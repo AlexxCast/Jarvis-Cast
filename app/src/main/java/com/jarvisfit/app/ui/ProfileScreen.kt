@@ -212,6 +212,9 @@ fun ProfileScreen(onSaved: () -> Unit) {
             fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
         Text("Collegamenti", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+        OutlinedButton(onClick = { CloudUi.showSetup.value = true }, modifier = Modifier.fillMaxWidth()) {
+            Text("Collega Jarvis Cloud (web, memoria, più modelli)")
+        }
         Field("Gemini API key (aistudio.google.com)", claudeKey, password = true) { claudeKey = it }
         Field("Modello", model) { model = it }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {

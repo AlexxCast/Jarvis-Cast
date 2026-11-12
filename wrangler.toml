@@ -1,0 +1,32 @@
+# Jarvis: un solo Worker serve la web app (cartella web/) e le API (server/src).
+# Il database vive in un Durable Object con SQLite: non c'è nulla da creare a mano.
+name = "jarvis"
+main = "server/src/index.js"
+compatibility_date = "2025-10-01"
+
+[assets]
+directory = "./web"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
+
+[[durable_objects.bindings]]
+name = "JARVIS"
+class_name = "JarvisDO"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["JarvisDO"]
+
+[vars]
+TZ_NAME = "Europe/Rome"
+
+[observability]
+enabled = true
+
+# Segreti da impostare su Cloudflare (mai in questo file):
+#   JARVIS_TOKEN            password che scegli tu, usata da app e web
+#   GEMINI_API_KEY          consigliata (gratuita)
+#   GROQ_API_KEY, CEREBRAS_API_KEY, NVIDIA_API_KEY, OPENROUTER_API_KEY,
+#   MISTRAL_API_KEY, GITHUB_MODELS_TOKEN   facoltative (gratuite)
+#   DEEPSEEK_API_KEY, ANTHROPIC_API_KEY    facoltative (a pagamento)

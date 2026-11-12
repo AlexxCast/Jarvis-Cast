@@ -1,0 +1,13 @@
+{
+  "name": "jarvis",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test \"server/test/*.test.js\"",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}

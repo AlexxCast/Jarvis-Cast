@@ -10,3 +10,6 @@ captures/
 *.jks
 *.keystore
 .env
+node_modules/
+.wrangler/
+.dev.vars
