@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.JarvisFit" parent="android:Theme.Material.NoActionBar">
+        <item name="android:statusBarColor">#050F05</item>
+        <item name="android:navigationBarColor">#050F05</item>
+        <item name="android:windowBackground">#050F05</item>
+    </style>
+</resources>
