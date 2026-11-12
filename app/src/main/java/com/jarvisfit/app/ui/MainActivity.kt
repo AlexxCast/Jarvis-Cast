@@ -41,6 +41,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.jarvisfit.app.data.ImageUtil
+import com.jarvisfit.app.data.Settings
 import com.jarvisfit.app.data.Store
 import com.jarvisfit.app.voice.Speaker
 import java.io.File
@@ -81,9 +82,33 @@ class MainActivity : ComponentActivity() {
         }
 
         photoRequested.value = intent?.getBooleanExtra(EXTRA_TAKE_PHOTO, false) == true
+        // Al primo avvio dopo l'aggiornamento propone una volta il collegamento a Jarvis Cloud.
+        if (!Settings.cloudEnabled && !Settings.cloudPromptSeen) {
+            Settings.cloudPromptSeen = true
+            CloudUi.showSetup.value = true
+        }
         setContent {
             MaterialTheme(colorScheme = JarvisColors) {
-                AppRoot(photoRequested)
+                var cloud by remember { mutableStateOf(Settings.cloudEnabled) }
+                if (cloud) {
+                    // Modalità cloud: l'interfaccia è la web app pubblicata dal repository.
+                    WebShell(onDisconnect = {
+                        Settings.serverToken = ""
+                        cloud = false
+                    })
+                } else {
+                    // Modalità classica: l'app di prima, tutta sul telefono.
+                    AppRoot(photoRequested)
+                    if (CloudUi.showSetup.value) {
+                        CloudSetupDialog(
+                            onDismiss = { CloudUi.showSetup.value = false },
+                            onConnected = {
+                                CloudUi.showSetup.value = false
+                                cloud = true
+                            },
+                        )
+                    }
+                }
             }
         }
     }

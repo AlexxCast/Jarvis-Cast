@@ -30,6 +30,8 @@ import com.jarvisfit.app.R
 import com.jarvisfit.app.ai.Brain
 import com.jarvisfit.app.data.Settings
 import com.jarvisfit.app.data.Store
+import com.jarvisfit.app.device.AppLauncher
+import com.jarvisfit.app.net.Cloud
 import com.jarvisfit.app.ui.MainActivity
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -42,12 +44,17 @@ object JarvisState {
     val partial = MutableStateFlow("")
     val error = MutableStateFlow("")
     val running: StateFlow<Status> get() = status
+    /** Aumenta a ogni scambio vocale concluso: la web app lo usa per aggiornare lo schermo. */
+    val exchanges = MutableStateFlow(0)
 }
 
 /**
- * Servizio in primo piano: ascolta sempre la parola "Jarvis" (Porcupine, offline),
- * poi registra la frase con il riconoscimento vocale di Android, la manda al Brain
+ * Servizio in primo piano: ascolta la parola "Jarvis" con il riconoscimento vocale di Android,
+ * manda la richiesta al cervello (server Jarvis, oppure Gemini diretto in modalità classica)
  * e legge la risposta. Conta anche i passi del giorno.
+ *
+ * Il microfono non è mai tenuto in ostaggio: [MicGuard] avvisa quando un'altra app inizia a
+ * registrare (Gemini, vocali, chiamate) e il servizio si mette in pausa finché non ha finito.
  */
 class JarvisService : LifecycleService(), SensorEventListener {
 
@@ -57,6 +64,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
         const val ACTION_LISTEN = "listen"     // ascolta subito, senza parola chiave
         private const val NOTIF_ID = 1
         private const val PHOTO_NOTIF_ID = 2
+        private const val INBOX_POLL_MS = 5 * 60_000L
 
         fun start(ctx: Context) {
             Settings.listeningEnabled = true
@@ -77,6 +85,14 @@ class JarvisService : LifecycleService(), SensorEventListener {
     private var foreground = false
     private var busy = false
 
+    // Convivenza con le altre app che usano il microfono
+    private val ticker = Handler(Looper.getMainLooper())
+    private var guard: MicGuard? = null
+    private var sessionActive = false   // il nostro riconoscitore è acceso
+    private var yielded = false         // in pausa perché il microfono serve a un'altra app
+    private var freeChecks = 0
+    private var wakeHeard = false       // "Jarvis" comparso nei risultati parziali della sessione
+
     // ---------------------------------------------------------------- lifecycle
 
     override fun onCreate() {
@@ -90,6 +106,8 @@ class JarvisService : LifecycleService(), SensorEventListener {
         }
         wakeLock = (getSystemService(POWER_SERVICE) as PowerManager)
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "JarvisFit::listen").apply { setReferenceCounted(false) }
+        guard = MicGuard(this, main) { onRecordingChanged() }.also { it.start() }
+        ticker.postDelayed(inboxPoll, 20_000)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -99,8 +117,10 @@ class JarvisService : LifecycleService(), SensorEventListener {
             else -> {
                 ensureForeground()
                 if (intent?.action == ACTION_LISTEN) {
+                    // Richiesta esplicita dell'utente: esce dall'eventuale pausa e ascolta subito.
+                    if (yielded) { yielded = false; main.removeCallbacks(resumeCheck) }
                     if (!busy) onWakeWord(beep = true) else Unit
-                } else if (!busy) {
+                } else if (!busy && !yielded) {
                     startWakeWord()
                 }
             }
@@ -111,6 +131,8 @@ class JarvisService : LifecycleService(), SensorEventListener {
     override fun onDestroy() {
         shutdown()
         (getSystemService(SENSOR_SERVICE) as SensorManager).unregisterListener(this)
+        guard?.stop()
+        ticker.removeCallbacksAndMessages(null)
         tone?.release()
         super.onDestroy()
     }
@@ -128,6 +150,9 @@ class JarvisService : LifecycleService(), SensorEventListener {
         main.removeCallbacksAndMessages(null)
         runCatching { recognizer?.destroy() }
         recognizer = null
+        sessionActive = false
+        yielded = false
+        busy = false
         Speaker.stop()
         if (wakeLock?.isHeld == true) wakeLock?.release()
         JarvisState.status.value = JarvisState.Status.OFF
@@ -161,15 +186,86 @@ class JarvisService : LifecycleService(), SensorEventListener {
         runCatching { NotificationManagerCompat.from(this).notify(NOTIF_ID, buildNotification(text)) }
     }
 
+    // ---------------------------------------------------------------- microfono condiviso
+
+    private fun guardEnabled() = Settings.micGuard && guard != null
+
+    /** Android segnala che qualcuno ha iniziato o smesso di registrare. */
+    private fun onRecordingChanged() {
+        if (!guardEnabled() || yielded) return
+        if (sessionActive && guard?.busyElsewhere(true) == true) yieldMic()
+    }
+
+    /** Rilascia subito il microfono e resta in pausa finché l'altra app non ha finito. */
+    private fun yieldMic() {
+        if (yielded) return
+        yielded = true
+        freeChecks = 0
+        main.removeCallbacksAndMessages(null)
+        stopSession(cancel = true)
+        Speaker.stop()
+        busy = false
+        inConversationMode = false
+        wakeHeard = false
+        JarvisState.status.value = JarvisState.Status.WAITING
+        JarvisState.partial.value = ""
+        updateNotification("In pausa: il microfono è in uso da un'altra app")
+        main.postDelayed(resumeCheck, 1500)
+    }
+
+    private val resumeCheck = object : Runnable {
+        override fun run() {
+            if (!yielded) return
+            if (!Settings.listeningEnabled) { yielded = false; return }
+            val g = guard
+            if (g != null && g.busyElsewhere(false)) {
+                freeChecks = 0
+                main.postDelayed(this, 1500)
+            } else if (++freeChecks < 2) {
+                // Deve risultare libero per due controlli di fila, così non si riparte tra una frase e l'altra.
+                main.postDelayed(this, 1200)
+            } else {
+                yielded = false
+                freeChecks = 0
+                startWakeWord()
+            }
+        }
+    }
+
+    /**
+     * Prima di accendere il riconoscitore: se il microfono è occupato si va in pausa.
+     * Ritorna true se si può procedere subito; altrimenti [retry] verrà richiamato (o si entra in pausa).
+     */
+    private fun micFreeOrYield(retry: () -> Unit): Boolean {
+        val g = guard
+        if (!guardEnabled() || g == null || !g.busyElsewhere(false)) return true
+        // Può essere la coda della nostra sessione appena chiusa: ricontrolla tra un attimo.
+        main.postDelayed({
+            if (yielded) return@postDelayed
+            if (g.busyElsewhere(false)) yieldMic() else retry()
+        }, 450)
+        return false
+    }
+
+    private fun beginSession(rec: SpeechRecognizer, intent: Intent) {
+        sessionActive = true
+        guard?.sessionStarted()
+        rec.startListening(intent)
+    }
+
+    private fun stopSession(cancel: Boolean) {
+        sessionActive = false
+        runCatching { if (cancel) recognizer?.cancel() else recognizer?.stopListening() }
+    }
+
     // ---------------------------------------------------------------- wake word
 
-    private val wakeWordRegex = Regex("\\b(jarvis|jarvi|ehi jarvis|hey jarvis|ciao jarvis)\\b", RegexOption.IGNORE_CASE)
     private val googleRegex = Regex("\\b(ok google|hey google|ehi google|gemini|apri gemini)\\b", RegexOption.IGNORE_CASE)
     private var lastSpokenText: String = ""
     private var lastSpokenTime: Long = 0L
 
     private fun startWakeWord() {
-        if (!Settings.listeningEnabled || busy) return
+        if (!Settings.listeningEnabled || busy || yielded) return
         if (Speaker.isSpeaking()) {
             restartWakeWordDelayed(500)
             return
@@ -182,9 +278,10 @@ class JarvisService : LifecycleService(), SensorEventListener {
         busy = false
         JarvisState.status.value = JarvisState.Status.WAITING
         JarvisState.error.value = ""
-        updateNotification("In ascolto di \"Jarvis\" (di' \"Jarvis\" o \"Hey Google\")")
+        updateNotification("In ascolto di \"Jarvis\"")
 
         main.post {
+            if (yielded || busy || !Settings.listeningEnabled) return@post
             if (Speaker.isSpeaking()) {
                 restartWakeWordDelayed(500)
                 return@post
@@ -195,8 +292,11 @@ class JarvisService : LifecycleService(), SensorEventListener {
                 restartWakeWordDelayed(3000)
                 return@post
             }
+            // Se un'altra app sta registrando o c'è una chiamata, non toccare il microfono
+            if (!micFreeOrYield { startWakeWord() }) return@post
 
             try {
+                wakeHeard = false
                 val rec = recognizer ?: SpeechRecognizer.createSpeechRecognizer(this).also { recognizer = it }
                 rec.setRecognitionListener(object : RecognitionListener {
                     override fun onReadyForSpeech(params: Bundle?) {}
@@ -206,44 +306,33 @@ class JarvisService : LifecycleService(), SensorEventListener {
                     override fun onEndOfSpeech() {}
                     override fun onEvent(eventType: Int, params: Bundle?) {}
                     override fun onPartialResults(partialResults: Bundle?) {
-                        if (Speaker.isSpeaking()) return
+                        if (Speaker.isSpeaking() || busy || yielded) return
                         val text = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
-                        if (text.isNotBlank()) {
-                            JarvisState.partial.value = text
-                            
-                            // 1. Rileva "Jarvis" -> attiva JarvisFit
-                            val mJarvis = wakeWordRegex.find(text)
-                            if (mJarvis != null && !busy) {
-                                rec.stopListening()
-                                onWakeWordDetected(text.substring(mJarvis.range.last + 1).trim())
-                                return
-                            }
-
-                            // 2. Rileva "Hey Google" / "Gemini" -> attiva l'Assistente Google / Gemini ufficiale di Android!
-                            val mGoogle = googleRegex.find(text)
-                            if (mGoogle != null && !busy) {
-                                rec.stopListening()
-                                onGoogleDetected()
-                                return
-                            }
+                        if (text.isBlank()) return
+                        JarvisState.partial.value = text
+                        // Sentito "Jarvis": segnala che sta ascoltando, ma aspetta la frase COMPLETA
+                        // (prima il comando veniva tagliato a metà sul risultato parziale).
+                        if (!wakeHeard && VoiceText.containsWake(text)) {
+                            wakeHeard = true
+                            JarvisState.status.value = JarvisState.Status.LISTENING
+                            updateNotification("Ti ascolto…")
                         }
                     }
                     override fun onResults(results: Bundle?) {
-                        if (busy || Speaker.isSpeaking()) return
+                        sessionActive = false
+                        if (busy || yielded || Speaker.isSpeaking()) return
                         val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
-                        val mJarvis = wakeWordRegex.find(text)
-                        val mGoogle = googleRegex.find(text)
-                        if (mJarvis != null) {
-                            onWakeWordDetected(text.substring(mJarvis.range.last + 1).trim())
-                        } else if (mGoogle != null) {
-                            onGoogleDetected()
-                        } else {
-                            // Non ha detto né Jarvis né Google, continua ad ascoltare
-                            restartWakeWordDelayed(250)
-                        }
+                        handleHeard(text)
                     }
                     override fun onError(error: Int) {
-                        if (busy) return
+                        sessionActive = false
+                        if (busy || yielded) return
+                        if (wakeHeard) {
+                            // Ha chiamato Jarvis ma la frase non è arrivata intera: chiedi di ripetere il comando.
+                            wakeHeard = false
+                            onWakeWordDetected("")
+                            return
+                        }
                         when (error) {
                             SpeechRecognizer.ERROR_NO_MATCH,
                             SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> restartWakeWordDelayed(300)
@@ -261,18 +350,46 @@ class JarvisService : LifecycleService(), SensorEventListener {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE, "it-IT")
                     putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                 }
-                rec.startListening(intent)
+                beginSession(rec, intent)
             } catch (e: Exception) {
+                sessionActive = false
                 restartWakeWordDelayed(1000)
             }
         }
     }
 
+    /** Decide cosa fare di una frase completa sentita in attesa. */
+    private fun handleHeard(text: String) {
+        wakeHeard = false
+        when (val w = VoiceText.wake(text)) {
+            is VoiceText.Wake.Direct -> onWakeWordDetected(w.command)
+            is VoiceText.Wake.Ambiguous -> {
+                if (!Settings.cloudEnabled) {
+                    // Modalità classica: senza un modello che giudichi il contesto, ignora solo i casi evidenti.
+                    if (w.aboutJarvis) backToWaiting() else onWakeWordDetected(w.text)
+                    return
+                }
+                // "Jarvis" in mezzo a un discorso: chiedi al server se l'utente si rivolge davvero a lui.
+                busy = true
+                JarvisState.status.value = JarvisState.Status.THINKING
+                lifecycleScope.launch {
+                    val yes = Cloud.addressed(w.text) ?: !w.aboutJarvis
+                    busy = false
+                    if (yielded) return@launch
+                    if (yes) onWakeWordDetected(w.text) else backToWaiting()
+                }
+            }
+            VoiceText.Wake.None -> {
+                if (googleRegex.containsMatchIn(text)) onGoogleDetected() else restartWakeWordDelayed(250)
+            }
+        }
+    }
+
     private fun restartWakeWordDelayed(delayMs: Long) {
-        if (!busy && Settings.listeningEnabled) {
+        if (!busy && !yielded && Settings.listeningEnabled) {
             main.postDelayed({
-                if (!busy && Settings.listeningEnabled && !Speaker.isSpeaking()) startWakeWord()
-                else if (!busy && Settings.listeningEnabled && Speaker.isSpeaking()) restartWakeWordDelayed(delayMs)
+                if (!busy && !yielded && Settings.listeningEnabled && !Speaker.isSpeaking()) startWakeWord()
+                else if (!busy && !yielded && Settings.listeningEnabled && Speaker.isSpeaking()) restartWakeWordDelayed(delayMs)
             }, delayMs)
         }
     }
@@ -291,7 +408,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
         if (busy) return
         busy = true
         // Ferma il nostro ascolto e rilascia immediatamente il microfono per Google / Gemini
-        runCatching { recognizer?.stopListening() }
+        stopSession(cancel = true)
         JarvisState.status.value = JarvisState.Status.WAITING
         updateNotification("Avvio Assistente Google / Gemini…")
 
@@ -310,11 +427,20 @@ class JarvisService : LifecycleService(), SensorEventListener {
             }
         }
 
-        // Rilascia e lascia il microfono a Google, riprendendo l'ascolto di Jarvis dopo 10 secondi
+        // Lascia il microfono all'assistente: si riparte solo quando ha finito di ascoltare
+        // (almeno 6 secondi, poi finché il microfono non risulta libero).
         main.postDelayed({
             busy = false
-            if (Settings.listeningEnabled) startWakeWord()
-        }, 10_000)
+            if (!Settings.listeningEnabled) return@postDelayed
+            if (guardEnabled()) {
+                yielded = true
+                freeChecks = 0
+                updateNotification("In pausa: il microfono è in uso da un'altra app")
+                main.post(resumeCheck)
+            } else {
+                startWakeWord()
+            }
+        }, 6_000)
     }
 
     private fun onWakeWordDetected(remainingCommand: String) {
@@ -333,8 +459,8 @@ class JarvisService : LifecycleService(), SensorEventListener {
                 PowerManager.SCREEN_BRIGHT_WAKE_LOCK or PowerManager.ACQUIRE_CAUSES_WAKEUP,
                 "JarvisFit::wakeScreen"
             )
+            // Si rilascia da solo allo scadere: rilasciarlo subito non lasciava il tempo di accendere lo schermo.
             screenLock.acquire(4000)
-            screenLock.release()
         }
 
         // 2. Apri l'app sul telefono
@@ -372,6 +498,8 @@ class JarvisService : LifecycleService(), SensorEventListener {
             busy = false
             return
         }
+        if (yielded) return
+        if (!micFreeOrYield { listenForCommand() }) return
         busy = true
         JarvisState.status.value = JarvisState.Status.LISTENING
         JarvisState.partial.value = ""
@@ -393,6 +521,8 @@ class JarvisService : LifecycleService(), SensorEventListener {
                 }
             }
             override fun onResults(results: Bundle?) {
+                sessionActive = false
+                if (yielded) return
                 if (Speaker.isSpeaking()) {
                     handleSilence()
                     return
@@ -411,6 +541,8 @@ class JarvisService : LifecycleService(), SensorEventListener {
                 }
             }
             override fun onError(error: Int) {
+                sessionActive = false
+                if (yielded) return
                 when (error) {
                     SpeechRecognizer.ERROR_NO_MATCH,
                     SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> handleSilence()
@@ -429,7 +561,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L)
         }
-        rec.startListening(intent)
+        beginSession(rec, intent)
     }
 
     /**
@@ -445,6 +577,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
     }
 
     private fun handleSilence() {
+        if (yielded) return
         if (inConversationMode) {
             val elapsed = System.currentTimeMillis() - lastConversationActivityTime
             if (elapsed > CONVERSATION_TIMEOUT_MS) {
@@ -471,7 +604,8 @@ class JarvisService : LifecycleService(), SensorEventListener {
     private fun backToWaiting() {
         busy = false
         inConversationMode = false
-        main.postDelayed({ if (Settings.listeningEnabled) startWakeWord() }, 300)
+        if (yielded) return
+        main.postDelayed({ if (Settings.listeningEnabled && !yielded) startWakeWord() }, 300)
     }
 
     // ---------------------------------------------------------------- brain
@@ -487,21 +621,37 @@ class JarvisService : LifecycleService(), SensorEventListener {
 
         JarvisState.status.value = JarvisState.Status.THINKING
         updateNotification("Sto pensando…")
-        runCatching { recognizer?.stopListening() }
+        stopSession(cancel = false)
 
         lifecycleScope.launch {
-            val reply = Brain.handle(text)
+            val cloud = Settings.cloudEnabled
+            val reply = if (cloud) Cloud.chat(text) else Brain.handle(text)
+            JarvisState.exchanges.value = JarvisState.exchanges.value + 1
             if (reply.photoRequest != null) notifyPhotoRequest(reply.photoRequest)
+            // "Apri Spotify": a schermo spento o con Jarvis in secondo piano Android può rifiutare l'avvio.
+            for ((type, value) in reply.device) {
+                when (type) {
+                    "open_app" -> AppLauncher.open(this@JarvisService, value)
+                    "open_url" -> AppLauncher.openUrl(this@JarvisService, value)
+                }
+            }
             
             // Pop-up notifica a schermo con i soli dati schematici (es. macro, kcal, ricetta e dosi), NON il discorso parlato!
             val popupText = reply.cardInfo ?: run {
-                val activeRecipe = Store.diary.activeRecipeSession
+                val activeRecipe = if (cloud) null else Store.diary.activeRecipeSession
                 if (activeRecipe != null) {
                     "🍳 ${activeRecipe.title}\n${activeRecipe.currentStep.ifBlank { activeRecipe.ingredientsNeeded }}"
                 } else null
             }
             if (!popupText.isNullOrBlank()) {
                 notifyInfoPopup(popupText)
+            }
+
+            if (yielded) {
+                // Nel frattempo un'altra app ha preso il microfono: niente voce sopra il suo audio,
+                // la risposta resta leggibile nella notifica.
+                if (popupText.isNullOrBlank()) notifyInfoPopup(reply.text)
+                return@launch
             }
 
             JarvisState.status.value = JarvisState.Status.SPEAKING
@@ -511,6 +661,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
 
             val after = {
                 main.post {
+                    if (yielded) return@post
                     if (inConversationMode && reply.expectReply && reply.photoRequest == null) {
                         busy = false
                         lastConversationActivityTime = System.currentTimeMillis()
@@ -528,7 +679,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
         }
     }
 
-    private fun notifyInfoPopup(infoText: String) {
+    private fun notifyInfoPopup(infoText: String, notificationId: Int = 10) {
         val openIntent = Intent(this, MainActivity::class.java).apply {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         }
@@ -543,7 +694,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
             .setAutoCancel(true)
             .setContentIntent(pi)
             .build()
-        runCatching { NotificationManagerCompat.from(this).notify(10, notif) }
+        runCatching { NotificationManagerCompat.from(this).notify(notificationId, notif) }
     }
 
     private fun notifyPhotoRequest(reason: String) {
@@ -561,6 +712,30 @@ class JarvisService : LifecycleService(), SensorEventListener {
             .addAction(0, "Scatta foto", pi)
             .build()
         runCatching { NotificationManagerCompat.from(this).notify(PHOTO_NOTIF_ID, n) }
+    }
+
+    // ---------------------------------------------------------------- avvisi dal server
+
+    /** Ogni pochi minuti chiede al server promemoria scaduti e compiti completati. */
+    private val inboxPoll = object : Runnable {
+        override fun run() {
+            if (Settings.cloudEnabled) {
+                lifecycleScope.launch {
+                    val items = Cloud.consumeInbox()
+                    items.forEachIndexed { i, text ->
+                        notifyInfoPopup(text, 20 + i)
+                    }
+                    val first = items.firstOrNull()
+                    val micFree = guard?.busyElsewhere(sessionActive) != true
+                    if (first != null && Settings.speakReplies && !busy && !yielded && micFree) {
+                        lastSpokenText = first
+                        lastSpokenTime = System.currentTimeMillis()
+                        Speaker.speak(first)
+                    }
+                }
+            }
+            ticker.postDelayed(this, INBOX_POLL_MS)
+        }
     }
 
     // ---------------------------------------------------------------- contapassi
@@ -588,6 +763,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
             Store.setSteps(today, steps)
             lastSavedSteps = steps
             lastSaveTime = now
+            if (Settings.cloudEnabled) lifecycleScope.launch { Cloud.sendSteps(today, steps) }
         }
     }
 

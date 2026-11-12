@@ -1,6 +1,29 @@
-# Jarvis Fit
+# Jarvis
 
-Assistente vocale Android per alimentazione e allenamento. Dici **"Jarvis"**, parli, e lui registra i pasti, ti propone cosa cucinare, calcola i passi che ti servono e ricorda tutto lo storico.
+Assistente personale a 360 gradi: parte dall'app Android Jarvis Fit (alimentazione e allenamento) e aggiunge un cervello nel cloud con memoria persistente, scelta automatica dei modelli gratuiti, promemoria e compiti in background.
+
+**Per installarlo: [docs/INSTALLAZIONE.md](docs/INSTALLAZIONE.md).**
+
+## Com'è fatto
+
+```
+web/      interfaccia (HTML/CSS/JS senza build): chat, oggi, cucina, attività, memoria, modelli, profilo
+server/   Cloudflare Worker + Durable Object con SQLite: API, router dei modelli, memoria, diario, promemoria, compiti
+app/      app Android: guscio che mostra la web app e fa ciò che un sito non può (ascolto a schermo spento, voce, contapassi)
+apple/    versione iOS dell'app classica (non ancora collegata al cloud)
+```
+
+- **Aggiornamenti senza APK.** Web app e server si pubblicano da soli a ogni modifica su `main`; l'app Android li carica all'apertura. L'APK si reinstalla solo se cambia la parte nativa.
+- **Router dei modelli** (`server/src/router.js`, elenco in `server/src/models.js`). Per ogni richiesta sceglie il livello (veloce, ragionamento, immagini), conta richieste e token per provider e **passa al modello successivo all'80% del limite**, prima dell'errore. Se un provider cade, la stessa richiesta riparte subito su un altro. I modelli a pagamento entrano solo se i gratuiti non sono disponibili.
+- **Le sessioni non si perdono**: conversazione, riassunto e memoria stanno nel database, non nel modello. Cambiare modello a metà discorso non cambia nulla per l'utente.
+- **Contesto modulare** (`server/src/context.js`). Ogni richiesta riceve: nucleo fisso, riepilogo della giornata, i moduli che servono (dieta completa solo se si parla di cibo o allenamento, agenda solo se si parla di impegni, ricordi pertinenti), riassunto della conversazione e ultimi messaggi. Tutto dimensionato sulla finestra del modello che risponde.
+- **Memoria a moduli** (`server/src/memory.js`): Jarvis crea un modulo per ogni attività o argomento e lo riapre solo quando serve.
+- **Sotto-task** (`server/src/jobs.js`): i compiti lunghi vengono divisi in passi, ognuno con contesto pulito, eseguiti in background.
+- **Microfono condiviso** (`app/.../voice/MicGuard.kt`): Jarvis si mette in pausa quando un'altra app registra.
+
+## L'app classica
+
+Senza server collegato l'app funziona come prima, tutta sul telefono con la sola chiave Gemini.
 
 ## Cosa fa
 - **Sempre in ascolto** della parola "Jarvis" (anche a schermo spento) tramite un servizio in primo piano con Porcupine, offline e a basso consumo. Funziona anche "Ehi Jarvis".

@@ -39,6 +39,27 @@ object Settings {
         get() = prefs.getBoolean("listening", false)
         set(v) = prefs.edit().putBoolean("listening", v).apply()
 
+    // Jarvis Cloud: indirizzo del server e token di accesso. Se mancano, l'app lavora in modalità classica.
+    var serverUrl: String
+        get() = prefs.getString("server_url", "") ?: ""
+        set(v) = prefs.edit().putString("server_url", v.trim().trimEnd('/')).apply()
+
+    var serverToken: String
+        get() = prefs.getString("server_token", "") ?: ""
+        set(v) = prefs.edit().putString("server_token", v.trim()).apply()
+
+    val cloudEnabled: Boolean
+        get() = serverUrl.isNotBlank() && serverToken.isNotBlank()
+
+    var cloudPromptSeen: Boolean
+        get() = prefs.getBoolean("cloud_prompt_seen", false)
+        set(v) = prefs.edit().putBoolean("cloud_prompt_seen", v).apply()
+
+    /** Se attivo, Jarvis lascia il microfono quando un'altra app registra (Gemini, vocali, chiamate). */
+    var micGuard: Boolean
+        get() = prefs.getBoolean("mic_guard", true)
+        set(v) = prefs.edit().putBoolean("mic_guard", v).apply()
+
     // Contapassi: il sensore restituisce passi totali dall'ultimo riavvio
     var stepBaseDate: String
         get() = prefs.getString("step_base_date", "") ?: ""

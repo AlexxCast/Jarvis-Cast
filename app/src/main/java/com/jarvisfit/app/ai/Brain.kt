@@ -35,7 +35,14 @@ import kotlin.math.roundToInt
  */
 object Brain {
 
-    data class Reply(val text: String, val expectReply: Boolean, val photoRequest: String?, val cardInfo: String? = null)
+    /** [device]: azioni da eseguire sul telefono, come coppie tipo/valore (es. "open_app" a "Spotify"). */
+    data class Reply(
+        val text: String,
+        val expectReply: Boolean,
+        val photoRequest: String?,
+        val cardInfo: String? = null,
+        val device: List<Pair<String, String>> = emptyList(),
+    )
 
     private val mutex = Mutex()
 

@@ -116,4 +116,50 @@ class VoiceTextTest {
             )
         )
     }
+
+    // ---------------------------------------------------------------- parola di attivazione
+
+    private fun direct(text: String): String? = (VoiceText.wake(text) as? VoiceText.Wake.Direct)?.command
+
+    @Test
+    fun testWake_DirectCalls() {
+        assertEquals("quante calorie mi restano", direct("Jarvis, quante calorie mi restano?"))
+        assertEquals("aggiungi una mela", direct("Ehi Jarvis aggiungi una mela"))
+        assertEquals("", direct("ciao Jarvis"))
+        assertEquals("", direct("Jarvis"))
+        assertEquals("che ore sono", direct("che ore sono Jarvis"))
+        // Il comando deve arrivare intero, non troncato
+        assertEquals("ricordami alle 18 di chiamare il dentista", direct("Hey Jarvis ricordami alle 18 di chiamare il dentista"))
+    }
+
+    @Test
+    fun testWake_NoWakeWord() {
+        assertTrue(VoiceText.wake("che tempo fa oggi") is VoiceText.Wake.None)
+        assertTrue(VoiceText.wake("") is VoiceText.Wake.None)
+        assertFalse(VoiceText.containsWake("ok google apri gemini"))
+        assertTrue(VoiceText.containsWake("ehi jarvis"))
+    }
+
+    @Test
+    fun testWake_TalkingAboutJarvisIsNotADirectCall() {
+        val film = VoiceText.wake("ieri ho visto il film Marvel dove c'è Jarvis")
+        assertTrue(film is VoiceText.Wake.Ambiguous)
+        assertTrue((film as VoiceText.Wake.Ambiguous).aboutJarvis)
+
+        val middle = VoiceText.wake("secondo me dovremmo chiedere a Jarvis cosa cucinare stasera")
+        assertTrue(middle is VoiceText.Wake.Ambiguous)
+
+        // Anche a inizio frase, se si parla del personaggio decide il contesto
+        val character = VoiceText.wake("Jarvis è il maggiordomo di Tony Stark nei film")
+        assertTrue(character is VoiceText.Wake.Ambiguous)
+        assertTrue((character as VoiceText.Wake.Ambiguous).aboutJarvis)
+    }
+
+    @Test
+    fun testWake_CommandMentioningFilmsStillReachesContextCheck() {
+        // "film" è un indizio, non un divieto: la frase passa al controllo di contesto invece di essere scartata
+        val w = VoiceText.wake("Jarvis che film danno stasera al cinema")
+        assertTrue(w is VoiceText.Wake.Ambiguous)
+        assertEquals("Jarvis che film danno stasera al cinema", (w as VoiceText.Wake.Ambiguous).text)
+    }
 }
