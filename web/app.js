@@ -1,6 +1,8 @@
 // Web app di Jarvis: nessuna build, solo moduli ES. Gira nel browser e dentro l'app Android
 // (dove window.JarvisNative dà accesso a microfono, voce, contapassi e ai dati della vecchia app).
 
+import { createOrb } from './orb.js';
+
 const native = window.JarvisNative || null;
 const nativeCall = (name, ...args) => { try { return native && typeof native[name] === 'function' ? native[name](...args) : null; } catch { return null; } };
 const nativeJson = (name, ...args) => { try { return JSON.parse(nativeCall(name, ...args) || 'null'); } catch { return null; } };
@@ -9,7 +11,41 @@ const store = {
   token: (nativeJson('getConfig') || {}).token || localStorage.getItem('jarvis_token') || '',
   tab: 'chat', sub: 'storico', state: null, messages: [], sending: false, pendingImage: null,
   memory: null, models: null, inbox: [], openJob: null, error: '',
+  voice: (nativeJson('getConfig') || {}).status || 'OFF', speakingUntil: 0,
 };
+
+// La sfera vive fuori dal ridisegno della pagina, così l'animazione non riparte a ogni aggiornamento.
+const orb = createOrb();
+let speakTimer = 0;
+function orbState() {
+  if (store.sending || store.voice === 'THINKING') return 'thinking';
+  if (store.voice === 'SPEAKING' || Date.now() < store.speakingUntil) return 'speaking';
+  if (store.voice === 'LISTENING') return 'listening';
+  if (native && store.voice === 'OFF') return 'off';
+  return 'idle';
+}
+function updateOrb() { orb.setState(orbState()); }
+/** Tiene la sfera in "sto parlando" per la durata stimata della risposta. */
+function markSpeaking(text) {
+  store.speakingUntil = Date.now() + Math.min(20000, 900 + String(text || '').length * 60);
+  clearTimeout(speakTimer);
+  speakTimer = setTimeout(updateOrb, store.speakingUntil - Date.now() + 50);
+  updateOrb();
+}
+// L'app Android comunica qui lo stato del servizio vocale (OFF, WAITING, LISTENING, THINKING, SPEAKING, ERROR).
+window.jarvisStatus = (status) => { store.voice = String(status || 'OFF'); updateOrb(); };
+
+/** Azioni che solo il telefono può eseguire (aprire un'app o un indirizzo). */
+function runDeviceActions(list) {
+  for (const a of list || []) {
+    if (a.type === 'open_app') {
+      if (!native) { toast(`Per aprire ${a.name} serve l'app Android di Jarvis.`); continue; }
+      if (nativeCall('openApp', a.name) !== true) toast(`Non trovo l'app "${a.name}" su questo telefono.`);
+    } else if (a.type === 'open_url' && /^https:\/\//i.test(a.url)) {
+      if (native) nativeCall('openUrl', a.url); else window.open(a.url, '_blank', 'noopener');
+    }
+  }
+}
 
 // ------------------------------------------------------------------ utilità
 
@@ -122,12 +158,15 @@ async function send(text) {
   if ((!text && !image) || store.sending) return;
   store.sending = true; store.pendingImage = null;
   store.messages.push({ role: 'user', text: text || 'Guarda questa foto.', image: !!image });
+  store.speakingUntil = 0;
   render(); scrollChat();
   try {
     const out = await api('POST', '/chat', { text, image });
     store.messages.push({ role: 'assistant', text: out.reply, card: out.card, model: out.model });
     if (out.photoRequest) toast('Jarvis chiede una foto: ' + out.photoRequest);
     if ((nativeJson('getConfig') || {}).speakReplies) nativeCall('speak', out.reply);
+    markSpeaking(out.reply);
+    runDeviceActions(out.device);
     await refresh();
   } catch (e) {
     store.messages.push({ role: 'assistant', text: 'Non riesco a contattare il server: ' + e.message });
@@ -155,6 +194,7 @@ function pickPhoto(camera = false) {
 }
 
 function viewChat() {
+  orb.el.classList.toggle('compact', store.messages.length > 0);
   const list = h('div', { class: 'chat' },
     store.messages.length ? null : h('p', { class: 'empty' }, 'Scriva o parli a Jarvis: pasti, allenamenti, promemoria, cose da ricordare, compiti da svolgere.'),
     store.messages.map(m => h('div', { class: 'msg ' + (m.role === 'user' ? 'user' : 'assistant') },
@@ -170,7 +210,7 @@ function viewChat() {
     native ? h('button', { class: 'btn icon', 'aria-label': 'Parla ora', onclick: () => nativeCall('listenNow') }, icon(ICONS.mic)) : null,
     ta,
     h('button', { class: 'btn primary icon', 'aria-label': 'Invia', disabled: store.sending, onclick: () => { const v = ta.value; ta.value = ''; send(v); } }, icon(ICONS.send)));
-  return [list, composer];
+  return [orb.el, list, composer];
 }
 
 // ------------------------------------------------------------------ oggi
@@ -441,6 +481,7 @@ function render() {
     h('button', { 'aria-current': store.tab === id ? 'page' : null, onclick: () => go(id) }, icon(ICONS[id]), label))));
   if (keep) { const ta = document.querySelector('.composer textarea'); if (ta) ta.value = keep; }
   if (scroll) { const m = document.querySelector('main'); if (m) m.scrollTop = scroll; }
+  updateOrb(); orb.sync();
 }
 
 boot();

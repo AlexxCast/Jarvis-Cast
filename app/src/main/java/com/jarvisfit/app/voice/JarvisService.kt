@@ -30,6 +30,7 @@ import com.jarvisfit.app.R
 import com.jarvisfit.app.ai.Brain
 import com.jarvisfit.app.data.Settings
 import com.jarvisfit.app.data.Store
+import com.jarvisfit.app.device.AppLauncher
 import com.jarvisfit.app.net.Cloud
 import com.jarvisfit.app.ui.MainActivity
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -627,6 +628,13 @@ class JarvisService : LifecycleService(), SensorEventListener {
             val reply = if (cloud) Cloud.chat(text) else Brain.handle(text)
             JarvisState.exchanges.value = JarvisState.exchanges.value + 1
             if (reply.photoRequest != null) notifyPhotoRequest(reply.photoRequest)
+            // "Apri Spotify": a schermo spento o con Jarvis in secondo piano Android può rifiutare l'avvio.
+            for ((type, value) in reply.device) {
+                when (type) {
+                    "open_app" -> AppLauncher.open(this@JarvisService, value)
+                    "open_url" -> AppLauncher.openUrl(this@JarvisService, value)
+                }
+            }
             
             // Pop-up notifica a schermo con i soli dati schematici (es. macro, kcal, ricetta e dosi), NON il discorso parlato!
             val popupText = reply.cardInfo ?: run {

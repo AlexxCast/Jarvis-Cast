@@ -234,3 +234,13 @@ test('API: stato, azioni manuali, import, passi, posta in arrivo', async () => {
   assert.equal((await call('GET', '/api/boh')).status, 404);
   assert.equal((await call('POST', '/api/chat', undefined)).status, 200);
 });
+
+test('aprire app e indirizzi: le azioni vengono inoltrate al telefono, quelle non valide scartate', async () => {
+  const db = makeDb();
+  const out = await handleChat(db, ENV, deps(fakeFetch(() => reply({ reply: 'Apro Spotify, signore.', actions: [
+    { type: 'open_app', name: 'Spotify' }, { type: 'open_app', name: '  ' },
+    { type: 'open_url', url: 'https://example.com/a' }, { type: 'open_url', url: 'javascript:alert(1)' }, { type: 'open_url', url: 'http://example.com' },
+  ] }))), { text: 'aprimi Spotify' });
+  assert.deepEqual(out.device, [{ type: 'open_app', name: 'Spotify' }, { type: 'open_url', url: 'https://example.com/a' }]);
+  assert.deepEqual(out.actions, ['open_app', 'open_url']);
+});

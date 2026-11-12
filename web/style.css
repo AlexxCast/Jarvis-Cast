@@ -70,3 +70,10 @@ label.check input { width: 20px; height: 20px; min-height: 0; accent-color: var(
 .empty { color: var(--muted); text-align: center; padding: 18px 8px; }
 details > summary { cursor: pointer; color: var(--muted); }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+.orb { position: relative; flex: none; height: min(44dvh, 340px); display: flex; flex-direction: column; align-items: center; transition: height .35s ease; }
+.orb.compact { height: 132px; }
+.orb canvas { width: 100%; flex: 1; min-height: 0; display: block; }
+.orb-label { font-size: .72rem; letter-spacing: .14em; text-transform: uppercase; color: var(--muted); padding-bottom: 4px; font-variant-numeric: tabular-nums; }
+.orb[data-state="thinking"] .orb-label, .orb[data-state="speaking"] .orb-label, .orb[data-state="listening"] .orb-label { color: var(--primary); }
+@media (max-height: 520px) { .orb, .orb.compact { height: 84px; } }
+@media (prefers-reduced-motion: reduce) { .orb { transition: none; } }

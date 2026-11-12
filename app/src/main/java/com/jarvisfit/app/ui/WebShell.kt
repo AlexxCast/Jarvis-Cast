@@ -47,6 +47,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.jarvisfit.app.data.Settings
+import com.jarvisfit.app.device.AppLauncher
 import com.jarvisfit.app.data.Store
 import com.jarvisfit.app.net.Cloud
 import com.jarvisfit.app.voice.JarvisService
@@ -77,6 +78,7 @@ class JarvisBridge(
         put("listening", Settings.listeningEnabled)
         put("speakReplies", Settings.speakReplies)
         put("micGuard", Settings.micGuard)
+        put("status", JarvisState.status.value.name)
         put("version", runCatching { activity.packageManager.getPackageInfo(activity.packageName, 0).versionName }.getOrNull() ?: "")
     }.toString()
 
@@ -111,6 +113,13 @@ class JarvisBridge(
     fun listenNow() = activity.runOnUiThread {
         if (Settings.listeningEnabled) JarvisService.listenNow(activity) else requestListening()
     }
+
+    /** "Apri Spotify": cerca l'app per nome e la avvia. */
+    @JavascriptInterface
+    fun openApp(name: String): Boolean = AppLauncher.open(activity, name)
+
+    @JavascriptInterface
+    fun openUrl(url: String): Boolean = AppLauncher.openUrl(activity, url)
 
     @JavascriptInterface
     fun disconnectCloud() = activity.runOnUiThread { onDisconnect() }
@@ -186,6 +195,11 @@ fun WebShell(onDisconnect: () -> Unit) {
     val exchanges by JarvisState.exchanges.collectAsState()
     LaunchedEffect(exchanges) {
         if (exchanges > 0) webView.evaluateJavascript("window.jarvisRefresh && window.jarvisRefresh()", null)
+    }
+    // La sfera nella pagina segue lo stato del servizio vocale (ascolta, pensa, parla).
+    val voiceStatus by JarvisState.status.collectAsState()
+    LaunchedEffect(voiceStatus) {
+        webView.evaluateJavascript("window.jarvisStatus && window.jarvisStatus('${voiceStatus.name}')", null)
     }
     // Se l'ascolto era attivo, riparte insieme all'app.
     LaunchedEffect(Unit) {

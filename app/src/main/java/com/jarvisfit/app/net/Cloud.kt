@@ -83,6 +83,14 @@ object Cloud {
                 expectReply = (o["expectReply"] as? JsonPrimitive)?.booleanOrNull ?: false,
                 photoRequest = str(o, "photoRequest").ifBlank { null },
                 cardInfo = str(o, "card").ifBlank { null },
+                device = (o["device"] as? JsonArray)?.mapNotNull { el ->
+                    val a = el as? JsonObject ?: return@mapNotNull null
+                    when (val type = str(a, "type")) {
+                        "open_app" -> str(a, "name").ifBlank { null }?.let { type to it }
+                        "open_url" -> str(a, "url").ifBlank { null }?.let { type to it }
+                        else -> null
+                    }
+                } ?: emptyList(),
             )
         } catch (e: Exception) {
             Brain.Reply("Non riesco a contattare il server, signore: ${e.message ?: "errore di rete"}.", false, null, null)

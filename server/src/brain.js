@@ -30,7 +30,7 @@ export function addMessage(db, sessionId, role, text, at, meta = null) {
 
 /** Applica le azioni restituite dal modello. Ritorna { photoRequest, jobs, applied }. */
 export function applyActions(db, actions, ctx) {
-  const out = { photoRequest: null, jobs: [], applied: [] };
+  const out = { photoRequest: null, jobs: [], applied: [], device: [] };
   let diary = null;
   for (const a of actions.slice(0, 20)) {
     try {
@@ -43,7 +43,16 @@ export function applyActions(db, actions, ctx) {
       else if (a.type === 'add_reminder') agenda.addReminder(db, a, ctx.ms, ctx.tz);
       else if (a.type === 'done_reminder') agenda.doneReminder(db, a.id);
       else if (a.type === 'start_job') { if (String(a.goal || '').trim()) out.jobs.push({ title: String(a.title || 'Compito').slice(0, 80), goal: String(a.goal).slice(0, 2000) }); }
-      else continue;
+      else if (a.type === 'open_app') {
+        // Eseguita dal telefono, non dal server: la inoltriamo così com'è.
+        const name = String(a.name || '').trim().slice(0, 60);
+        if (!name) continue;
+        out.device.push({ type: 'open_app', name });
+      } else if (a.type === 'open_url') {
+        const url = String(a.url || '').trim().slice(0, 500);
+        if (!/^https:\/\//i.test(url)) continue;
+        out.device.push({ type: 'open_url', url });
+      } else continue;
       out.applied.push(a.type);
     } catch (e) {
       logEvent(db, ctx.nowIso, 'error', `azione ${a.type}: ${e.message}`);
@@ -107,11 +116,11 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
     const parsed = parseReply(res.text);
     const done = applyActions(db, parsed.actions, { today, nowIso, ms, tz, hadPhoto: !!image });
     for (const j of done.jobs) deps.startJob?.(j);
-    result = { reply: parsed.reply, expectReply: parsed.expectReply, card: parsed.card, photoRequest: done.photoRequest, model: res.key, switched: res.switched, actions: done.applied };
+    result = { reply: parsed.reply, expectReply: parsed.expectReply, card: parsed.card, photoRequest: done.photoRequest, model: res.key, switched: res.switched, actions: done.applied, device: done.device };
     sess.model = res.key;
   } catch (e) {
     logEvent(db, nowIso, 'error', `chat: ${e.message} ${(e.tried || []).join(' | ')}`);
-    result = { reply: e.tried ? e.message : 'Si è verificato un problema interno, signore. Riprovi tra poco.', expectReply: false, card: '', photoRequest: null, model: '', switched: false, actions: [], error: true };
+    result = { reply: e.tried ? e.message : 'Si è verificato un problema interno, signore. Riprovi tra poco.', expectReply: false, card: '', photoRequest: null, model: '', switched: false, actions: [], device: [], error: true };
   }
 
   addMessage(db, sessionId, 'assistant', result.reply, nowIso, { model: result.model, card: result.card || undefined });
