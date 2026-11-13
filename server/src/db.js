@@ -37,8 +37,14 @@ export function wrapNodeSqlite(database) {
   };
 }
 
+// Colonne aggiunte dopo la prima versione: ALTER fallisce se esistono già, ed è giusto così.
+const ADDED_COLUMNS = [
+  "ALTER TABLE reminders ADD COLUMN repeat TEXT NOT NULL DEFAULT ''",
+];
+
 export function migrate(db) {
   for (const stmt of SCHEMA.split(';').map(s => s.trim()).filter(Boolean)) db.run(stmt);
+  for (const stmt of ADDED_COLUMNS) { try { db.run(stmt); } catch { /* già presente */ } }
 }
 
 export function kvGet(db, key, fallback = null) {

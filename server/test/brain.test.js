@@ -8,6 +8,7 @@ import * as memory from '../src/memory.js';
 import * as agenda from '../src/agenda.js';
 import * as jobs from '../src/jobs.js';
 import * as ui from '../src/ui.js';
+import * as mood from '../src/mood.js';
 import { handleApi } from '../src/api.js';
 import { localToMs, nowIso } from '../src/clock.js';
 import { makeDb, fakeFetch, deps, reply, T0 } from './helpers.js';
@@ -333,4 +334,45 @@ test('personalizzare l\'app: "voglio vedere sempre il deficit" fissa il riquadro
   assert.deepEqual(res.state.layout, { jarvis: [], oggi: [] });
   // Riquadri inventati vengono ignorati.
   assert.equal(ui.applyUiAction(db, { type: 'ui_pin', widget: 'grafico_magico' }), false);
+});
+
+test('promemoria che si ripetono: "ogni sera butta la spazzatura" torna ogni giorno alla stessa ora', () => {
+  const db = makeDb();
+  const tz = 'Europe/Rome';
+  const id = agenda.addReminder(db, { text: 'Butta la spazzatura', due: '2026-11-12T21:00', repeat: 'giorno' }, T0, tz);
+  assert.ok(id);
+  // Scatta alle 21 del 12: notifica e passa al 13 alle 21.
+  let next = agenda.fireDue(db, localToMs('2026-11-12T21:01', tz), tz);
+  assert.equal(next, localToMs('2026-11-13T21:00', tz));
+  assert.equal(db.all("SELECT * FROM inbox WHERE kind = 'reminder'").length, 1);
+  // Server fermo per tre giorni: una sola notifica, poi la prossima sera.
+  next = agenda.fireDue(db, localToMs('2026-11-16T10:00', tz), tz);
+  assert.equal(next, localToMs('2026-11-16T21:00', tz));
+  assert.equal(db.all("SELECT * FROM inbox WHERE kind = 'reminder'").length, 2);
+  // Attraverso il cambio d'ora resta alle 21 locali; feriali salta il fine settimana; mese tiene il giorno.
+  assert.equal(agenda.nextOccurrence(localToMs('2027-03-27T21:00', tz), 'giorno', localToMs('2027-03-27T21:01', tz), tz), localToMs('2027-03-28T21:00', tz));
+  assert.equal(agenda.nextOccurrence(localToMs('2026-11-13T08:00', tz), 'feriali', localToMs('2026-11-13T09:00', tz), tz), localToMs('2026-11-16T08:00', tz));
+  assert.equal(agenda.nextOccurrence(localToMs('2026-01-31T09:00', tz), 'mese', localToMs('2026-01-31T10:00', tz), tz), localToMs('2026-02-28T09:00', tz));
+  assert.equal(agenda.listReminders(db, tz)[0].repeat, 'giorno');
+  // done_reminder lo ferma per sempre.
+  agenda.doneReminder(db, id);
+  assert.equal(agenda.listReminders(db, tz).length, 0);
+});
+
+test('umore: le emozioni spostano gli ormoni, che tornano piano alla quiete; entrano nel contesto', async () => {
+  const db = seeded();
+  const H = 3600_000;
+  assert.equal(mood.current(db, T0).dominant, 'quiete');
+  mood.feel(db, 'entusiasmo', 1, T0);
+  const hot = mood.current(db, T0);
+  assert.equal(hot.dominant, 'gioia');
+  assert.ok(hot.gioia > 0.7 && hot.calma < 0.55);
+  const later = mood.current(db, T0 + 12 * H);
+  assert.ok(later.gioia < 0.5 && later.dominant === 'quiete', 'dopo 12 ore è quasi tornato alla quiete');
+  mood.feel(db, 'parola-sconosciuta', 1, T0);
+  const f = fakeFetch(() => reply({ reply: 'Mi spiace, signore.', mood: { emozione: 'preoccupazione', intensita: 0.8 } }));
+  await handleChat(db, ENV, deps(f), { text: 'ho perso le chiavi' });
+  assert.match(systemOf(f.calls[0]), /STATO D'ANIMO/);
+  const state = await (await handleApi(db, ENV, deps(f), new Request('https://x/api/state'))).json();
+  assert.ok(state.mood.tensione > 0.3);
 });

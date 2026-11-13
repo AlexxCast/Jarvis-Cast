@@ -5,6 +5,7 @@
 import * as router from './router.js';
 import { loadDiary, dietContext, DIET_KEYWORDS, newId } from './diet.js';
 import * as memory from './memory.js';
+import * as mood from './mood.js';
 import { pushInbox, logEvent } from './db.js';
 import { today as todayOf, nowIso as nowIsoOf, nowHuman } from './clock.js';
 
@@ -88,6 +89,7 @@ export async function advance(db, env, deps) {
       'Sei Jarvis. Unisci i risultati dei passi in un unico risultato finale chiaro e ordinato per l\'utente, in italiano, senza ripetizioni. Puoi usare titoli brevi ed elenchi.',
       `COMPITO: ${job.goal}\n\n${all}`, 1800)).text.trim();
     db.run("UPDATE jobs SET status = 'done', result = ?, updated = ? WHERE id = ?", final.slice(0, 12000), at, job.id);
+    mood.feel(db, 'soddisfazione', 0.6, deps.now());
     pushInbox(db, at, 'job', `Ho completato "${job.title}", signore. Il risultato è nella sezione Attività.`);
     return hasPendingJobs(db) ? 1000 : null;
   } catch (e) {

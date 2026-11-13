@@ -7,6 +7,7 @@ import * as memory from './memory.js';
 import * as agenda from './agenda.js';
 import * as ui from './ui.js';
 import * as coder from './coder.js';
+import * as mood from './mood.js';
 import { today as todayOf, nowIso as nowIsoOf, nowHuman } from './clock.js';
 import { logEvent, kvSet } from './db.js';
 
@@ -16,7 +17,7 @@ const UI_WORDS = /(mostra|vedere|vedo|visualizz|schermat|riquadr|togli|nascond|i
 const SPORT_WORDS = /(allen|corsa|corr[eoi]|palestra|sport|cammin|bici|nuot|esercizi|pesi|passi)/i;
 const SUMMARIZE_AFTER = 24;   // messaggi non ancora riassunti oltre i quali si comprime
 const KEEP_VERBATIM = 10;     // messaggi recenti che restano sempre per intero
-const AGENDA_KEYWORDS = /(ricord|promemoria|appuntament|agenda|scadenz|sveglia|domani|dopodomani|stasera|settimana prossima|luned|marted|mercoled|gioved|venerd|sabato|domenica|alle \d|tra \d+ (minut|or))/i;
+const AGENDA_KEYWORDS = /(ricord|ogni (sera|mattina|giorno|settimana|mese|luned|marted|mercoled|gioved|venerd|sabato|domenica)|tutti i giorni|promemoria|appuntament|agenda|scadenz|sveglia|domani|dopodomani|stasera|settimana prossima|luned|marted|mercoled|gioved|venerd|sabato|domenica|alle \d|tra \d+ (minut|or))/i;
 
 function session(db, id) {
   let row = db.get('SELECT * FROM sessions WHERE id = ?', id);
@@ -98,7 +99,7 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
   const history = db.all('SELECT role, text FROM messages WHERE session = ? AND id > ? ORDER BY id DESC LIMIT 14', sessionId, sess.summarized_upto).reverse();
   const mods = memory.listModules(db);
   const parts = {
-    core: CORE_PROMPT(diary.profile.name, nowHuman(ms, tz)),
+    core: CORE_PROMPT(diary.profile.name, nowHuman(ms, tz)) + '\n\n' + mood.MOOD_PROMPT(mood.current(db, ms)),
     brief: dietBrief(diary, today),
     rules: [dietOn ? DIET_RULES : '', UI_WORDS.test(userText) ? ui.uiPrompt(ui.loadLayout(db)) : '', UI_WORDS.test(userText) ? coder.codePrompt(env, db) : ''].filter(Boolean).join('\n\n'),
     blocks: dietOn ? dietContext(diary, today) : [],
@@ -125,6 +126,7 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
     const parsed = parseReply(res.text);
     remembered = parsed.actions.filter(a => a && a.type === 'remember').map(a => memory.slug(a.module) || 'generale');
     topicHits = memory.touchTopics(db, parsed.topics, nowIso);
+    if (parsed.mood) mood.feel(db, parsed.mood.emozione, parsed.mood.intensita, ms);
     const done = applyActions(db, parsed.actions, { today, nowIso, ms, tz, hadPhoto: !!image });
     for (const j of done.jobs) deps.startJob?.(j);
     for (const c of done.code) {
@@ -140,6 +142,7 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
     sess.model = res.key;
   } catch (e) {
     logEvent(db, nowIso, 'error', `chat: ${e.message} ${(e.tried || []).join(' | ')}`);
+    mood.feel(db, 'frustrazione', 0.3, ms);
     result = { reply: e.tried ? e.message : 'Si è verificato un problema interno, signore. Riprovi tra poco.', expectReply: false, card: '', photoRequest: null, model: '', switched: false, actions: [], device: [], error: true };
   }
 
