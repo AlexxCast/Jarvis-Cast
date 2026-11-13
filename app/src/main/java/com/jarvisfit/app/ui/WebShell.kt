@@ -85,6 +85,10 @@ class JarvisBridge(
         put("speakReplies", Settings.speakReplies)
         put("sensitivity", Settings.sensitivity)
         put("micGuard", Settings.micGuard)
+        put("voiceEnrolled", com.jarvisfit.app.voice.VoiceId.enrolled)
+        put("voiceLock", Settings.voiceLock)
+        put("voiceStrictness", Settings.voiceStrictness)
+        put("voicePhrase", com.jarvisfit.app.voice.VoiceId.PHRASE)
         put("status", JarvisState.status.value.name)
         put("version", runCatching { activity.packageManager.getPackageInfo(activity.packageName, 0).versionName }.getOrNull() ?: "")
     }.toString()
@@ -152,6 +156,35 @@ class JarvisBridge(
 
     @JavascriptInterface
     fun runPhoneTask(goal: String): String = PhoneAgent.start(activity, goal)
+
+    /** Registra la voce del proprietario (tre frasi). L'esito arriva alla pagina con window.jarvisVoiceEnroll. */
+    @JavascriptInterface
+    fun enrollVoice() {
+        val hasMic = ContextCompat.checkSelfPermission(activity, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+        if (!hasMic) { activity.runOnUiThread { androidx.core.app.ActivityCompat.requestPermissions(activity, arrayOf(Manifest.permission.RECORD_AUDIO), 78) }; onVoiceEnroll("Conceda il microfono a Jarvis e riprovi.", true); return }
+        com.jarvisfit.app.JarvisApp.scope.launch {
+            // Ferma l'ascolto di "Jarvis" finché registriamo, così il microfono è tutto per la voce.
+            val wasListening = Settings.listeningEnabled
+            if (wasListening) JarvisService.stop(activity)
+            kotlinx.coroutines.delay(600)
+            val error = com.jarvisfit.app.voice.VoiceId.enroll(activity) { msg -> onVoiceEnroll(msg, false) }
+            if (wasListening) activity.runOnUiThread { JarvisService.start(activity) }
+            onVoiceEnroll(error ?: "", true)
+        }
+    }
+
+    private fun onVoiceEnroll(msg: String, done: Boolean) {
+        JarvisState.voiceEnroll.value = "${if (done) "done" else "step"}|$msg|${System.nanoTime()}"
+    }
+
+    @JavascriptInterface
+    fun setVoiceLock(on: Boolean) { Settings.voiceLock = on && com.jarvisfit.app.voice.VoiceId.enrolled }
+
+    @JavascriptInterface
+    fun setVoiceStrictness(value: Double) { Settings.voiceStrictness = value.toFloat() }
+
+    @JavascriptInterface
+    fun forgetVoice() = com.jarvisfit.app.voice.VoiceId.forget()
 
     /** "ok:<nome>", "permesso", "sconosciuto" oppure "errore". Senza permessi li chiede subito. */
     @JavascriptInterface
@@ -273,6 +306,14 @@ fun WebShell(onDisconnect: () -> Unit) {
         if (exchanges > 0) webView.evaluateJavascript("window.jarvisRefresh && window.jarvisRefresh()", null)
     }
     // La sfera nella pagina segue lo stato del servizio vocale (ascolta, pensa, parla).
+    val voiceEnroll by JarvisState.voiceEnroll.collectAsState()
+    LaunchedEffect(voiceEnroll) {
+        val parts = voiceEnroll.split('|')
+        if (parts.size >= 3) {
+            val msg = org.json.JSONObject.quote(parts[1])
+            webView.evaluateJavascript("window.jarvisVoiceEnroll && window.jarvisVoiceEnroll(${parts[0] == "done"}, $msg)", null)
+        }
+    }
     val voiceStatus by JarvisState.status.collectAsState()
     LaunchedEffect(voiceStatus) {
         webView.evaluateJavascript("window.jarvisStatus && window.jarvisStatus('${voiceStatus.name}')", null)
