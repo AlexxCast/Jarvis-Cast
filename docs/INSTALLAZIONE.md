@@ -7,7 +7,7 @@ Da lì in poi ogni modifica che arriva sul ramo `main` di questo repository vien
 
 1. Crea un account gratuito su <https://dash.cloudflare.com/sign-up>.
 2. Nel pannello: **Workers & Pages → Create → Import a repository**, collega GitHub e scegli `Jarvis-Cast`.
-   Lascia il nome progetto `jarvis` e il comando di deploy proposto (`npx wrangler deploy`), poi **Deploy**.
+   Lascia il nome progetto `jarvis-cast` (deve coincidere con `name` in `wrangler.toml`) e il comando di deploy proposto (`npx wrangler deploy`), poi **Deploy**.
 3. Apri il Worker appena creato → **Settings → Variables and Secrets** e aggiungi questi valori come **Secret**:
 
    | Nome | Cosa metterci | Dove si prende |
@@ -23,7 +23,7 @@ Da lì in poi ogni modifica che arriva sul ramo `main` di questo repository vien
    | `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY` | facoltative, **a pagamento** (usate solo se i gratuiti sono esauriti) | <https://platform.deepseek.com>, <https://console.anthropic.com> |
 
    Basta `JARVIS_TOKEN` più una chiave per partire. Più chiavi gratuite aggiungi, più margine ha Jarvis prima di restare senza crediti.
-4. Apri l'indirizzo del Worker (tipo `https://jarvis.tuonome.workers.dev`), inserisci il token: sei dentro.
+4. Apri l'indirizzo del Worker (tipo `https://jarvis-cast.tuonome.workers.dev`), inserisci il token: sei dentro.
 
 Gli abbonamenti Gemini Pro e Claude Pro valgono per le rispettive app di chat e **non** danno crediti API: per Jarvis servono le chiavi qui sopra.
 

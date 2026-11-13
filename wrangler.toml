@@ -1,6 +1,6 @@
 # Jarvis: un solo Worker serve la web app (cartella web/) e le API (server/src).
 # Il database vive in un Durable Object con SQLite: non c'è nulla da creare a mano.
-name = "jarvis"
+name = "jarvis-cast"
 main = "server/src/index.js"
 compatibility_date = "2025-10-01"
 
