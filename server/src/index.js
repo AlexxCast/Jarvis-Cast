@@ -53,6 +53,8 @@ export class JarvisDO extends DurableObject {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+    // Anteprime delle modifiche proposte da Jarvis: l'indirizzo contiene un codice casuale lungo.
+    if (url.pathname.startsWith('/preview/')) return env.JARVIS.get(env.JARVIS.idFromName('main')).fetch(request);
     if (!url.pathname.startsWith('/api/')) return env.ASSETS.fetch(request);
 
     if (url.pathname === '/api/health') {

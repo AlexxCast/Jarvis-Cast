@@ -7,6 +7,7 @@ import * as N from './nutrition.js';
 import * as memory from './memory.js';
 import * as agenda from './agenda.js';
 import * as ui from './ui.js';
+import * as coder from './coder.js';
 import * as jobs from './jobs.js';
 import * as router from './router.js';
 import { sanitizeModels, DEFAULT_MODELS, PROVIDERS } from './models.js';
@@ -23,7 +24,7 @@ async function body(request) {
   try { const o = JSON.parse(text); return o && typeof o === 'object' ? o : {}; } catch { throw new Error('JSON non valido'); }
 }
 
-function statePayload(db, ms, tz) {
+function statePayload(db, ms, tz, env = {}) {
   const today = todayOf(ms, tz);
   const d = loadDiary(db);
   const days = [];
@@ -40,6 +41,7 @@ function statePayload(db, ms, tz) {
     diary: d, reminders: agenda.listReminders(db, tz), jobs: jobs.listJobs(db),
     legacyImported: kvGet(db, 'legacyImported', null),
     layout: ui.loadLayout(db),
+    code: coder.enabled(env) ? coder.listProposals(db).filter(x => ['working', 'ready'].includes(x.status)) : null,
   };
 }
 
@@ -67,7 +69,7 @@ export async function handleApi(db, env, deps, request) {
       const b = await body(request);
       try { return json({ addressed: await isAddressed(db, env, deps, b.text) }); } catch { return json({ addressed: false, error: true }); }
     }
-    if (path === '/api/state' && method === 'GET') return json(statePayload(db, ms, tz));
+    if (path === '/api/state' && method === 'GET') return json(statePayload(db, ms, tz, env));
 
     if (path === '/api/history' && method === 'GET') {
       const session = String(url.searchParams.get('session') || 'main');
@@ -82,7 +84,7 @@ export async function handleApi(db, env, deps, request) {
       const done = applyActions(db, actions, { today: todayOf(ms, tz), nowIso: nowIsoOf(ms, tz), ms, tz, hadPhoto: false });
       const nextDue = agenda.fireDue(db, ms, tz);
       if (nextDue) deps.schedule?.(nextDue);
-      return json({ applied: done.applied, state: statePayload(db, ms, tz) });
+      return json({ applied: done.applied, state: statePayload(db, ms, tz, env) });
     }
     if (path === '/api/profile' && method === 'PUT') {
       const b = await body(request);
@@ -90,7 +92,7 @@ export async function handleApi(db, env, deps, request) {
       d.profile = patchProfile(d.profile, b.profile || {});
       if (Number(b.profile?.weightKg) > 20 && !d.weights.length) d.weights.push({ date: todayOf(ms, tz), kg: Number(b.profile.weightKg) });
       saveDiary(db, d);
-      return json({ state: statePayload(db, ms, tz) });
+      return json({ state: statePayload(db, ms, tz, env) });
     }
     if (path === '/api/steps' && method === 'POST') {
       const b = await body(request);
@@ -114,9 +116,25 @@ export async function handleApi(db, env, deps, request) {
       }
       kvSet(db, 'legacyImported', nowIsoOf(ms, tz));
       logEvent(db, nowIsoOf(ms, tz), 'import', `diario app: ${legacy.meals.length} pasti`);
-      return json({ ok: true, meals: merged.meals.length, activities: merged.activities.length, weights: merged.weights.length, state: statePayload(db, ms, tz) });
+      return json({ ok: true, meals: merged.meals.length, activities: merged.activities.length, weights: merged.weights.length, state: statePayload(db, ms, tz, env) });
     }
 
+    if (path.startsWith('/preview/')) return await coder.servePreview(db, env, deps, path + (url.pathname.endsWith('/') && !path.endsWith('/') ? '/' : ''));
+    if (path === '/api/code' && method === 'GET') return json({ enabled: coder.enabled(env), items: coder.listProposals(db) });
+    if (path === '/api/code' && method === 'POST') {
+      if (!coder.enabled(env)) return bad('Per far modificare l\'app a Jarvis serve il segreto GITHUB_TOKEN su Cloudflare.');
+      const b = await body(request);
+      const req = String(b.request || '').trim();
+      if (!req) return bad('Descrivi la modifica.');
+      const id = coder.propose(db, req, ms, tz);
+      deps.defer ? deps.defer(coder.work(db, env, deps, id)) : await coder.work(db, env, deps, id);
+      return json({ id, state: statePayload(db, ms, tz, env) });
+    }
+    const codeOp = /^\/api\/code\/([a-z0-9]+)\/(approve|discard)$/.exec(path);
+    if (codeOp && method === 'POST') {
+      await (codeOp[2] === 'approve' ? coder.approve : coder.discard)(db, env, deps, codeOp[1]);
+      return json({ ok: true, state: statePayload(db, ms, tz, env) });
+    }
     if (path === '/api/graph' && method === 'GET') {
       // Foglie della dieta: gli ultimi pasti e allenamenti registrati.
       const g = memory.graph(db), d = loadDiary(db);

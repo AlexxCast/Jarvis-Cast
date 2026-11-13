@@ -8,7 +8,7 @@ compatibility_date = "2025-10-01"
 directory = "./web"
 binding = "ASSETS"
 not_found_handling = "single-page-application"
-run_worker_first = ["/api/*"]
+run_worker_first = ["/api/*", "/preview/*"]
 
 [[durable_objects.bindings]]
 name = "JARVIS"
@@ -30,3 +30,4 @@ enabled = true
 #   GROQ_API_KEY, CEREBRAS_API_KEY, NVIDIA_API_KEY, OPENROUTER_API_KEY,
 #   MISTRAL_API_KEY, GITHUB_MODELS_TOKEN   facoltative (gratuite)
 #   DEEPSEEK_API_KEY, ANTHROPIC_API_KEY    facoltative (a pagamento)
+#   GITHUB_TOKEN            facoltativo: permette a Jarvis di proporre modifiche alla web app

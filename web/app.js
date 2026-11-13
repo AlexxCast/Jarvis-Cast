@@ -280,6 +280,28 @@ function widgets(place) {
     h('button', { class: 'wx', 'aria-label': 'Togli ' + title, onclick: guard(() => act({ type: 'ui_unpin', widget: w.type === 'nota' ? w.id : w.type, where: place })) }, '×'))));
 }
 
+/** Modifiche all'app preparate da Jarvis: si guardano in anteprima e si approvano o scartano. */
+function codeBanner() {
+  const items = store.state?.code || [];
+  if (!items.length) return null;
+  // Mentre Jarvis lavora, ricontrolla ogni 10 secondi finché l'anteprima è pronta.
+  if (items.some(c => c.status === 'working') && !store.codePoll) {
+    store.codePoll = setTimeout(async () => { store.codePoll = 0; try { await refresh(); render(); } catch { /* riprova al prossimo giro */ } }, 10000);
+  }
+  const op = (id, what) => guard(async () => {
+    store.state = (await api('POST', `/code/${id}/${what}`)).state;
+    render();
+    toast(what === 'approve' ? 'Approvata: sarà online tra un paio di minuti.' : 'Modifica scartata.');
+  });
+  return h('div', { class: 'codebar' }, items.map(c => c.status === 'working'
+    ? h('div', { class: 'banner' }, h('b', {}, 'Sto preparando la modifica'), h('p', { class: 'muted small' }, c.request))
+    : h('div', { class: 'banner' }, h('b', {}, 'Modifica pronta'), h('p', { class: 'small' }, c.summary || c.request),
+      h('div', { class: 'row wrap' },
+        h('button', { class: 'btn primary', onclick: () => { location.href = `/preview/${c.id}/`; } }, 'Anteprima'),
+        h('button', { class: 'btn', onclick: op(c.id, 'approve') }, 'Approva'),
+        h('button', { class: 'btn ghost danger', onclick: op(c.id, 'discard') }, 'Scarta')))));
+}
+
 function viewChat() {
   syncCompact();
   // La conversazione completa si apre solo se richiesta; altrimenti sotto la sfera c'è solo l'ultima risposta.
@@ -305,7 +327,7 @@ function viewChat() {
     h('button', { class: 'btn icon' + (store.chatOpen ? ' on' : ''), 'aria-label': store.chatOpen ? 'Chiudi la chat' : 'Apri la chat', 'aria-pressed': store.chatOpen ? 'true' : 'false', onclick: () => { store.chatOpen = !store.chatOpen; render(); if (store.chatOpen) scrollChat(); } }, icon(ICONS.chat)),
     ta,
     h('button', { class: 'btn primary icon', 'aria-label': 'Invia', disabled: store.sending, onclick: () => { const v = ta.value; ta.value = ''; send(v); } }, icon(ICONS.send)));
-  return store.chatOpen ? [orb.el, list, composer] : [widgets('jarvis'), orb.el, caption, composer];
+  return store.chatOpen ? [orb.el, list, composer] : [codeBanner(), widgets('jarvis'), orb.el, caption, composer];
 }
 
 // ------------------------------------------------------------------ oggi
