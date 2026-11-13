@@ -37,8 +37,11 @@ jobs:
           KEYSTORE_B64: ${{ secrets.DEBUG_KEYSTORE_B64 }}
         run: |
           if [ -n "$KEYSTORE_B64" ]; then
-            mkdir -p ~/.android
-            echo "$KEYSTORE_B64" | base64 -d > ~/.android/debug.keystore
+            KS="$RUNNER_TEMP/jarvis-debug.keystore"
+            echo "$KEYSTORE_B64" | tr -d ' \r\n' | base64 -d > "$KS"
+            echo "JARVIS_DEBUG_KEYSTORE=$KS" >> "$GITHUB_ENV"
+            # Impronta del certificato della chiave (pubblica): deve essere CBE33F52…0E07.
+            keytool -list -v -keystore "$KS" -storepass android | grep -m1 "SHA256:" || echo "::warning::Il segreto non contiene una chiave valida."
           else
             echo "::warning::Segreto DEBUG_KEYSTORE_B64 assente: l'APK sarà firmato con una chiave diversa da quella del telefono."
           fi
