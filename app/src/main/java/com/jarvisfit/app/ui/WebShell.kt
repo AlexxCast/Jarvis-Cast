@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.view.ViewGroup
 import android.webkit.JavascriptInterface
 import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
@@ -155,6 +156,9 @@ fun WebShell(onDisconnect: () -> Unit) {
 
     val webView = remember {
         WebView(ctx).apply {
+            // Senza questo la WebView prende l'altezza del contenuto (wrap_content) e la pagina,
+            // che a sua volta è alta "il 100% della finestra", resta schiacciata in alto.
+            layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.mediaPlaybackRequiresUserGesture = true
