@@ -244,3 +244,26 @@ test('aprire app e indirizzi: le azioni vengono inoltrate al telefono, quelle no
   assert.deepEqual(out.device, [{ type: 'open_app', name: 'Spotify' }, { type: 'open_url', url: 'https://example.com/a' }]);
   assert.deepEqual(out.actions, ['open_app', 'open_url']);
 });
+
+test('sfera: la mappa ha un ramo per modulo e ogni risposta dice quali rami ha acceso', async () => {
+  const db = seeded();
+  const f = fakeFetch((url, body, n) => n === 1
+    ? reply({ reply: 'Me lo segno.', actions: [{ type: 'remember', module: 'Auto', text: 'La Panda fa il tagliando ogni 15000 km.' }] })
+    : reply({ reply: 'ok' }));
+  const d = deps(f);
+  const first = await handleChat(db, ENV, d, { text: 'segnati che la Panda fa il tagliando ogni 15000 km' });
+  assert.ok(first.touched.includes('auto'), 'il modulo appena creato si accende');
+  const g = memory.graph(db);
+  const auto = g.branches.find(b => b.id === 'auto');
+  assert.equal(auto.kind, 'module');
+  assert.match(auto.children[0].label, /tagliando/);
+  assert.ok(g.branches.some(b => b.id === 'dieta'));
+
+  const second = await handleChat(db, ENV, d, { text: 'quando devo fare il prossimo tagliando?', sessionId: 's2' });
+  assert.deepEqual(second.touched, ['auto']);
+  assert.deepEqual(second.touchedLeaves, [auto.children[0].id]);
+  assert.equal(second.tier, 'fast');
+
+  const res = await handleApi(db, ENV, d, new Request('https://x/api/graph'));
+  assert.equal((await res.json()).branches.length, g.branches.length);
+});
