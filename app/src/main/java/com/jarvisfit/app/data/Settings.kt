@@ -60,6 +60,18 @@ object Settings {
         get() = prefs.getBoolean("mic_guard", true)
         set(v) = prefs.edit().putBoolean("mic_guard", v).apply()
 
+    // Riconoscimento della voce: impronta registrata (solo numeri, resta sul telefono) e blocco attivo.
+    var voiceModel: String
+        get() = prefs.getString("voice_model", "") ?: ""
+        set(v) = prefs.edit().putString("voice_model", v).apply()
+    var voiceLock: Boolean
+        get() = prefs.getBoolean("voice_lock", false)
+        set(v) = prefs.edit().putBoolean("voice_lock", v).apply()
+    /** Da 0 (permissivo) a 1 (severo). */
+    var voiceStrictness: Float
+        get() = prefs.getFloat("voice_strictness", 0.5f)
+        set(v) = prefs.edit().putFloat("voice_strictness", v.coerceIn(0f, 1f)).apply()
+
     // Contapassi: il sensore restituisce passi totali dall'ultimo riavvio
     var stepBaseDate: String
         get() = prefs.getString("step_base_date", "") ?: ""

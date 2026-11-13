@@ -48,6 +48,8 @@ object JarvisState {
     val running: StateFlow<Status> get() = status
     /** Aumenta a ogni scambio vocale concluso: la web app lo usa per aggiornare lo schermo. */
     val exchanges = MutableStateFlow(0)
+    /** Avanzamento della registrazione della voce: "step|messaggio|n" oppure "done|errore|n". */
+    val voiceEnroll = MutableStateFlow("")
 }
 
 /**
@@ -277,6 +279,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
 
     private fun startWakeWord() {
         if (!Settings.listeningEnabled || busy || yielded) return
+        if (VoiceId.enrolling) { restartWakeWordDelayed(1500); return } // il microfono serve alla registrazione della voce
         if (Speaker.isSpeaking()) {
             restartWakeWordDelayed(500)
             return
@@ -644,7 +647,11 @@ class JarvisService : LifecycleService(), SensorEventListener {
             if (reply.photoRequest != null) notifyPhotoRequest(reply.photoRequest)
             // "Apri Spotify": a schermo spento o con Jarvis in secondo piano Android può rifiutare l'avvio.
             var callWho: String? = null
+            // Usare il telefono o telefonare: prima controlla che a parlare sia il proprietario.
+            val sensitive = reply.device.any { it.first == "phone_task" || it.first == "call" }
+            val allowed = !sensitive || !VoiceId.needed() || VoiceId.gate(this@JarvisService)
             for ((type, value) in reply.device) {
+                if (!allowed && (type == "phone_task" || type == "call")) continue
                 when (type) {
                     "call" -> callWho = value // parte dopo che Jarvis ha finito di parlare
                     "open_app" -> AppLauncher.open(this@JarvisService, value)
@@ -668,6 +675,12 @@ class JarvisService : LifecycleService(), SensorEventListener {
                 notifyInfoPopup(popupText)
             }
 
+            if (!allowed) {
+                // Voce non riconosciuta: l'ha già detto, e non legge la risposta che annunciava l'azione.
+                inConversationMode = false
+                backToWaiting()
+                return@launch
+            }
             if (yielded) {
                 // Nel frattempo un'altra app ha preso il microfono: niente voce sopra il suo audio,
                 // la risposta resta leggibile nella notifica.

@@ -79,6 +79,12 @@ function markSpeaking(text) {
   updateOrb();
 }
 // L'app Android comunica qui lo stato del servizio vocale (OFF, WAITING, LISTENING, THINKING, SPEAKING, ERROR).
+// Registrazione della voce: l'app Android manda qui i passaggi e l'esito.
+window.jarvisVoiceEnroll = (done, msg) => {
+  store.voiceEnroll = done ? '' : String(msg || '');
+  if (done) toast(msg ? String(msg) : 'Voce registrata: ora Jarvis la riconosce.');
+  render();
+};
 window.jarvisStatus = (status) => { store.voice = String(status || 'OFF'); updateOrb(); };
 
 /** Azioni che solo il telefono può eseguire (aprire un'app o un indirizzo). */
@@ -679,6 +685,18 @@ function viewImpostazioni() {
           ? 'Jarvis può usare il telefono al posto suo (tocca, scrive, legge). Si ferma prima di inviare, pagare o eliminare cose non richieste.'
           : 'Per far usare il telefono a Jarvis ("scrivi a Marco che arrivo") attivi "Jarvis: usa il telefono" in Accessibilità.'),
         nativeCall('phoneControlStatus') === true ? null : h('button', { class: 'btn', onclick: () => nativeCall('openPhoneControlSettings') }, 'Apri Accessibilità')),
+      typeof native.enrollVoice === 'function' ? h('div', {},
+        h('div', { class: 'small' }, 'Riconoscimento della sua voce'),
+        h('p', { class: 'muted' }, cfg.voiceEnrolled
+          ? `Prima di usare il telefono o telefonare, Jarvis chiede di dire "${cfg.voicePhrase}" e controlla che sia la sua voce. Dopo un riconoscimento non lo richiede per 10 minuti.`
+          : `Registri la sua voce (tre volte la frase "${cfg.voicePhrase}"): così Jarvis usa il telefono solo se a chiederlo è lei. L'impronta resta sul telefono.`),
+        store.voiceEnroll ? h('p', { class: 'small' }, store.voiceEnroll) : null,
+        h('div', { class: 'row wrap' },
+          h('button', { class: 'btn' + (cfg.voiceEnrolled ? '' : ' primary'), disabled: !!store.voiceEnroll, onclick: () => { store.voiceEnroll = 'Preparo il microfono…'; nativeCall('enrollVoice'); render(); } }, cfg.voiceEnrolled ? 'Registra di nuovo' : 'Registra la mia voce'),
+          cfg.voiceEnrolled ? h('button', { class: 'btn ghost danger', onclick: () => { nativeCall('forgetVoice'); setTimeout(render, 200); } }, 'Cancella la voce') : null),
+        cfg.voiceEnrolled ? toggle('Chiedi la mia voce prima di usare il telefono', 'voiceLock', 'setVoiceLock') : null,
+        cfg.voiceEnrolled ? h('div', { class: 'row wrap' }, [['Permissivo', 0.2], ['Normale', 0.5], ['Severo', 0.85]].map(([label, v]) =>
+          h('button', { class: 'btn' + (Math.abs((cfg.voiceStrictness ?? 0.5) - v) < 0.2 ? ' primary' : ''), onclick: () => { nativeCall('setVoiceStrictness', v); setTimeout(render, 200); } }, label))) : null) : null,
       typeof native.callPermission === 'function' ? h('div', { class: 'row wrap' },
         h('p', { class: 'grow' }, nativeCall('callPermission') === true ? 'Jarvis può telefonare ai contatti della rubrica ("chiama Marco").' : 'Per le telefonate ("chiama Marco") Jarvis ha bisogno dei permessi Contatti e Telefono.'),
         nativeCall('callPermission') === true ? null : h('button', { class: 'btn', onclick: () => { nativeCall('requestCallPermission'); setTimeout(render, 2500); } }, 'Concedi')) : null,
