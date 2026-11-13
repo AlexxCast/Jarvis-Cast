@@ -153,6 +153,22 @@ class JarvisBridge(
     @JavascriptInterface
     fun runPhoneTask(goal: String): String = PhoneAgent.start(activity, goal)
 
+    /** "ok:<nome>", "permesso", "sconosciuto" oppure "errore". Senza permessi li chiede subito. */
+    @JavascriptInterface
+    fun callContact(who: String): String {
+        val r = com.jarvisfit.app.device.Dialer.call(activity, who)
+        if (r == "permesso") requestCallPermission()
+        return r
+    }
+
+    @JavascriptInterface
+    fun callPermission(): Boolean = com.jarvisfit.app.device.Dialer.hasPermission(activity)
+
+    @JavascriptInterface
+    fun requestCallPermission() = activity.runOnUiThread {
+        androidx.core.app.ActivityCompat.requestPermissions(activity, com.jarvisfit.app.device.Dialer.permissions, 77)
+    }
+
     @JavascriptInterface
     fun syncPlaces(json: String) = Places.sync(activity, json)
 

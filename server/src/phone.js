@@ -89,3 +89,12 @@ export const DOING_WORDS = /\b(apri|manda|mandami|invia|scrivi|metti|cerca|leggi
 export const PROMISE_WORDS = /\b(apro|faccio|mando|invio|scrivo|metto|cerco|avvio|leggo|chiamo|imposto|attivo|procedo|ci penso|me ne occupo|eseguo|subito|provvedo|lo faccio|rispondo)\b/i;
 /** Cose da fare DENTRO un'app: aprirla soltanto non basta. */
 export const INSIDE_WORDS = /\b(manda|mandami|invia|scrivi|metti|cerca|leggi|leggimi|chiama|riproduci|imposta|rispondi|fai partire|avvia la|avvia il)\b/i;
+
+/** "chiama Marcolino" -> "Marcolino". Vuoto se non è una telefonata normale (es. "chiama su WhatsApp", "come si chiama"). */
+export function calleeOf(text) {
+  const t = String(text || '');
+  if (/\b(whatsapp|telegram|videochiam|meet|zoom|skype|messenger|instagram)\b/i.test(t)) return '';
+  const m = /(?:^|[\s,])(?:chiama(?:mi)?|telefona\s+a|fai\s+una\s+chiamata\s+a|fai\s+uno\s+squillo\s+a)\s+(?:a\s+|il\s+|la\s+|lo\s+|l')?([^?.!,;]{2,40})/i.exec(t);
+  if (!m || /\b(si|ti|mi)\s+chiama/i.test(t)) return '';
+  return m[1].replace(/\b(per favore|subito|adesso|ora|grazie|al telefono|sul cellulare)\b.*$/i, '').trim();
+}

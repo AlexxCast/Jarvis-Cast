@@ -39,6 +39,12 @@ export function addMessage(db, sessionId, role, text, at, meta = null) {
   db.run('INSERT INTO messages (session, role, text, at, meta) VALUES (?, ?, ?, ?, ?)', sessionId, role, text, at, meta ? JSON.stringify(meta) : null);
 }
 
+/** Frasi con cui il modello dichiara di aver salvato o cambiato qualcosa. */
+export const CLAIM_WORDS = /\b(ho|l'ho|li ho|le ho|te l'ho|gliel'ho)\s+(appena\s+|già\s+|subito\s+|anche\s+)?(registrat|aggiunt|aggiornat|salvat|segnat|impostat|annotat|memorizzat|eliminat|cancellat|inserit|creat|modificat|spostat|tolt|rimoss)|\b(promemoria|piano|diario|pasto|peso|allenamento|dispensa|ricetta)\s+(è stat[oa]\s+)?(impostat|aggiornat|registrat|salvat|creat|aggiunt)[oa]\b|^\W*(fatto|registrato|aggiornato|salvato|segnato|annotato)\b/i;
+const FAIL_LABELS = { add_meal: 'registrare il pasto (mancano gli alimenti)', update_meal: 'modificare il pasto (non l\'ho trovato)', delete_meal: 'eliminare il pasto (non l\'ho trovato)', add_weight: 'registrare il peso', add_activity: 'registrare l\'allenamento', add_reminder: 'creare il promemoria (data non valida)', remember: 'salvare il ricordo', call: 'avviare la chiamata (manca il nome)', update_profile: 'aggiornare il profilo', delete_activity: 'eliminare l\'attività (non l\'ho trovata)' };
+const failLabel = (t) => FAIL_LABELS[t] || `completare l'operazione "${t}"`;
+const REPAIR_PROMPT = (failed) => `CONTROLLO AUTOMATICO: nella tua risposta ${failed.length ? `queste azioni non erano valide e NON sono state eseguite: ${failed.join(', ')}` : 'dichiari di aver fatto qualcosa ma il campo "actions" è vuoto o incompleto'}. Finora NON è stato salvato nulla. Rimanda SOLO il JSON completo, con in "actions" tutte le azioni corrette e complete (per un pasto: items con name, grams, kcal, protein, carbs, fat; per update/delete: l'id esatto preso dal contesto). Se davvero non c'è nulla da salvare, lascia "actions" vuoto e scrivi una reply che NON dica di aver salvato o fatto qualcosa.`;
+
 /** App installate sul telefono (le manda l'app Android), così un nome storpiato diventa l'app vera. */
 export function appsPrompt(db) {
   const apps = kvGet(db, 'apps', []);
@@ -48,7 +54,7 @@ export function appsPrompt(db) {
 
 /** Applica le azioni restituite dal modello. Ritorna { photoRequest, jobs, applied }. */
 export function applyActions(db, actions, ctx) {
-  const out = { photoRequest: null, jobs: [], applied: [], device: [], code: [] };
+  const out = { photoRequest: null, jobs: [], applied: [], device: [], code: [], failed: [] };
   let diary = null;
   // phone_task apre l'app da solo: un open_app in più la riaprirebbe a metà lavoro.
   if (actions.some(a => a?.type === 'phone_task')) actions = actions.filter(a => a?.type !== 'open_app');
@@ -56,20 +62,28 @@ export function applyActions(db, actions, ctx) {
     try {
       if (DIET_ACTIONS.has(a.type)) {
         diary = diary || loadDiary(db);
+        const before = JSON.stringify(diary);
         const photo = applyDietAction(diary, a, ctx);
         if (photo) out.photoRequest = photo;
-      } else if (a.type === 'remember') memory.remember(db, a, ctx.nowIso);
+        // Un'azione che non cambia nulla (pasto senza alimenti, id inesistente) non è "fatta".
+        if (!photo && a.type !== 'clear_recipe_session' && JSON.stringify(diary) === before) { out.failed.push(a.type); continue; }
+      } else if (a.type === 'remember') { if (!memory.remember(db, a, ctx.nowIso)) { out.failed.push(a.type); continue; } }
       else if (a.type === 'forget') memory.forget(db, a.id);
-      else if (a.type === 'add_reminder') agenda.addReminder(db, a, ctx.ms, ctx.tz);
+      else if (a.type === 'add_reminder') { if (!agenda.addReminder(db, a, ctx.ms, ctx.tz)) { out.failed.push(a.type); continue; } }
       else if (a.type === 'done_reminder') agenda.doneReminder(db, a.id);
       else if (coder.CODE_ACTIONS.has(a.type)) out.code.push({ type: a.type, id: String(a.id || ''), request: String(a.request || '').trim().slice(0, 2000) });
-      else if (ui.UI_ACTIONS.has(a.type)) { if (!ui.applyUiAction(db, a, ctx.nowIso)) continue; out.ui = true; }
+      else if (ui.UI_ACTIONS.has(a.type)) { if (!ui.applyUiAction(db, a, ctx.nowIso)) { out.failed.push(a.type); continue; } out.ui = true; }
       else if (a.type === 'start_job') { if (String(a.goal || '').trim()) out.jobs.push({ title: String(a.title || 'Compito').slice(0, 80), goal: String(a.goal).slice(0, 2000) }); }
       else if (a.type === 'open_app') {
         // Eseguita dal telefono, non dal server: la inoltriamo così com'è.
         const name = String(a.name || '').trim().slice(0, 60);
         if (!name) continue;
         out.device.push({ type: 'open_app', name });
+      } else if (a.type === 'call') {
+        // La telefonata la fa il telefono, cercando il nome in rubrica.
+        const name = String(a.name || a.number || '').trim().slice(0, 60);
+        if (!name) { out.failed.push(a.type); continue; }
+        out.device.push({ type: 'call', name });
       } else if (a.type === 'phone_task') {
         // Il telefono esegue l'obiettivo da solo, chiedendo al server una mossa alla volta.
         const goal = String(a.goal || '').trim().slice(0, 1000);
@@ -85,9 +99,10 @@ export function applyActions(db, actions, ctx) {
         const url = String(a.url || '').trim().slice(0, 500);
         if (!/^https:\/\//i.test(url)) continue;
         out.device.push({ type: 'open_url', url });
-      } else continue;
+      } else { out.failed.push(String(a.type)); continue; }
       out.applied.push(a.type);
     } catch (e) {
+      out.failed.push(String(a.type));
       logEvent(db, ctx.nowIso, 'error', `azione ${a.type}: ${e.message}`);
     }
   }
@@ -147,17 +162,47 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
   const tier = router.classifyTier(userText, !!image);
   try {
     const res = await router.chat(db, env, {
-      tier, needsVision: !!image, preferKey: sess.model, maxTokens: 1400,
+      tier, needsVision: !!image, preferKey: sess.model, maxTokens: 2000,
       build: (model) => buildMessages(model, parts), fetchFn: deps.fetchFn, now: deps.now, tz,
     });
-    const parsed = parseReply(res.text);
+    let parsed = parseReply(res.text);
+    let done = applyActions(db, parsed.actions, { today, nowIso, ms, tz, hadPhoto: !!image });
+    // Dice di averlo fatto ma nessuna azione è andata a buon fine: una seconda richiesta per avere le azioni vere.
+    const nothing = (d) => !d.applied.length && !d.device.length && !d.jobs.length && !d.code.length;
+    // Le richieste da eseguire sul telefono (chiamate, app) hanno la loro rete di sicurezza più sotto.
+    const deviceAsk = !!phone.calleeOf(userText) || (phone.DOING_WORDS.test(userText) && DEVICE_WORDS.test(userText));
+    if (nothing(done) && (done.failed.length || parsed.truncated || (CLAIM_WORDS.test(parsed.reply) && !deviceAsk))) {
+      logEvent(db, nowIso, 'error', `azione dichiarata ma non eseguita (${done.failed.join(', ') || 'nessuna azione'}): ${parsed.reply.slice(0, 120)}`);
+      let fixed = null;
+      try {
+        const again = await router.chat(db, env, {
+          tier: 'smart', needsVision: !!image, maxTokens: 2000, fetchFn: deps.fetchFn, now: deps.now, tz,
+          build: (model) => [...buildMessages(model, parts), { role: 'assistant', content: res.text.slice(0, 3000) }, { role: 'user', content: REPAIR_PROMPT(done.failed) }],
+        });
+        fixed = parseReply(again.text);
+      } catch { /* resta la risposta onesta qui sotto */ }
+      const redo = fixed?.parsed ? applyActions(db, fixed.actions, { today, nowIso, ms, tz, hadPhoto: !!image }) : null;
+      if (redo && (!nothing(redo) || !CLAIM_WORDS.test(fixed.reply))) { parsed = fixed; done = redo; }
+      else {
+        parsed = { ...parsed, reply: 'Mi scusi signore, non sono riuscito a salvarlo davvero. Me lo può ripetere con i dettagli?', expectReply: true, card: '', actions: [] };
+        mood.feel(db, 'frustrazione', 0.3, ms);
+      }
+    } else if (done.failed.length) {
+      // Alcune azioni sono riuscite e altre no: lo dice chiaramente invece di far finta.
+      parsed = { ...parsed, reply: `${parsed.reply} Attenzione però: non sono riuscito a ${[...new Set(done.failed)].map(failLabel).join(' e a ')}.` };
+      logEvent(db, nowIso, 'error', `azioni non riuscite: ${done.failed.join(', ')}`);
+    }
     remembered = parsed.actions.filter(a => a && a.type === 'remember').map(a => memory.slug(a.module) || 'generale');
     topicHits = memory.touchTopics(db, parsed.topics, nowIso);
     if (parsed.mood) mood.feel(db, parsed.mood.emozione, parsed.mood.intensita, ms);
-    const done = applyActions(db, parsed.actions, { today, nowIso, ms, tz, hadPhoto: !!image });
     // Ha promesso di farlo ma non ha messo l'azione: la aggiungiamo noi, così non resta una promessa a vuoto.
     const goal = userText.replace(/^\W*(ehi|ciao|ok)?\W*jarvis\W*/i, '').slice(0, 1000);
-    if (!done.device.length && phone.DOING_WORDS.test(userText) && DEVICE_WORDS.test(userText) && phone.PROMISE_WORDS.test(parsed.reply)) {
+    const callee = phone.calleeOf(userText);
+    if (!done.device.length && callee && phone.PROMISE_WORDS.test(parsed.reply)) {
+      // "Chiamo Marcolino" senza l'azione: la telefonata parte lo stesso.
+      done.device.push({ type: 'call', name: callee });
+      done.applied.push('call');
+    } else if (!done.device.length && phone.DOING_WORDS.test(userText) && DEVICE_WORDS.test(userText) && phone.PROMISE_WORDS.test(parsed.reply)) {
       done.device.push({ type: 'phone_task', goal });
       done.applied.push('phone_task');
     } else if (done.device.length && done.device.every(d => d.type === 'open_app') && phone.INSIDE_WORDS.test(userText)) {

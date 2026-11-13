@@ -564,3 +564,55 @@ test('telefono: una domanda di conferma resta in sospeso e la chat la riprende',
   await handleChat(db, ENV, deps(fakeFetch((url, body) => { system = body.messages[0].content; return reply({}); })), { text: 'grazie' });
   assert.doesNotMatch(system, /IN SOSPESO/);
 });
+
+test('onestà: se dice "ho registrato" senza azione, una seconda richiesta recupera l\'azione vera', async () => {
+  const db = makeDb();
+  let n = 0, repairAsk = '';
+  const out = await handleChat(db, ENV, deps(fakeFetch((url, body) => {
+    n++;
+    if (n === 1) return reply({ reply: 'Ho registrato la pizza, signore.' });
+    repairAsk = body.messages[body.messages.length - 1].content;
+    return reply({ reply: 'Ho registrato la pizza: 800 kcal.', actions: [{ type: 'add_meal', meal: 'cena', description: 'pizza margherita', items: [{ name: 'pizza', grams: 300, kcal: 800, protein: 30, carbs: 100, fat: 25 }] }] });
+  })), { text: 'ho mangiato una pizza margherita' });
+  assert.equal(n, 2);
+  assert.match(repairAsk, /CONTROLLO AUTOMATICO/);
+  assert.equal(loadDiary(db).meals.length, 1);
+  assert.equal(out.reply, 'Ho registrato la pizza: 800 kcal.');
+});
+
+test('onestà: se nemmeno al secondo tentativo salva, lo ammette invece di far finta', async () => {
+  const db = makeDb();
+  const out = await handleChat(db, ENV, deps(fakeFetch(() => reply({ reply: 'Ho aggiornato il piano, signore.', actions: [{ type: 'add_meal', meal: 'cena' }] }))), { text: 'ho mangiato una pizza' });
+  assert.equal(loadDiary(db).meals.length, 0);
+  assert.match(out.reply, /non sono riuscito a salvarlo/);
+  assert.equal(out.expectReply, true);
+  // Una risposta che parla solo dei dati, senza dichiarare azioni, non fa partire controlli.
+  let calls = 0;
+  const ok = await handleChat(db, ENV, deps(fakeFetch(() => { calls++; return reply({ reply: 'Oggi ha registrato 1200 kcal.' }); })), { text: 'quante calorie ho mangiato oggi?' });
+  assert.equal(calls, 1);
+  assert.equal(ok.reply, 'Oggi ha registrato 1200 kcal.');
+});
+
+test('onestà: azioni riuscite a metà vengono dichiarate, e un JSON tagliato salva comunque le azioni intere', async () => {
+  const db = makeDb();
+  const out = await handleChat(db, ENV, deps(fakeFetch(() => reply({ reply: 'Ho registrato il peso e corretto il pranzo.', actions: [{ type: 'add_weight', kg: 80 }, { type: 'update_meal', id: 'inesistente', description: 'x' }] }))), { text: 'peso 80 kg e correggi il pranzo' });
+  assert.equal(loadDiary(db).weights.length, 1);
+  assert.match(out.reply, /Attenzione però: non sono riuscito a modificare il pasto/);
+  const cut = parseReply('{"reply": "Ho registrato la colazione.", "expect_reply": false, "card": "", "actions": [{"type": "add_meal", "meal": "colazione", "description": "latte {e} biscotti", "items": [{"name": "latte", "grams": 200, "kcal": 90, "protein": 6, "carbs": 10, "fat": 3}]}, {"type": "add_me');
+  assert.equal(cut.truncated, true);
+  assert.equal(cut.reply, 'Ho registrato la colazione.');
+  assert.equal(cut.actions.length, 1);
+  assert.equal(cut.actions[0].items[0].name, 'latte');
+});
+
+test('chiamate: "chiama Marcolino" diventa una telefonata vera, anche se il modello la promette soltanto', async () => {
+  const db = makeDb();
+  let out = await handleChat(db, ENV, deps(fakeFetch(() => reply({ reply: 'Chiamo Marcolino.', actions: [{ type: 'call', name: 'Marcolino' }] }))), { text: 'chiama Marcolino' });
+  assert.deepEqual(out.device, [{ type: 'call', name: 'Marcolino' }]);
+  out = await handleChat(db, ENV, deps(fakeFetch(() => reply({ reply: 'Certo signore, chiamo subito Marcolino.' }))), { text: 'Jarvis chiama Marcolino per favore' });
+  assert.deepEqual(out.device, [{ type: 'call', name: 'Marcolino' }]);
+  assert.equal(phone.calleeOf('chiama mamma'), 'mamma');
+  assert.equal(phone.calleeOf('telefona a Luca Rossi adesso'), 'Luca Rossi');
+  assert.equal(phone.calleeOf('chiama Marco su WhatsApp'), '');
+  assert.equal(phone.calleeOf('come si chiama il mio medico'), '');
+});
