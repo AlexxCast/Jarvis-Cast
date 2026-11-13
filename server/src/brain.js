@@ -41,7 +41,7 @@ export function addMessage(db, sessionId, role, text, at, meta = null) {
 export function appsPrompt(db) {
   const apps = kvGet(db, 'apps', []);
   if (!apps.length) return '';
-  return 'APP INSTALLATE SUL TELEFONO (usa sempre questi nomi esatti; se l\'utente storpia un nome o il riconoscimento vocale lo sbaglia, es. "joytify", scegli l\'app più simile per suono o per contesto, es. musica = Spotify): ' + apps.join(', ').slice(0, 3500);
+  return 'APP INSTALLATE SUL TELEFONO (usa sempre questi nomi esatti; un nome detto uguale o quasi a una di queste app è quella app; se l\'utente storpia un nome o il riconoscimento vocale lo sbaglia, scegli l\'app installata più simile per suono o per contesto, es. per la musica l\'app di musica che c\'è in questo elenco): ' + apps.join(', ').slice(0, 3500);
 }
 
 /** Applica le azioni restituite dal modello. Ritorna { photoRequest, jobs, applied }. */

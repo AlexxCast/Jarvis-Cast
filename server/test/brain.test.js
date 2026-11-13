@@ -453,7 +453,7 @@ test('app del telefono: elenco salvato, nomi storpiati risolti dal modello, phon
   const res = await handleApi(db, ENV, d, new Request('https://x/api/apps', { method: 'POST', body: JSON.stringify({ apps: ['WhatsApp', 'Spotify', 'Spotify', '', 'Maps'] }) }));
   assert.equal((await res.json()).count, 3);
   let seen = '';
-  const out = await handleChat(db, ENV, deps(fakeFetch((url, body) => { seen = JSON.stringify(body); return reply({ reply: 'Metto la musica.', actions: [{ type: 'open_app', name: 'Spotify' }, { type: 'phone_task', goal: 'Apri Spotify e avvia la playlist Preferiti' }] }); })), { text: 'metti la mia playlist su joytify' });
+  const out = await handleChat(db, ENV, deps(fakeFetch((url, body) => { seen = JSON.stringify(body); return reply({ reply: 'Metto la musica.', actions: [{ type: 'open_app', name: 'Spotify' }, { type: 'phone_task', goal: 'Apri Spotify e avvia la playlist Preferiti' }] }); })), { text: 'metti la mia playlist su spotifai' });
   assert.match(seen, /APP INSTALLATE SUL TELEFONO.*: Maps, Spotify, WhatsApp/);
   assert.deepEqual(out.device, [{ type: 'phone_task', goal: 'Apri Spotify e avvia la playlist Preferiti' }]);
 });
