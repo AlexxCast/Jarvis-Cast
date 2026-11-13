@@ -5,6 +5,7 @@ import { handleChat, isAddressed, applyActions, addMessage } from './brain.js';
 import { loadDiary, saveDiary, mergeLegacy, patchProfile, DIET_ACTIONS } from './diet.js';
 import * as N from './nutrition.js';
 import * as memory from './memory.js';
+import * as phone from './phone.js';
 import * as places from './places.js';
 import * as agenda from './agenda.js';
 import * as ui from './ui.js';
@@ -68,6 +69,7 @@ export async function handleApi(db, env, deps, request) {
       if (nextDue) deps.schedule?.(nextDue);
       return json(out);
     }
+    if (path === '/api/phone/step' && method === 'POST') return json(await phone.step(db, env, deps, await body(request)));
     if (path === '/api/addressed' && method === 'POST') {
       const b = await body(request);
       try { return json({ addressed: await isAddressed(db, env, deps, b.text) }); } catch { return json({ addressed: false, error: true }); }

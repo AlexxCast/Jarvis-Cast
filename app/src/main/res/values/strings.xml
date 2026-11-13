@@ -1,3 +1,4 @@
 <resources>
     <string name="app_name">Jarvis Assistente</string>
+    <string name="accessibility_description">Permette a Jarvis di usare il telefono quando glielo chiedi a voce: legge lo schermo, tocca, scrive e scorre al posto tuo. Lavora solo durante un tuo comando, si ferma prima di inviare, pagare o eliminare qualcosa che non hai chiesto, e non scrive mai password.</string>
 </resources>

@@ -91,6 +91,10 @@ function runDeviceActions(list) {
     } else if (a.type === 'open_url' && /^https:\/\//i.test(a.url)) {
       if (native) nativeCall('openUrl', a.url); else window.open(a.url, '_blank', 'noopener');
     } else if (a.type === 'save_place') savePlaceHere(a.name);
+    else if (a.type === 'phone_task') {
+      if (!native) { toast('Per usare il telefono serve l\'app Android di Jarvis.'); continue; }
+      if (nativeCall('runPhoneTask', a.goal) === 'spento') toast('Attivi "Jarvis: usa il telefono" in Accessibilità (sezione Altro).');
+    }
   }
 }
 
@@ -617,6 +621,11 @@ function viewImpostazioni() {
       toggle('Ascolto continuo di "Jarvis" (anche a schermo spento)', 'listening', 'setListening'),
       toggle('Leggi le risposte ad alta voce', 'speakReplies', 'setSpeakReplies'),
       toggle('Lascia il microfono alle altre app (Gemini, vocali, chiamate)', 'micGuard', 'setMicGuard'),
+      h('div', { class: 'row wrap' },
+        h('p', { class: 'grow' }, nativeCall('phoneControlStatus') === true
+          ? 'Jarvis può usare il telefono al posto suo (tocca, scrive, legge). Si ferma prima di inviare, pagare o eliminare cose non richieste.'
+          : 'Per far usare il telefono a Jarvis ("scrivi a Marco che arrivo") attivi "Jarvis: usa il telefono" in Accessibilità.'),
+        nativeCall('phoneControlStatus') === true ? null : h('button', { class: 'btn', onclick: () => nativeCall('openPhoneControlSettings') }, 'Apri Accessibilità')),
       h('p', { class: 'muted' }, `App ${cfg.version || ''}. Quando un'altra app registra, Jarvis si mette in pausa e riprende da solo.`),
       h('div', { class: 'row wrap' },
         h('button', { class: 'btn', onclick: guard(async () => { store.state.legacyImported = null; await importLegacyIfNeeded(); render(); }) }, 'Reimporta i dati del telefono'),

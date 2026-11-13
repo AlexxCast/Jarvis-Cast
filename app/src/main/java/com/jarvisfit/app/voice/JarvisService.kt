@@ -32,6 +32,7 @@ import com.jarvisfit.app.data.Settings
 import com.jarvisfit.app.data.Store
 import com.jarvisfit.app.device.AppLauncher
 import com.jarvisfit.app.device.Places
+import com.jarvisfit.app.device.PhoneAgent
 import com.jarvisfit.app.net.Cloud
 import com.jarvisfit.app.ui.MainActivity
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -635,6 +636,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
                 when (type) {
                     "open_app" -> AppLauncher.open(this@JarvisService, value)
                     "open_url" -> AppLauncher.openUrl(this@JarvisService, value)
+                    "phone_task" -> PhoneAgent.start(this@JarvisService, value)
                     "save_place" -> when (Places.saveHere(this@JarvisService, value)) {
                         "permesso" -> notifyInfoPopup("Per salvare \"$value\" apri Jarvis e concedi la posizione (Consenti sempre).", 12)
                         "spento" -> notifyInfoPopup("Accendi la posizione del telefono e ripeti.", 12)

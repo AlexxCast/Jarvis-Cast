@@ -57,6 +57,11 @@ export function applyActions(db, actions, ctx) {
         const name = String(a.name || '').trim().slice(0, 60);
         if (!name) continue;
         out.device.push({ type: 'open_app', name });
+      } else if (a.type === 'phone_task') {
+        // Il telefono esegue l'obiettivo da solo, chiedendo al server una mossa alla volta.
+        const goal = String(a.goal || '').trim().slice(0, 1000);
+        if (!goal) continue;
+        out.device.push({ type: 'phone_task', goal });
       } else if (a.type === 'save_place') {
         // Le coordinate le conosce solo il telefono: salva lui la posizione attuale con questo nome.
         const name = String(a.name || '').trim().slice(0, 40);
