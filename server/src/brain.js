@@ -1,5 +1,6 @@
 // Il "cervello": mette insieme contesto, router dei modelli, memoria e azioni.
 
+import { WEATHER_WORDS, weatherContext } from './weather.js';
 import * as router from './router.js';
 import { CORE_PROMPT, buildMessages, parseReply } from './context.js';
 import { loadDiary, saveDiary, applyDietAction, dietBrief, dietContext, DIET_ACTIONS, DIET_KEYWORDS, DIET_RULES } from './diet.js';
@@ -37,7 +38,7 @@ export function addMessage(db, sessionId, role, text, at, meta = null) {
   db.run('INSERT INTO messages (session, role, text, at, meta) VALUES (?, ?, ?, ?, ?)', sessionId, role, text, at, meta ? JSON.stringify(meta) : null);
 }
 
-/** App installate sul telefono (le manda l'app Android), così "joytify" diventa Spotify. */
+/** App installate sul telefono (le manda l'app Android), così un nome storpiato diventa l'app vera. */
 export function appsPrompt(db) {
   const apps = kvGet(db, 'apps', []);
   if (!apps.length) return '';
@@ -130,6 +131,7 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
     moduleIndex: [mods.length ? 'MODULI DI MEMORIA ESISTENTI: ' + mods.map(m => `${m.name}${m.description ? ` (${m.description})` : ''} [${m.entries}]`).join('; ') : '',
       memory.topicsIndex(db, mods.map(m => m.name).slice(0, 30))].filter(Boolean).join('\n').slice(0, 2500),
     agenda: agendaOn ? agenda.agendaContext(db, tz) : '',
+    weather: WEATHER_WORDS.test(userText) ? await weatherContext(db, deps.fetchFn, userText) : '',
     summary: sess.summary,
     history,
     userText: `[${nowHuman(ms, tz)}${source === 'voice' ? ', a voce' : ''}] ${userText}`,

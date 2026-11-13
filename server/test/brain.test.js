@@ -476,3 +476,63 @@ test('nodi senza doppioni: nomi simili diventano un nodo solo, i sotto-argomenti
   assert.equal(g.children.find(c => c.label === 'joy-tyfi').parent, 't:intrattenimento/musica');
   assert.match(memory.topicsIndex(db, ['intrattenimento']), /intrattenimento: .*joy-tyfi/);
 });
+
+test('nomi di app storpiati dal riconoscimento vocale finiscono nel nodo dell\'app vera', () => {
+  const db = makeDb();
+  const at = '2026-11-13T19:00';
+  db.run("INSERT INTO kv (key, value) VALUES ('apps', ?)", JSON.stringify(['Instagram', 'Joytify', 'WhatsApp']));
+  // Doppioni salvati prima che Jarvis conoscesse le app.
+  for (const [name, label] of [['joy-tyfi', 'joy-tyfi'], ['joy-tifi', 'Joy Tifi'], ['app-joy-tyfiche', 'app joy-tyfiche'], ['musica', 'musica']]) {
+    db.run('INSERT INTO topics (module, name, label, last_used) VALUES (\'intrattenimento\', ?, ?, ?)', name, label, at);
+  }
+  memory.tidyTopics(db);
+  const labels = db.all("SELECT label FROM topics WHERE module = 'intrattenimento'").map(r => r.label).sort();
+  assert.deepEqual(labels, ['Joytify', 'musica']);
+  // Quelli nuovi entrano già col nome giusto.
+  memory.touchTopics(db, [{ area: 'intrattenimento', topic: 'pronuncia joy tify', parent: 'musica' }], at);
+  assert.equal(db.all("SELECT label FROM topics WHERE module = 'intrattenimento'").length, 2);
+  assert.equal(memory.appLabel(db, 'musica'), 'musica');
+  assert.equal(memory.appLabel(db, 'instagram'), 'Instagram');
+  // Parole vere che somigliano a un'app restano come sono.
+  db.run("UPDATE kv SET value = ? WHERE key = 'apps'", JSON.stringify(['Strava', 'Telegram', 'Calendario', 'Joytify']));
+  for (const w of ['strada', 'telegrafo', 'calendario esami']) assert.equal(memory.appLabel(db, w), w);
+  assert.equal(memory.appLabel(db, 'app joy thieve'), 'Joytify');
+});
+
+test('meteo: con una città nella frase Jarvis riceve i dati veri di Open-Meteo', async () => {
+  const db = makeDb();
+  const seen = [];
+  let system = '';
+  const fetchFn = async (url, init) => {
+    seen.push(String(url));
+    if (String(url).includes('geocoding-api')) return new Response(JSON.stringify({ results: [{ name: 'Klagenfurt', country: 'Austria', latitude: 46.62, longitude: 14.3 }] }));
+    if (String(url).includes('api.open-meteo.com')) return new Response(JSON.stringify({
+      current: { temperature_2m: 4.2, apparent_temperature: 1.1, weather_code: 61, wind_speed_10m: 9, relative_humidity_2m: 88 },
+      daily: { time: ['2026-11-12', '2026-11-13', '2026-11-14'], weather_code: [61, 3, 0], temperature_2m_min: [1, 0, -2], temperature_2m_max: [6, 5, 7], precipitation_probability_max: [80, 20, 0] },
+    }));
+    system = JSON.parse(init.body).messages[0].content;
+    return new Response(JSON.stringify({ choices: [{ message: { content: reply({ reply: 'A Klagenfurt piove, 4 gradi.' }) } }] }));
+  };
+  const out = await handleChat(db, ENV, deps(fetchFn), { text: 'che tempo fa a Klagenfurt domani?' });
+  assert.match(seen[0], /name=Klagenfurt/);
+  assert.match(system, /METEO REALE ADESSO A KLAGENFURT, AUSTRIA.*pioggia leggera, 4°C/);
+  assert.match(system, /domani: coperto, 0–5°C, pioggia 20%/);
+  assert.equal(out.reply, 'A Klagenfurt piove, 4 gradi.');
+  // La volta dopo, senza città, usa l'ultima chiesta senza rifare la ricerca.
+  seen.length = 0;
+  await handleChat(db, ENV, deps(fetchFn), { text: 'e domani piove?' });
+  assert.ok(!seen.some(u => u.includes('geocoding-api')));
+  assert.match(system, /KLAGENFURT/);
+});
+
+test('meteo: senza luogo noto chiede la città, e i messaggi senza meteo non chiamano il servizio', async () => {
+  const db = makeDb();
+  const calls = [];
+  const fetchFn = async (url, init) => { calls.push(String(url)); return new Response(JSON.stringify({ choices: [{ message: { content: reply({}) } }] })); };
+  await handleChat(db, ENV, deps(fetchFn), { text: 'ciao come va' });
+  assert.ok(calls.every(u => !u.includes('open-meteo')));
+  let system = '';
+  const f2 = async (url, init) => { system = JSON.parse(init.body).messages[0].content; return new Response(JSON.stringify({ choices: [{ message: { content: reply({}) } }] })); };
+  await handleChat(db, ENV, deps(f2), { text: 'che tempo fa?' });
+  assert.match(system, /METEO: non so ancora dove/);
+});
