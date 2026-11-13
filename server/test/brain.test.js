@@ -7,6 +7,7 @@ import { loadDiary, saveDiary, EMPTY_DIARY, mergeLegacy } from '../src/diet.js';
 import * as memory from '../src/memory.js';
 import * as agenda from '../src/agenda.js';
 import * as jobs from '../src/jobs.js';
+import * as ui from '../src/ui.js';
 import { handleApi } from '../src/api.js';
 import { localToMs, nowIso } from '../src/clock.js';
 import { makeDb, fakeFetch, deps, reply, T0 } from './helpers.js';
@@ -309,4 +310,27 @@ test('sfera: Sport è un ramo a parte, con un nodo per tipo di attività', async
   const sport = g.branches.find(b => b.id === 'sport');
   assert.deepEqual(sport.children.map(c => c.label), ['tecnica di corsa', 'corsa · 2 volte, ultima 11-12', 'palestra · una volta, ultima 11-11']);
   assert.equal(g.branches.filter(b => b.id === 'sport').length, 1);
+});
+
+test('personalizzare l\'app: "voglio vedere sempre il deficit" fissa il riquadro, e si può togliere', async () => {
+  const db = seeded();
+  const f = fakeFetch((url, body, n) => n === 1
+    ? reply({ reply: 'Fatto, signore: lo vedrà sempre nella schermata principale.', actions: [{ type: 'ui_pin', widget: 'deficit_cumulativo', where: 'jarvis' }, { type: 'ui_note', text: 'Niente dolci dopo cena', where: 'oggi' }] })
+    : reply({ reply: 'ok' }));
+  const d = deps(f);
+  const out = await handleChat(db, ENV, d, { text: 'voglio vedere sempre il deficit accumulato' });
+  assert.equal(out.layoutChanged, true);
+  assert.match(systemOf(f.calls[0]), /PERSONALIZZARE L'APP[\s\S]*deficit_cumulativo/);
+  const state = await (await handleApi(db, ENV, d, new Request('https://x/api/state'))).json();
+  assert.deepEqual(state.layout.jarvis, [{ type: 'deficit_cumulativo' }]);
+  assert.equal(state.layout.oggi[0].text, 'Niente dolci dopo cena');
+  // Le istruzioni per l'interfaccia entrano solo quando servono.
+  await handleChat(db, ENV, d, { text: 'ho mangiato una mela', sessionId: 's2' });
+  assert.doesNotMatch(systemOf(f.calls[1]), /PERSONALIZZARE L'APP/);
+  // Togliere a mano dalla schermata, con la ✕.
+  const noteId = state.layout.oggi[0].id;
+  const res = await (await handleApi(db, ENV, d, new Request('https://x/api/actions', { method: 'POST', body: JSON.stringify({ actions: [{ type: 'ui_unpin', widget: 'deficit_cumulativo', where: 'jarvis' }, { type: 'ui_unpin', widget: noteId, where: 'oggi' }] }) }))).json();
+  assert.deepEqual(res.state.layout, { jarvis: [], oggi: [] });
+  // Riquadri inventati vengono ignorati.
+  assert.equal(ui.applyUiAction(db, { type: 'ui_pin', widget: 'grafico_magico' }), false);
 });
