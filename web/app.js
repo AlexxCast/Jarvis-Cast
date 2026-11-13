@@ -247,6 +247,39 @@ function pickPhoto(camera = false) {
   input.click();
 }
 
+// ------------------------------------------------------------------ riquadri scelti da Jarvis
+
+/** Contenuto di un riquadro: [titolo, valore grande, riga piccola]. */
+function widgetData(w) {
+  const s = store.state, t = s.today, b = s.balance;
+  const kg = (v) => (v >= 0 ? '-' : '+') + Math.abs(v).toFixed(1) + ' kg';
+  switch (w.type) {
+    case 'deficit_cumulativo': return b ? ['Deficit accumulato', fmt(b.cumulativeDeficitVsMaintenance) + ' kcal', `≈ ${kg(b.estimatedWeightLossKg)} dal ${dateLabel(b.startDate)}`] : ['Deficit accumulato', '—', 'completa il profilo'];
+    case 'calorie_oggi': return ['Calorie oggi', `${fmt(t.eaten)} / ${fmt(t.target)}`, t.remaining >= 0 ? `restano ${fmt(t.remaining)} kcal` : `oltre di ${fmt(-t.remaining)} kcal`];
+    case 'macro_oggi': return ['Macro oggi', `P${t.protein} C${t.carbs} G${t.fat}`, `proteine obiettivo ${t.proteinTarget} g`];
+    case 'passi_oggi': return ['Passi oggi', fmt(t.steps), t.burned ? `${fmt(t.burned)} kcal di attività` : 'nessuna attività'];
+    case 'peso': {
+      const ws = [...(s.diary.weights || [])].sort((a, c) => (a.date < c.date ? -1 : 1));
+      const last = ws[ws.length - 1];
+      return ['Peso', last ? last.kg + ' kg' : '—', last && ws.length > 1 ? `${kg(ws[0].kg - last.kg)} dal ${dateLabel(ws[0].date)}` : 'nessuna pesata'];
+    }
+    case 'deficit_medio': return b ? ['Deficit medio', fmt(b.avgDeficitPerDay) + ' kcal/g', `media netta ${fmt(b.avgNetKcalPerDay)} kcal`] : ['Deficit medio', '—', ''];
+    case 'promemoria': { const r = s.reminders[0]; return ['Promemoria', r ? r.text : 'nessuno', r ? r.due.replace('T', ' ') : '']; }
+    case 'compiti': { const run = s.jobs.filter(j => j.status !== 'done' && j.status !== 'failed'); return ['Compiti', run.length ? String(run.length) : 'nessuno', run[0]?.title || '']; }
+    case 'nota': return [w.title || 'Nota', '', w.text];
+    default: return null;
+  }
+}
+function widgets(place) {
+  const list = (store.state?.layout?.[place] || []).map(w => [w, widgetData(w)]).filter(([, d]) => d);
+  if (!list.length) return null;
+  return h('div', { class: 'widgets ' + place }, list.map(([w, [title, value, line]]) => h('div', { class: 'widget' },
+    h('span', { class: 'wt' }, title),
+    value ? h('b', { class: 'num' }, value) : null,
+    line ? h('span', { class: 'muted small' }, line) : null,
+    h('button', { class: 'wx', 'aria-label': 'Togli ' + title, onclick: guard(() => act({ type: 'ui_unpin', widget: w.type === 'nota' ? w.id : w.type, where: place })) }, '×'))));
+}
+
 function viewChat() {
   syncCompact();
   // La conversazione completa si apre solo se richiesta; altrimenti sotto la sfera c'è solo l'ultima risposta.
@@ -272,7 +305,7 @@ function viewChat() {
     h('button', { class: 'btn icon' + (store.chatOpen ? ' on' : ''), 'aria-label': store.chatOpen ? 'Chiudi la chat' : 'Apri la chat', 'aria-pressed': store.chatOpen ? 'true' : 'false', onclick: () => { store.chatOpen = !store.chatOpen; render(); if (store.chatOpen) scrollChat(); } }, icon(ICONS.chat)),
     ta,
     h('button', { class: 'btn primary icon', 'aria-label': 'Invia', disabled: store.sending, onclick: () => { const v = ta.value; ta.value = ''; send(v); } }, icon(ICONS.send)));
-  return store.chatOpen ? [orb.el, list, composer] : [orb.el, caption, composer];
+  return store.chatOpen ? [orb.el, list, composer] : [widgets('jarvis'), orb.el, caption, composer];
 }
 
 // ------------------------------------------------------------------ oggi
@@ -288,6 +321,7 @@ function viewOggi() {
   const acts = d.activities.filter(a => a.date === t.date);
   const kcalOf = (m) => (m.items || []).reduce((x, i) => x + (Number(i.kcal) || 0), 0);
   return [
+    widgets('oggi'),
     d.activeRecipeSession ? h('div', { class: 'banner' }, h('h2', {}, '🍳 In cucina: ' + d.activeRecipeSession.title),
       h('p', { class: 'pre' }, d.activeRecipeSession.currentStep || d.activeRecipeSession.ingredientsNeeded),
       h('div', { class: 'row', style: 'margin-top:8px' }, h('button', { class: 'btn', onclick: guard(() => act({ type: 'clear_recipe_session' })) }, 'Ho finito'))) : null,

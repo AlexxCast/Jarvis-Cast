@@ -6,6 +6,7 @@ import { loadDiary, saveDiary, mergeLegacy, patchProfile, DIET_ACTIONS } from '.
 import * as N from './nutrition.js';
 import * as memory from './memory.js';
 import * as agenda from './agenda.js';
+import * as ui from './ui.js';
 import * as jobs from './jobs.js';
 import * as router from './router.js';
 import { sanitizeModels, DEFAULT_MODELS, PROVIDERS } from './models.js';
@@ -38,6 +39,7 @@ function statePayload(db, ms, tz) {
     balance: complete ? (({ dailyProgressList, ...rest }) => rest)(N.cumulativeBalance(d, today)) : null,
     diary: d, reminders: agenda.listReminders(db, tz), jobs: jobs.listJobs(db),
     legacyImported: kvGet(db, 'legacyImported', null),
+    layout: ui.loadLayout(db),
   };
 }
 
@@ -76,7 +78,7 @@ export async function handleApi(db, env, deps, request) {
     if (path === '/api/actions' && method === 'POST') {
       // Modifiche fatte a mano dall'interfaccia: stesse azioni che usa il modello.
       const b = await body(request);
-      const actions = (Array.isArray(b.actions) ? b.actions : []).filter(a => a && (DIET_ACTIONS.has(a.type) || ['remember', 'forget', 'add_reminder', 'done_reminder'].includes(a.type)));
+      const actions = (Array.isArray(b.actions) ? b.actions : []).filter(a => a && (DIET_ACTIONS.has(a.type) || ['remember', 'forget', 'add_reminder', 'done_reminder'].includes(a.type) || ui.UI_ACTIONS.has(a.type)));
       const done = applyActions(db, actions, { today: todayOf(ms, tz), nowIso: nowIsoOf(ms, tz), ms, tz, hadPhoto: false });
       const nextDue = agenda.fireDue(db, ms, tz);
       if (nextDue) deps.schedule?.(nextDue);
