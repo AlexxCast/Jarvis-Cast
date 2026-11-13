@@ -76,6 +76,7 @@ export function createOrb() {
   let branches = [];
   let focus = null;
   let onPick = null;
+  let tint = [57, 255, 20], tintA = 0;   // colore dell'umore e quanto pesa (0..1)
   let angle = 0.4, tilt = 0.35, last = 0, spawn = 0, raf = 0, w = 0, hgt = 0, spinRing = 0;
 
   function resize() {
@@ -165,7 +166,7 @@ export function createOrb() {
     // Alone attorno a Jarvis
     const halo = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.min(w, hgt) * 0.5);
     halo.addColorStop(0, `rgba(57,255,20,${0.14 * cur.glow})`);
-    halo.addColorStop(0.5, `rgba(34,160,60,${0.05 * cur.glow})`);
+    halo.addColorStop(0.45, `rgba(${tint.join(',')},${(0.05 + tintA * 0.16) * cur.glow})`);
     halo.addColorStop(1, 'rgba(5,15,5,0)');
     ctx.fillStyle = halo;
     ctx.fillRect(0, 0, w, hgt);
@@ -255,6 +256,7 @@ export function createOrb() {
     const heat = center.heat;
     const g = ctx.createRadialGradient(center.sx, center.sy, 0, center.sx, center.sy, cr * 3.2);
     g.addColorStop(0, `rgba(57,255,20,${(0.35 + heat * 0.2) * cur.glow * fadeCenter})`);
+    g.addColorStop(0.55, `rgba(${tint.join(',')},${tintA * 0.35 * cur.glow * fadeCenter})`);
     g.addColorStop(1, 'rgba(57,255,20,0)');
     ctx.fillStyle = g;
     ctx.beginPath(); ctx.arc(center.sx, center.sy, cr * 3.2, 0, Math.PI * 2); ctx.fill();
@@ -313,6 +315,8 @@ export function createOrb() {
 
   return {
     el, setState,
+    /** Sfumatura dell'umore: colore [r,g,b] e intensità 0..1 (resta sempre una velatura, il verde domina). */
+    setTint(rgb, amount) { tint = rgb.map(v => Math.round(v)); tintA = Math.max(0, Math.min(1, amount)); },
     /** I rami da disegnare: [{ id, label, kind, children: [{ id, label }] }] (da /api/graph). Quelli vuoti non si vedono. */
     setGraph(list) {
       const old = new Map(branches.map(b => [b.id, b]));

@@ -8,6 +8,7 @@ import * as memory from './memory.js';
 import * as agenda from './agenda.js';
 import * as ui from './ui.js';
 import * as coder from './coder.js';
+import * as mood from './mood.js';
 import * as jobs from './jobs.js';
 import * as router from './router.js';
 import { sanitizeModels, DEFAULT_MODELS, PROVIDERS } from './models.js';
@@ -41,6 +42,7 @@ function statePayload(db, ms, tz, env = {}) {
     diary: d, reminders: agenda.listReminders(db, tz), jobs: jobs.listJobs(db),
     legacyImported: kvGet(db, 'legacyImported', null),
     layout: ui.loadLayout(db),
+    mood: mood.current(db, ms),
     code: coder.enabled(env) ? coder.listProposals(db).filter(x => ['working', 'ready'].includes(x.status)) : null,
   };
 }

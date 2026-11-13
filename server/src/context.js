@@ -34,7 +34,7 @@ AZIONI DISPONIBILI (campo "type"):
 - update_recipe_session {title, current_step, ingredients_needed, notes} · clear_recipe_session {}
 - save_recipe {title, items, instructions, total_kcal, total_protein, total_carbs, total_fat} · delete_recipe {id | title}
 - remember {module, text, description: descrizione del modulo se è nuovo} · forget {id}
-- add_reminder {text, due: "yyyy-MM-ddTHH:mm"} · done_reminder {id}
+- add_reminder {text, due: "yyyy-MM-ddTHH:mm" (la prima volta), repeat: ""|giorno|feriali|settimana|mese} · done_reminder {id} (per un promemoria che si ripete lo ferma per sempre)
 - start_job {title, goal: descrizione completa e autosufficiente del lavoro da svolgere}
 - code_change {request} · code_approve {id} · code_discard {id}
 - ui_pin {widget, where} · ui_unpin {widget | id, where} · ui_note {text, title, where} · ui_reset {}
@@ -118,6 +118,7 @@ export function parseReply(raw) {
     expectReply: obj.expect_reply === true,
     card: typeof obj.card === 'string' ? obj.card.trim() : '',
     actions: Array.isArray(obj.actions) ? obj.actions.filter(a => a && typeof a.type === 'string') : [],
+    mood: obj.mood && typeof obj.mood === 'object' && typeof obj.mood.emozione === 'string' ? { emozione: obj.mood.emozione.slice(0, 30), intensita: Number(obj.mood.intensita) || 0.4 } : null,
     topics: Array.isArray(obj.topics) ? obj.topics.filter(t => t && typeof t.area === 'string' && t.area.trim()).slice(0, 3).map(t => ({ area: t.area.trim().slice(0, 40), topic: String(t.topic || '').trim().slice(0, 60) })) : [],
     parsed: true,
   };

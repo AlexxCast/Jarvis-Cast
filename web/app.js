@@ -26,6 +26,21 @@ function orbState() {
 }
 function updateOrb() { orb.setState(orbState()); }
 
+// Umore di Jarvis: gioia → giallo/arancione, tensione → rosso/viola, calma → azzurro/blu.
+const MOOD_RGB = { gioia: [255, 170, 40], tensione: [210, 40, 150], calma: [40, 150, 255] };
+const MOOD_BASE = { gioia: 0.45, tensione: 0.15, calma: 0.55 };
+function applyMood(m) {
+  if (!m) return;
+  const w = Object.fromEntries(Object.keys(MOOD_RGB).map(k => [k, Math.max(0.02, (m[k] || 0) - MOOD_BASE[k] + 0.12)]));
+  const sum = Object.values(w).reduce((a, b) => a + b, 0);
+  const rgb = [0, 1, 2].map(i => Object.keys(w).reduce((a, k) => a + MOOD_RGB[k][i] * w[k] / sum, 0));
+  const strength = Math.min(1, Math.max(...Object.keys(MOOD_RGB).map(k => Math.abs((m[k] || 0) - MOOD_BASE[k]))) * 2.5 + 0.15);
+  const root = document.documentElement.style;
+  root.setProperty('--mood', rgb.map(Math.round).join(','));
+  root.setProperty('--mood-a', (0.05 + strength * 0.13).toFixed(3));
+  orb.setTint(rgb, strength);
+}
+
 // I rami della sfera sono i moduli di memoria di Jarvis (più dieta, agenda e compiti).
 let lastLit = '';
 async function loadGraph(lightUp = false) {
@@ -136,6 +151,7 @@ function logout(clear = true) {
 
 async function refresh() {
   store.state = await api('GET', '/state');
+  applyMood(store.state.mood);
   store.error = '';
 }
 async function loadHistory() {
@@ -419,7 +435,7 @@ function viewAttivita() {
         s.reminders = (await api('POST', '/reminders', { text: text.value, due: due.value })).reminders; render();
       }) }, 'Aggiungi')),
       s.reminders.length ? h('div', { class: 'list' }, s.reminders.map(r => h('div', { class: 'item' },
-        h('div', { class: 'grow' }, h('div', {}, r.text), h('div', { class: 'muted num' }, new Date(r.dueMs).toLocaleString('it-IT', { dateStyle: 'medium', timeStyle: 'short' }))),
+        h('div', { class: 'grow' }, h('div', {}, r.text), h('div', { class: 'muted num' }, new Date(r.dueMs).toLocaleString('it-IT', { dateStyle: 'medium', timeStyle: 'short' }) + ({ giorno: ' · ogni giorno', feriali: ' · dal lunedì al venerdì', settimana: ' · ogni settimana', mese: ' · ogni mese' }[r.repeat] || ''))),
         h('button', { class: 'btn icon ghost danger', 'aria-label': 'Elimina promemoria', onclick: guard(async () => { s.reminders = (await api('DELETE', '/reminders/' + r.id)).reminders; render(); }) }, icon(ICONS.trash)))))
         : h('p', { class: 'empty' }, 'Nessun promemoria. Può anche dire: "Jarvis, ricordami alle 18 di chiamare il dentista".')),
     h('div', { class: 'card' }, h('h2', {}, 'Compiti in background'),
@@ -594,7 +610,7 @@ function render() {
   const title = { chat: 'Jarvis', oggi: 'Oggi', cucina: 'Cucina', attivita: 'Attività', altro: 'Altro' }[store.tab];
   app.append(h('header', { class: 'top' }, h('h1', {}, title),
     native ? h('span', { class: 'muted small' }, listening ? 'in ascolto' : 'ascolto spento') : null, native ? h('span', { class: 'dot' + (listening ? ' on' : '') }) : null));
-  if (store.tab === 'chat') app.append(...viewChat());
+  if (store.tab === 'chat') app.append(...viewChat().filter(Boolean));
   else app.append(h('main', {}, { oggi: viewOggi, cucina: viewCucina, attivita: viewAttivita, altro: viewAltro }[store.tab]()));
   app.append(h('nav', { class: 'tabs', 'aria-label': 'Sezioni' }, TABS.map(([id, label]) =>
     h('button', { 'aria-current': store.tab === id ? 'page' : null, onclick: () => go(id) }, icon(ICONS[id]), label))));
