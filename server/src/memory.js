@@ -89,20 +89,20 @@ export function markUsed(db, ids, nowIso) {
  * La "mappa" di Jarvis per la sfera: ogni modulo è un ramo, i suoi ricordi più usati sono le foglie.
  * Più dati fissi: dieta e agenda (sempre presenti), compiti in corso.
  */
-export function graph(db, { perModule = 8 } = {}) {
+export function graph(db, { perModule = 24 } = {}) {
   const branches = [
     { id: 'dieta', label: 'Dieta', kind: 'core', children: [] },
     { id: 'sport', label: 'Sport', kind: 'core', children: [] },
-    { id: 'agenda', label: 'Agenda', kind: 'core', children: db.all('SELECT id, text FROM reminders WHERE done = 0 ORDER BY due LIMIT 8').map(r => ({ id: 'r:' + r.id, label: r.text })) },
+    { id: 'agenda', label: 'Agenda', kind: 'core', children: db.all('SELECT id, text FROM reminders WHERE done = 0 ORDER BY due LIMIT 24').map(r => ({ id: 'r:' + r.id, label: r.text })) },
   ];
-  const jobs = db.all("SELECT id, title, status FROM jobs ORDER BY created DESC LIMIT 8");
+  const jobs = db.all("SELECT id, title, status FROM jobs ORDER BY created DESC LIMIT 24");
   if (jobs.length) branches.push({ id: 'compiti', label: 'Compiti', kind: 'core', children: jobs.map(j => ({ id: 'j:' + j.id, label: j.title, status: j.status })) });
   for (const m of listModules(db)) {
     const topics = db.all('SELECT name, label FROM topics WHERE module = ? ORDER BY uses DESC, last_used DESC LIMIT ?', m.name, perModule)
       .map(t => ({ id: `t:${m.name}/${t.name}`, label: t.label, kind: 'topic' }));
     const rows = db.all('SELECT id, text FROM memories WHERE module = ? ORDER BY uses DESC, id DESC LIMIT ?', m.name, Math.max(2, perModule - topics.length))
       .map(r => ({ id: 'm:' + r.id, label: r.text }));
-    const children = [...topics, ...rows].slice(0, perModule + 2);
+    const children = [...topics, ...rows].slice(0, perModule + 4);
     // Un'area con lo stesso nome di un ramo fisso (es. "dieta") si aggiunge a quel ramo.
     const fixed = branches.find(b => b.id === m.name && b.kind === 'core');
     if (fixed) { fixed.children.push(...children); continue; }
@@ -137,20 +137,24 @@ export function noteUse(db, ids, ms) {
 }
 const decayed = (u, ms) => u.score * Math.pow(0.5, Math.max(0, ms - u.at) / (HALF_LIFE_DAYS * 86_400_000));
 
-/** Livello 0 (centro) .. 1 (esterno) bilanciando mole di informazioni, frequenza d'uso e quanto è personale. */
+/** Livello da 0 (centro) in su, bilanciando mole di informazioni, frequenza d'uso e quanto è personale.
+ * Non c'è un tetto: un ramo che continua a crescere scende su gusci sempre più esterni e la sfera si allarga. */
 export function levelOf({ size, use, personal }) {
-  const heavy = Math.min(1, Math.log10(1 + Math.max(0, size)) / 2.3);   // ~200 elementi = pesantissimo
+  const heavy = Math.log10(1 + Math.max(0, size)) / 2.3;                // ~200 elementi = 1, ~40.000 = 2
   const freq = 1 - Math.exp(-Math.max(0, use) / 4);                      // ~10 usi recenti = frequentissimo
-  return Math.round(Math.max(0, Math.min(1, 0.4 * heavy + 0.3 * (1 - freq) + 0.3 * (1 - personal))) * 100) / 100;
+  return Math.round(Math.max(0, 0.4 * heavy + 0.3 * (1 - freq) + 0.3 * (1 - personal)) * 100) / 100;
 }
 
-/** Aggiunge a ogni ramo level (0..1) e ring (0 interno, 1 medio, 2 esterno). sizes: {id: numero di elementi}. */
+/** Guscio di un livello: 0 interno, 1 medio, 2 esterno, poi 3, 4... man mano che Jarvis cresce. */
+export const ringOf = (level) => (level < 0.4 ? 0 : level < 0.62 ? 1 : 2 + Math.floor((level - 0.62) / 0.3));
+
+/** Aggiunge a ogni ramo level (da 0 in su) e ring. sizes: {id: numero di elementi}. */
 export function addLevels(db, branches, sizes, ms) {
   const use = kvGet(db, 'branchUse', {});
   for (const b of branches) {
     const size = sizes[b.id] ?? (b.entries || 0) + (b.children || []).length;
     b.level = levelOf({ size, use: use[b.id] ? decayed(use[b.id], ms) : 0, personal: personalOf(b) });
-    b.ring = b.level < 0.4 ? 0 : b.level < 0.62 ? 1 : 2;
+    b.ring = ringOf(b.level);
   }
   return branches;
 }

@@ -143,7 +143,7 @@ export async function handleApi(db, env, deps, request) {
     if (path === '/api/graph' && method === 'GET') {
       // Foglie della dieta: gli ultimi pasti e allenamenti registrati.
       const g = memory.graph(db), d = loadDiary(db);
-      const meals = (d.meals || []).slice(-6).reverse().map(m => ({ id: 'meal:' + m.id, label: `${m.date.slice(5)} ${m.meal}: ${m.description || (m.items || []).map(i => i.name).filter(Boolean).slice(0, 3).join(', ')}` }));
+      const meals = (d.meals || []).slice(-16).reverse().map(m => ({ id: 'meal:' + m.id, label: `${m.date.slice(5)} ${m.meal}: ${m.description || (m.items || []).map(i => i.name).filter(Boolean).slice(0, 3).join(', ')}` }));
       const dieta = g.branches.find(b => b.id === 'dieta');
       dieta.children = [...dieta.children, ...meals];
       // Sport: un nodo per ogni tipo di attività (corsa, palestra...), con quante volte e l'ultima data.
@@ -155,7 +155,7 @@ export async function handleApi(db, env, deps, request) {
         kinds.set(name, { n: k.n + 1, last: a.date > k.last ? a.date : k.last });
       }
       const sport = g.branches.find(b => b.id === 'sport');
-      sport.children = [...sport.children, ...[...kinds].sort((a, b) => b[1].n - a[1].n).slice(0, 8)
+      sport.children = [...sport.children, ...[...kinds].sort((a, b) => b[1].n - a[1].n).slice(0, 16)
         .map(([name, k]) => ({ id: 'sport:' + name, label: `${name} · ${k.n === 1 ? "una volta" : k.n + " volte"}, ultima ${k.last.slice(5)}` }))];
       const sizes = { dieta: (d.meals || []).length, sport: (d.activities || []).length + (d.weights || []).length,
         agenda: db.get('SELECT COUNT(*) AS n FROM reminders WHERE done = 0').n, compiti: db.get('SELECT COUNT(*) AS n FROM jobs').n };

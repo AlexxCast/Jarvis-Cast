@@ -9,7 +9,7 @@ const ZOOM = 2;           // ingrandimento quando un ramo è aperto
 const SPREAD = 0.42;      // distanza (in radianti) delle foglie dal loro ramo, sulla superficie
 const STEPS = 7;          // punti per tratto di pista curva
 const SHELL_MIN = 0.42;   // raggio del guscio più interno (informazioni personali, leggere, frequenti)
-const RINGS = [0.5, 0.75, 1]; // gusci disegnati: interno, medio, esterno
+const LEVEL_STEP = 1 - SHELL_MIN; // raggio guadagnato per ogni unità di livello (non c'è un massimo)
 
 const MODES = {
   idle:      { spin: 0.12, rate: 1.2, glow: 0.6,  breathe: 0.03, label: 'Pronto' },
@@ -35,7 +35,9 @@ function surfaceTrace(a, b, r = 1) {
 }
 
 /** Raggio del guscio di un ramo: livello 0 = vicino a Jarvis, 1 = superficie esterna. */
-const shellOf = (b) => SHELL_MIN + (Number.isFinite(b.level) ? Math.max(0, Math.min(1, b.level)) : 0.6) * (1 - SHELL_MIN);
+const shellOf = (b) => SHELL_MIN + (Number.isFinite(b.level) ? Math.max(0, b.level) : 0.6) * LEVEL_STEP;
+/** Centro di ogni guscio da disegnare: 0 interno, 1 medio, 2 esterno, poi uno ogni 0.3 di livello. */
+const ringLevel = (k) => (k === 0 ? 0.2 : k === 1 ? 0.51 : 0.77 + (k - 2) * 0.3);
 
 /** Dispone i rami: nodo sulla sfera per ogni argomento, foglie attorno, piste verso il centro e tra i nodi. */
 function layoutBranches(list, old) {
@@ -51,11 +53,13 @@ function layoutBranches(list, old) {
     // Dal centro: dritto verso l'esterno, poi una curva a gomito fino al nodo (come una pista).
     const bend = { ...onSphere(lat + (i % 2 ? 0.25 : -0.25), lon - 0.2, r * 0.55), rad: r * 0.55 };
     const spoke = [{ x: 0, y: 0, z: 0 }, bend, hub];
-    const kids = (b.children || []).slice(0, 10);
+    const kids = (b.children || []).slice(0, 32);
     const leaves = kids.map((c, k) => {
-      const a = (k / Math.max(1, kids.length)) * Math.PI * 2 + i * 0.7;
+      const a = ((k % 10) / Math.min(10, Math.max(1, kids.length))) * Math.PI * 2 + i * 0.7 + Math.floor(k / 10) * 0.31;
       // Stessa distanza a schermo su ogni guscio: sui gusci piccoli l'angolo è più ampio.
-      const dist = Math.min(0.75, SPREAD / Math.sqrt(r)) * (k % 2 ? 1.25 : 1);
+      // Tante foglie: si dispongono su più giri attorno al ramo, sempre più fitti.
+      const turn = Math.floor(k / 10);
+      const dist = Math.min(0.75, SPREAD / Math.sqrt(r)) * (k % 2 ? 1.25 : 1) * (1 + turn * 0.45);
       const llat = clampLat(lat + Math.sin(a) * dist);
       const llon = lon + (Math.cos(a) * dist) / Math.max(0.35, Math.cos(llat));
       const before = prev?.leaves.find(l => l.id === c.id);
@@ -88,6 +92,7 @@ export function createOrb() {
   // l'esterno come un'onda; le emozioni secondarie colorano alcune zone e una parte degli impulsi.
   const BASE = [60, 205, 80];
   let tintFrom = BASE, tintTo = BASE, tintA = 0, wave = 9, parts = [];
+  let fit = 1, rings = 3, maxRad = 1;                // la sfera si allontana quando i gusci crescono
   let angle = 0.4, tilt = 0.35, last = 0, spawn = 0, raf = 0, w = 0, hgt = 0, spinRing = 0;
 
   function resize() {
@@ -155,7 +160,7 @@ export function createOrb() {
       tilt += (0.35 - tilt) * (1 - Math.exp(-dt * 2));
     }
     spinRing += dt * (mode === 'thinking' ? 5 : 0.8) * slow;
-    if (wave < 2) wave += dt * 0.55 * (reduced ? 4 : 1);
+    if (wave < maxRad + 0.6) wave += dt * 0.55 * (reduced ? 4 : 1);
     const time = now / 1000;
 
     // Respiro del nodo centrale: lento in attesa, ritmo di voce quando parla, onde quando ascolta.
@@ -173,7 +178,9 @@ export function createOrb() {
     }
 
     const compact = hgt < 170;
-    const R = Math.min(w, hgt) * 0.36 * cur.zoom;
+    // Più gusci = sfera più grande: la camera si allontana piano per farla stare tutta.
+    fit += (1 / Math.max(1, ...branches.map(b => b.hub.rad * 1.08), 1) - fit) * camEase;
+    const R = Math.min(w, hgt) * 0.36 * cur.zoom * fit;
     const cx = w / 2, cy = hgt / 2;
     const ca = Math.cos(angle), sa = Math.sin(angle), ct = Math.cos(tilt), st = Math.sin(tilt);
     const project = (p) => {
@@ -205,16 +212,17 @@ export function createOrb() {
     // Gusci dei livelli: cerchi sottili tratteggiati, interno, medio ed esterno.
     if (!compact) {
       ctx.setLineDash([2, 6]); ctx.lineWidth = 1;
-      for (const r of RINGS) {
+      for (let k = 0; k < rings; k++) {
+        const r = SHELL_MIN + ringLevel(k) * LEVEL_STEP;
         ctx.strokeStyle = `rgba(${tintAt(r).map(Math.round).join(',')},${0.1 * cur.glow})`;
         ctx.beginPath(); ctx.arc(center.sx, center.sy, R * r * 0.95, 0, Math.PI * 2); ctx.stroke();
       }
       ctx.setLineDash([]);
     }
     // L'onda di un cambio d'umore che si allarga dal centro.
-    if (wave < 1.3) {
+    if (wave < maxRad + 0.3) {
       ctx.lineWidth = 2;
-      ctx.strokeStyle = `rgba(${tintTo.map(Math.round).join(',')},${(1.3 - wave) * 0.35 * cur.glow})`;
+      ctx.strokeStyle = `rgba(${tintTo.map(Math.round).join(',')},${(1 - wave / (maxRad + 0.3)) * 0.35 * cur.glow})`;
       ctx.beginPath(); ctx.arc(center.sx, center.sy, R * wave * 0.95, 0, Math.PI * 2); ctx.stroke();
     }
 
@@ -298,7 +306,7 @@ export function createOrb() {
       ring(h, r, h.heat, ((0.5 + h.d * 0.5) * cur.glow + h.heat * 0.4) * b.fade, true, b.rgb);
       ctx.fillStyle = color(h.heat, (0.6 + h.heat * 0.4) * b.fade, b.rgb);
       ctx.beginPath(); ctx.arc(h.sx, h.sy, r * 0.4, 0, Math.PI * 2); ctx.fill();
-      if (!compact && b.fade > 0.3 && (focused === b || (!focused && (h.d > 0.35 || h.heat > 0.2)))) {
+      if (!compact && b.fade > 0.3 && (focused === b || (!focused && (h.d > (branches.length > 12 ? 0.7 : 0.35) || h.heat > 0.2)))) {
         ctx.font = focused === b ? '600 14px system-ui, sans-serif' : '600 11px system-ui, sans-serif';
         ctx.textAlign = 'center';
         ctx.fillStyle = `rgba(190,255,180,${focused === b ? 0.95 : Math.min(1, (0.3 + h.d * 0.5 + h.heat * 0.5) * cur.glow) * b.fade})`;
@@ -375,7 +383,7 @@ export function createOrb() {
     setTint(rgb, amount, list = []) {
       const next = rgb.map(v => Math.round(v));
       if (next.some((v, i) => Math.abs(v - tintTo[i]) > 6)) {
-        tintFrom = mix(tintFrom, tintTo, Math.max(0, Math.min(1, wave / 1.3))); // da dove era arrivata l'onda
+        tintFrom = mix(tintFrom, tintTo, Math.max(0, Math.min(1, wave / (maxRad + 0.3)))); // da dove era arrivata l'onda
         tintTo = next; wave = 0;
       }
       tintA = Math.max(0, Math.min(1, amount));
@@ -386,6 +394,8 @@ export function createOrb() {
       const old = new Map(branches.map(b => [b.id, b]));
       const shown = (Array.isArray(list) ? list : []).filter(b => (b.children || []).length || b.kind !== 'core');
       branches = layoutBranches(shown, old);
+      rings = Math.max(3, ...branches.map(b => (Number.isFinite(b.ring) ? b.ring : 1) + 1));
+      maxRad = Math.max(1, ...branches.map(b => b.hub.rad));
       if (focus && !branches.some(b => b.id === focus)) focus = null;
       setLabel();
     },
