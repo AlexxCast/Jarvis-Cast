@@ -291,7 +291,7 @@ test('sfera: ogni argomento di cui si parla diventa un nodo, sotto la sua area',
 
 test('parseReply: argomenti ripuliti e al massimo tre', () => {
   const r = parseReply(JSON.stringify({ reply: 'ok', topics: [{ area: 'a', topic: 'x' }, { area: '' }, 'no', { area: 'b' }, { area: 'c' }, { area: 'd' }] }));
-  assert.deepEqual(r.topics, [{ area: 'a', topic: 'x' }, { area: 'b', topic: '' }, { area: 'c', topic: '' }]);
+  assert.deepEqual(r.topics, [{ area: 'a', topic: 'x', parent: '' }, { area: 'b', topic: '', parent: '' }, { area: 'c', topic: '', parent: '' }]);
   assert.deepEqual(parseReply('testo semplice').topics, []);
 });
 
@@ -456,4 +456,23 @@ test('app del telefono: elenco salvato, nomi storpiati risolti dal modello, phon
   const out = await handleChat(db, ENV, deps(fakeFetch((url, body) => { seen = JSON.stringify(body); return reply({ reply: 'Metto la musica.', actions: [{ type: 'open_app', name: 'Spotify' }, { type: 'phone_task', goal: 'Apri Spotify e avvia la playlist Preferiti' }] }); })), { text: 'metti la mia playlist su spotifai' });
   assert.match(seen, /APP INSTALLATE SUL TELEFONO.*: Maps, Spotify, WhatsApp/);
   assert.deepEqual(out.device, [{ type: 'phone_task', goal: 'Apri Spotify e avvia la playlist Preferiti' }]);
+});
+
+test('nodi senza doppioni: nomi simili diventano un nodo solo, i sotto-argomenti vanno sotto il loro argomento', () => {
+  const db = makeDb();
+  const at = '2026-11-13T18:00';
+  for (const topic of ['joy-tyfi', 'Joy Tifi', 'app Joy-TyFi', 'pronuncia joytifi']) memory.touchTopics(db, [{ area: 'intrattenimento', topic, parent: 'musica' }], at);
+  memory.touchTopics(db, [{ area: 'intrattenimento', topic: 'instagram' }], at);
+  const rows = db.all('SELECT name, label, parent, uses FROM topics ORDER BY name');
+  assert.deepEqual(rows.map(r => r.label).sort(), ['instagram', 'joy-tyfi', 'musica'].sort());
+  assert.equal(rows.find(r => r.label === 'joy-tyfi').parent, 'musica');
+  assert.equal(rows.find(r => r.label === 'joy-tyfi').uses, 4);
+  assert.ok(!memory.sameTopic('instagram', 'telegram'));
+  assert.ok(!memory.sameTopic('python', 'java'));
+  // Doppioni già salvati prima: li riunisce.
+  db.run("INSERT INTO topics (module, name, label, last_used) VALUES ('intrattenimento', 'joy-thieve', 'Joy Tyfy', ?)", at);
+  assert.equal(memory.tidyTopics(db), 1);
+  const g = memory.graph(db).branches.find(b => b.id === 'intrattenimento');
+  assert.equal(g.children.find(c => c.label === 'joy-tyfi').parent, 't:intrattenimento/musica');
+  assert.match(memory.topicsIndex(db, ['intrattenimento']), /intrattenimento: .*joy-tyfi/);
 });

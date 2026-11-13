@@ -56,6 +56,8 @@ object VoiceText {
     }
 
     private val wakeToken = Regex("\\b(jarvis|jarvi|giarvis|jervis|gervis|jarvys)\\b")
+    /** Sensibilità alta: accetta anche come il riconoscimento vocale storpia spesso il nome. */
+    private val wakeTokenLoose = Regex("\\b(jarvis|jarvi|giarvis|jervis|gervis|jarvys|jarviss|jarbis|giarvi|garvis|charvis|jarvas|harvis|giorvis|jarvees|jarviz|giarviz)\\b")
 
     /** Parole che possono precedere il nome quando lo si chiama ("ehi Jarvis", "senti Jarvis"). */
     private val callWords = setOf(
@@ -78,9 +80,9 @@ object VoiceText {
      * - "Jarvis, quante calorie mi restano?" / "Ehi Jarvis" / "che ore sono Jarvis" → [Wake.Direct]
      * - "ieri ho visto il film dove c'è Jarvis" → [Wake.Ambiguous] (deciderà il contesto)
      */
-    fun wake(raw: String): Wake {
+    fun wake(raw: String, sensitivity: Float = 0.5f): Wake {
         val norm = normalize(raw)
-        val m = wakeToken.find(norm) ?: return Wake.None
+        val m = (if (sensitivity > 0.7f) wakeTokenLoose else wakeToken).find(norm) ?: return Wake.None
         val before = norm.substring(0, m.range.first).trim()
         val after = norm.substring(m.range.last + 1).trim()
         val beforeWords = before.split(" ").filter { it.isNotBlank() }
@@ -90,8 +92,12 @@ object VoiceText {
         if (beforeWords.size <= 3 && beforeWords.all { it in callWords }) {
             return if (about && after.isNotBlank()) Wake.Ambiguous(raw.trim(), true) else Wake.Direct(after)
         }
+        // Sensibilità bassa: risponde solo se il nome è all'inizio.
+        if (sensitivity < 0.35f) return Wake.None
         // Nome alla fine di una frase breve: "che ore sono Jarvis".
         if (after.isBlank() && !about && beforeWords.size <= 12) return Wake.Direct(before)
+        // Sensibilità alta: il nome in mezzo alla frase basta, se non si parla dei film.
+        if (sensitivity > 0.7f && !about) return Wake.Direct("$before $after".trim())
         // Nome in mezzo al discorso.
         return Wake.Ambiguous(raw.trim(), about)
     }

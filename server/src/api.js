@@ -149,6 +149,7 @@ export async function handleApi(db, env, deps, request) {
     }
     if (path === '/api/graph' && method === 'GET') {
       // Foglie della dieta: gli ultimi pasti e allenamenti registrati.
+      memory.tidyTopics(db);
       const g = memory.graph(db), d = loadDiary(db);
       const meals = (d.meals || []).slice(-16).reverse().map(m => ({ id: 'meal:' + m.id, label: `${m.date.slice(5)} ${m.meal}: ${m.description || (m.items || []).map(i => i.name).filter(Boolean).slice(0, 3).join(', ')}` }));
       const dieta = g.branches.find(b => b.id === 'dieta');
@@ -169,6 +170,29 @@ export async function handleApi(db, env, deps, request) {
       for (const b of g.branches) if (b.kind === 'module') sizes[b.id] = (b.entries || 0) + db.get('SELECT COUNT(*) AS n FROM topics WHERE module = ?', b.id).n;
       memory.addLevels(db, g.branches, sizes, ms);
       return json({ ...g, last: kvGet(db, 'lastTouched', null) });
+    }
+    if (path === '/api/mind' && method === 'GET') {
+      // Come Jarvis archivia e usa i contesti: dipartimenti, argomenti, riassunti, compiti.
+      memory.tidyTopics(db);
+      const g = memory.graph(db, { perModule: 40 });
+      const sizes = {};
+      for (const b of g.branches) if (b.kind === 'module') sizes[b.id] = (b.entries || 0) + db.get('SELECT COUNT(*) AS n FROM topics WHERE module = ?', b.id).n;
+      memory.addLevels(db, g.branches, sizes, ms);
+      const use = kvGet(db, 'branchUse', {});
+      const last = db.get("SELECT modules FROM sessions ORDER BY updated DESC LIMIT 1");
+      let active = [];
+      try { active = Object.entries(JSON.parse(last?.modules || '{}')).filter(([, ttl]) => ttl > 0).map(([k]) => k); } catch { /* vuoto */ }
+      return json({
+        departments: g.branches.filter(b => b.kind === 'module').map(b => ({
+          id: b.id, label: b.label, description: b.description || '', entries: b.entries || 0, level: b.level, ring: b.ring,
+          uses: Math.round((use[b.id]?.score || 0) * 10) / 10,
+          topics: db.all('SELECT name, label, parent, uses FROM topics WHERE module = ? ORDER BY uses DESC LIMIT 40', b.id),
+        })).sort((a, b) => a.level - b.level),
+        core: g.branches.filter(b => b.kind === 'core').map(b => ({ id: b.id, label: b.label, count: (b.children || []).length, level: b.level, ring: b.ring })),
+        summaries: db.all("SELECT id, summary, updated FROM sessions WHERE summary != '' ORDER BY updated DESC LIMIT 20"),
+        active,
+        jobs: jobs.listJobs(db).slice(0, 10).map(j => ({ id: j.id, title: j.title, status: j.status, steps: j.steps.length })),
+      });
     }
     if (path === '/api/memory' && method === 'GET') {
       return json({ modules: memory.listModules(db), entries: db.all('SELECT id, module, text, created, uses FROM memories ORDER BY module, id DESC LIMIT 1000') });

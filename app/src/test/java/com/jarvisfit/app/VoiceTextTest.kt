@@ -122,6 +122,16 @@ class VoiceTextTest {
     private fun direct(text: String): String? = (VoiceText.wake(text) as? VoiceText.Wake.Direct)?.command
 
     @Test
+    fun sensitivityChangesHowEasilyJarvisAnswers() {
+        assertTrue(VoiceText.wake("che ore sono jarvis", 0.2f) is VoiceText.Wake.None)
+        assertTrue(VoiceText.wake("jarvis che ore sono", 0.2f) is VoiceText.Wake.Direct)
+        assertTrue(VoiceText.wake("ehi jarbis accendi la luce", 0.5f) is VoiceText.Wake.None)
+        assertTrue(VoiceText.wake("ehi jarbis accendi la luce", 0.9f) is VoiceText.Wake.Direct)
+        assertTrue(VoiceText.wake("allora jarvis mi dici il meteo di oggi", 0.9f) is VoiceText.Wake.Direct)
+        assertTrue(VoiceText.wake("ieri ho visto il film Marvel dove c'è Jarvis", 0.9f) is VoiceText.Wake.Ambiguous)
+    }
+
+    @Test
     fun testWake_DirectCalls() {
         assertEquals("quante calorie mi restano", direct("Jarvis, quante calorie mi restano?"))
         assertEquals("aggiungi una mela", direct("Ehi Jarvis aggiungi una mela"))

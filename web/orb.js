@@ -53,7 +53,11 @@ function layoutBranches(list, old) {
     // Dal centro: dritto verso l'esterno, poi una curva a gomito fino al nodo (come una pista).
     const bend = { ...onSphere(lat + (i % 2 ? 0.25 : -0.25), lon - 0.2, r * 0.55), rad: r * 0.55 };
     const spoke = [{ x: 0, y: 0, z: 0 }, bend, hub];
-    const kids = (b.children || []).slice(0, 32);
+    const all = (b.children || []).slice(0, 32);
+    const ids = new Set(all.map(c => c.id));
+    // Prima gli argomenti principali attorno al ramo, poi i sotto-argomenti attorno al loro argomento.
+    const kids = all.filter(c => !c.parent || !ids.has(c.parent));
+    const subs = all.filter(c => c.parent && ids.has(c.parent));
     const leaves = kids.map((c, k) => {
       const a = ((k % 10) / Math.min(10, Math.max(1, kids.length))) * Math.PI * 2 + i * 0.7 + Math.floor(k / 10) * 0.31;
       // Stessa distanza a schermo su ogni guscio: sui gusci piccoli l'angolo è più ampio.
@@ -66,6 +70,22 @@ function layoutBranches(list, old) {
       const pos = { ...onSphere(llat, llon, r), lat: llat, lon: llon, rad: r };
       return { id: c.id, label: String(c.label || ''), ...pos, path: surfaceTrace(hub, pos, r), heat: before ? before.heat : 0 };
     });
+    const count = new Map();
+    for (const c of subs) {
+      const host = leaves.find(l => l.id === c.parent);
+      if (!host) continue;
+      const k = count.get(host.id) || 0;
+      count.set(host.id, k + 1);
+      // A ventaglio sul lato esterno dell'argomento, lontano dal ramo.
+      const out = Math.atan2(host.lat - lat, (host.lon - lon) * Math.cos(host.lat));
+      const a = out + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 0.55;
+      const dist = Math.min(0.4, (SPREAD * 0.55) / Math.sqrt(r)) * (1 + Math.floor(k / 5) * 0.4);
+      const llat = clampLat(host.lat + Math.sin(a) * dist);
+      const llon = host.lon + (Math.cos(a) * dist) / Math.max(0.35, Math.cos(llat));
+      const before = prev?.leaves.find(l => l.id === c.id);
+      const pos = { ...onSphere(llat, llon, r), lat: llat, lon: llon, rad: r };
+      leaves.push({ id: c.id, label: String(c.label || ''), ...pos, parent: host.id, path: surfaceTrace(host, pos, r), heat: before ? before.heat : 0, sub: true });
+    }
     return { id: b.id, label: String(b.label || b.id), kind: b.kind || 'module', ring: b.ring ?? 1, zone: i, dir: hub, hub, spoke, leaves, fade: prev?.fade ?? 0 };
   });
 }
@@ -114,7 +134,15 @@ export function createOrb() {
       const targets = leafIds === null
         ? (b.leaves.length && Math.random() < 0.6 ? [b.leaves[Math.floor(Math.random() * b.leaves.length)]] : [])
         : b.leaves.filter(l => leafIds.has(l.id));
-      for (const l of targets) trails.push({ path: l.path, t: 0, speed: speed * 0.9, col, then: () => { l.heat = Math.max(l.heat, leafIds ? 1 : 0.6); } });
+      const light = (l, sp) => trails.push({ path: l.path, t: 0, speed: sp, col, then: () => {
+        l.heat = Math.max(l.heat, leafIds ? 1 : 0.6);
+        // Un sotto-argomento acceso riceve l'impulso passando dal suo argomento.
+        for (const s of b.leaves) if (s.parent === l.id && (leafIds ? leafIds.has(s.id) : Math.random() < 0.4)) light(s, sp * 0.9);
+      } });
+      for (const l of targets.filter(t => !t.sub || !leafIds || !b.leaves.some(p => p.id === t.parent && leafIds.has(p.id)))) {
+        if (l.sub) { const host = b.leaves.find(p => p.id === l.parent); if (host) { light(host, speed * 0.9); continue; } }
+        light(l, speed * 0.9);
+      }
     } });
   }
 

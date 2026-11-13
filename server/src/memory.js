@@ -40,6 +40,50 @@ export function forget(db, id) {
  * Segna gli argomenti di cui si è parlato: l'area diventa un ramo (un modulo), l'argomento una sua foglia.
  * Ritorna { modules: [nome], leaves: [id foglia] } per accenderli sulla sfera.
  */
+// ---------------------------------------------------------------- argomenti senza doppioni
+// "Joy Tifi", "app Joy-TyFi" e "joy-tyfi" sono lo stesso nodo: si confrontano in forma compatta.
+const FILLER = /\b(app|applicazione|l|la|il|lo|i|gli|le|un|una|uno|di|del|della|pronuncia|nome|programma)\b/g;
+export const topicKey = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+  .replace(/[^a-z0-9]+/g, ' ').replace(FILLER, ' ').replace(/\s+/g, '');
+
+function editDistance(a, b) {
+  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+  for (let i = 1; i <= a.length; i++) {
+    const cur = [i];
+    for (let j = 1; j <= b.length; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return prev[b.length];
+}
+
+/** Vero se due argomenti sono lo stesso concetto scritto in modo diverso. */
+export function sameTopic(a, b) {
+  const x = topicKey(a), y = topicKey(b);
+  if (!x || !y) return false;
+  if (x === y) return true;
+  const short = Math.min(x.length, y.length), long = Math.max(x.length, y.length);
+  if (short >= 5 && (x.includes(y) || y.includes(x)) && short / long >= 0.6) return true;
+  return short >= 4 && 1 - editDistance(x, y) / long >= 0.72;
+}
+
+/** Trova nel modulo un argomento uguale o quasi; ritorna il suo name oppure null. */
+function findTopic(db, mod, label) {
+  for (const t of db.all('SELECT name, label FROM topics WHERE module = ? ORDER BY uses DESC', mod)) {
+    if (sameTopic(t.label, label) || sameTopic(t.name, label)) return t.name;
+  }
+  return null;
+}
+
+function upsertTopic(db, mod, label, nowIso) {
+  const existing = findTopic(db, mod, label);
+  if (existing) { db.run('UPDATE topics SET uses = uses + 1, last_used = ? WHERE module = ? AND name = ?', nowIso, mod, existing); return existing; }
+  const name = slug(label);
+  if (!name || name === mod) return null;
+  db.run('INSERT INTO topics (module, name, label, last_used) VALUES (?, ?, ?, ?) ON CONFLICT(module, name) DO UPDATE SET uses = uses + 1, last_used = excluded.last_used',
+    mod, name, String(label).trim().slice(0, 60), nowIso);
+  return name;
+}
+
 export function touchTopics(db, topics, nowIso) {
   const out = { modules: [], leaves: [] };
   for (const t of topics || []) {
@@ -47,13 +91,47 @@ export function touchTopics(db, topics, nowIso) {
     if (!mod) continue;
     db.run('INSERT INTO modules (name, description, created) VALUES (?, \'\', ?) ON CONFLICT(name) DO NOTHING', mod, nowIso);
     out.modules.push(mod);
-    const name = slug(t.topic);
-    if (!name || name === mod) continue;
-    db.run('INSERT INTO topics (module, name, label, last_used) VALUES (?, ?, ?, ?) ON CONFLICT(module, name) DO UPDATE SET uses = uses + 1, last_used = excluded.last_used',
-      mod, name, String(t.topic).trim().slice(0, 60), nowIso);
+    if (!slug(t.topic) || slug(t.topic) === mod) continue;
+    const name = upsertTopic(db, mod, t.topic, nowIso);
+    if (!name) continue;
+    // Sotto-argomento: si appende al suo argomento più generale (creato se manca).
+    const parent = t.parent && !sameTopic(t.parent, t.topic) && slug(t.parent) !== mod ? upsertTopic(db, mod, t.parent, nowIso) : null;
+    if (parent && parent !== name) {
+      db.run('UPDATE topics SET parent = ? WHERE module = ? AND name = ?', parent, mod, name);
+      out.leaves.push(`t:${mod}/${parent}`);
+    }
     out.leaves.push(`t:${mod}/${name}`);
   }
   return out;
+}
+
+/** Riunisce i doppioni già salvati: tiene il nodo più usato, somma gli usi, sposta i figli. */
+export function tidyTopics(db) {
+  let merged = 0;
+  for (const { module: mod } of db.all('SELECT DISTINCT module FROM topics')) {
+    const list = db.all('SELECT name, label, uses FROM topics WHERE module = ? ORDER BY uses DESC, last_used DESC', mod);
+    const kept = [];
+    for (const t of list) {
+      const into = kept.find(k => sameTopic(k.label, t.label) || sameTopic(k.name, t.label));
+      if (!into) { kept.push(t); continue; }
+      db.run('UPDATE topics SET uses = uses + ? WHERE module = ? AND name = ?', t.uses, mod, into.name);
+      db.run('UPDATE topics SET parent = ? WHERE module = ? AND parent = ?', into.name, mod, t.name);
+      db.run('DELETE FROM topics WHERE module = ? AND name = ?', mod, t.name);
+      merged++;
+    }
+    db.run("UPDATE topics SET parent = '' WHERE module = ? AND parent = name", mod);
+  }
+  return merged;
+}
+
+/** Gli argomenti esistenti, per farli riusare al modello invece di crearne di simili. */
+export function topicsIndex(db, modules) {
+  const out = [];
+  for (const m of modules) {
+    const t = db.all('SELECT label FROM topics WHERE module = ? ORDER BY uses DESC LIMIT 12', m).map(r => r.label);
+    if (t.length) out.push(`${m}: ${t.join(', ')}`);
+  }
+  return out.length ? 'ARGOMENTI GIÀ NELLA MAPPA: ' + out.join(' · ') : '';
 }
 
 /**
@@ -98,8 +176,8 @@ export function graph(db, { perModule = 24 } = {}) {
   const jobs = db.all("SELECT id, title, status FROM jobs ORDER BY created DESC LIMIT 24");
   if (jobs.length) branches.push({ id: 'compiti', label: 'Compiti', kind: 'core', children: jobs.map(j => ({ id: 'j:' + j.id, label: j.title, status: j.status })) });
   for (const m of listModules(db)) {
-    const topics = db.all('SELECT name, label FROM topics WHERE module = ? ORDER BY uses DESC, last_used DESC LIMIT ?', m.name, perModule)
-      .map(t => ({ id: `t:${m.name}/${t.name}`, label: t.label, kind: 'topic' }));
+    const topics = db.all('SELECT name, label, parent FROM topics WHERE module = ? ORDER BY uses DESC, last_used DESC LIMIT ?', m.name, perModule)
+      .map(t => ({ id: `t:${m.name}/${t.name}`, label: t.label, kind: 'topic', ...(t.parent ? { parent: `t:${m.name}/${t.parent}` } : {}) }));
     const rows = db.all('SELECT id, text FROM memories WHERE module = ? ORDER BY uses DESC, id DESC LIMIT ?', m.name, Math.max(2, perModule - topics.length))
       .map(r => ({ id: 'm:' + r.id, label: r.text }));
     const children = [...topics, ...rows].slice(0, perModule + 4);

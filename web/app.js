@@ -519,11 +519,11 @@ const jobTag = (j) => h('span', { class: 'tag ' + ({ done: 'ok', failed: 'bad' }
 
 // ------------------------------------------------------------------ altro
 
-const SUBS = [['storico', 'Storico'], ['memoria', 'Memoria'], ['modelli', 'Modelli'], ['profilo', 'Profilo'], ['impostazioni', 'Impostazioni']];
+const SUBS = [['storico', 'Storico'], ['mente', 'Mente'], ['memoria', 'Memoria'], ['modelli', 'Modelli'], ['profilo', 'Profilo'], ['impostazioni', 'Impostazioni']];
 
 function viewAltro() {
   const bar = h('div', { class: 'row wrap' }, SUBS.map(([id, label]) => h('button', { class: 'btn' + (store.sub === id ? ' primary' : ''), 'aria-pressed': String(store.sub === id), onclick: () => go('altro', id) }, label)));
-  const body = { storico: viewStorico, memoria: viewMemoria, modelli: viewModelli, profilo: viewProfilo, impostazioni: viewImpostazioni }[store.sub]();
+  const body = { storico: viewStorico, mente: viewMente, memoria: viewMemoria, modelli: viewModelli, profilo: viewProfilo, impostazioni: viewImpostazioni }[store.sub]();
   return [bar, ...body];
 }
 
@@ -544,6 +544,49 @@ function viewStorico() {
         h('span', { class: 'num' }, fmt(d.kcal) + ' kcal'))))),
     s.diary.weights.length ? h('div', { class: 'card' }, h('h2', {}, 'Pesate'),
       h('div', { class: 'list' }, [...s.diary.weights].sort((a, b2) => (a.date < b2.date ? 1 : -1)).slice(0, 20).map(w => h('div', { class: 'item' }, h('span', { class: 'grow' }, dateLabel(w.date)), h('span', { class: 'num' }, w.kg + ' kg'))))) : null,
+  ];
+}
+
+const RING_NAMES = ['interno', 'medio', 'esterno'];
+const ringName = (r) => RING_NAMES[r] || `livello ${r + 1}`;
+
+/** Come Jarvis archivia e usa i contesti: blocchi piccoli, uno per dipartimento, argomento o riassunto. */
+function viewMente() {
+  if (!store.mind) { api('GET', '/mind').then(m => { store.mind = m; render(); }).catch(e => toast(e.message)); return [h('p', { class: 'empty' }, 'Carico la mente di Jarvis…')]; }
+  const m = store.mind;
+  const chip = (text, cls = '') => h('span', { class: 'tag ' + cls }, text);
+  const topicTree = (topics) => {
+    const top = topics.filter(t => !t.parent || !topics.some(p => p.name === t.parent));
+    return h('div', { class: 'chips' }, top.map(t => {
+      const subs = topics.filter(s => s.parent === t.name);
+      return h('span', { class: 'chip' }, t.label, subs.length ? h('span', { class: 'muted' }, ' › ' + subs.map(s => s.label).join(', ')) : null);
+    }));
+  };
+  return [
+    h('div', { class: 'card' }, h('h2', {}, 'Come lavora'),
+      h('div', { class: 'blocks' },
+        h('div', { class: 'block' }, h('b', {}, 'Nucleo'), h('span', { class: 'muted small' }, 'Personalità, umore e il tuo profilo: sempre presenti.')),
+        h('div', { class: 'block' }, h('b', {}, 'Dipartimenti'), h('span', { class: 'muted small' }, 'Un cassetto per area. Entra nel contesto solo se ne parli.')),
+        h('div', { class: 'block' }, h('b', {}, 'Riassunti'), h('span', { class: 'muted small' }, 'Le conversazioni lunghe diventano un riassunto breve.')),
+        h('div', { class: 'block' }, h('b', {}, 'Compiti'), h('span', { class: 'muted small' }, 'Lavori lunghi a passi, ognuno con un contesto pulito.')))),
+    h('div', { class: 'card' }, h('h2', {}, 'Nel contesto adesso'),
+      m.active.length ? h('div', { class: 'chips' }, m.active.map(a => chip(a, 'ok'))) : h('p', { class: 'muted small' }, 'Solo il nucleo: nessun dipartimento aperto.')),
+    h('div', { class: 'card' }, h('h2', {}, 'Dipartimenti'),
+      h('p', { class: 'muted small' }, 'Dal più interno (personale, leggero, usato spesso) al più esterno (pesante, accessorio, raro).'),
+      m.departments.length ? h('div', { class: 'blocks' }, m.departments.map(d => h('div', { class: 'block' },
+        h('b', { style: 'overflow-wrap:anywhere' }, d.label), chip(ringName(d.ring)),
+        h('span', { class: 'muted small' }, `${d.entries} ${d.entries === 1 ? 'ricordo' : 'ricordi'} · ${d.topics.length} ${d.topics.length === 1 ? 'argomento' : 'argomenti'} · usato ${d.uses}`),
+        d.description ? h('span', { class: 'muted small clip' }, d.description) : null,
+        d.topics.length ? topicTree(d.topics) : null)))
+        : h('p', { class: 'empty' }, 'Nessun dipartimento ancora.'),
+      m.core.length ? h('div', { class: 'chips', style: 'margin-top:8px' }, m.core.map(c => chip(`${c.label} · ${c.count} · ${ringName(c.ring)}`))) : null),
+    h('div', { class: 'card' }, h('h2', {}, 'Riassunti delle conversazioni'),
+      m.summaries.length ? h('div', { class: 'blocks' }, m.summaries.map(s => h('details', { class: 'block' },
+        h('summary', {}, h('span', { class: 'muted small num' }, (s.updated || '').slice(0, 16).replace('T', ' ')), ' ', s.summary.slice(0, 90) + (s.summary.length > 90 ? '…' : '')),
+        h('p', { class: 'small' }, s.summary))))
+        : h('p', { class: 'muted small' }, 'Ancora nessuna conversazione abbastanza lunga da riassumere.')),
+    m.jobs.length ? h('div', { class: 'card' }, h('h2', {}, 'Progetti e compiti'),
+      h('div', { class: 'chips' }, m.jobs.map(j => chip(`${j.title} · ${j.status} · ${j.steps} passi`, j.status === 'done' ? 'ok' : j.status === 'failed' ? 'bad' : '')))) : null,
   ];
 }
 
@@ -620,6 +663,10 @@ function viewImpostazioni() {
       toggle('Ascolto continuo di "Jarvis" (anche a schermo spento)', 'listening', 'setListening'),
       toggle('Leggi le risposte ad alta voce', 'speakReplies', 'setSpeakReplies'),
       toggle('Lascia il microfono alle altre app (Gemini, vocali, chiamate)', 'micGuard', 'setMicGuard'),
+      h('div', {}, h('div', { class: 'small' }, 'Sensibilità quando lo chiama'),
+        h('div', { class: 'row wrap' }, [['Bassa', 0.2, 'solo "Ehi Jarvis" all\'inizio'], ['Media', 0.5, 'consigliata'], ['Alta', 0.85, 'risponde anche a nomi simili']].map(([label, v, hint]) =>
+          h('button', { class: 'btn' + (Math.abs((cfg.sensitivity ?? 0.5) - v) < 0.2 ? ' primary' : ''), title: hint, onclick: () => { nativeCall('setSensitivity', v); setTimeout(render, 200); } }, label))),
+        h('div', { class: 'muted small' }, (cfg.sensitivity ?? 0.5) < 0.35 ? 'Bassa: risponde solo se inizia con "Jarvis" o "Ehi Jarvis".' : (cfg.sensitivity ?? 0.5) > 0.7 ? 'Alta: capisce anche "Jervis", "Giarvis" e il nome in mezzo alla frase.' : 'Media: il nome all\'inizio o alla fine; in mezzo al discorso decide dal contesto.')),
       h('div', { class: 'row wrap' },
         h('p', { class: 'grow' }, nativeCall('phoneControlStatus') === true
           ? 'Jarvis può usare il telefono al posto suo (tocca, scrive, legge). Si ferma prima di inviare, pagare o eliminare cose non richieste.'
@@ -659,7 +706,7 @@ function viewLogin() {
 }
 
 const TABS = [['chat', 'Jarvis'], ['oggi', 'Oggi'], ['cucina', 'Cucina'], ['attivita', 'Attività'], ['altro', 'Altro']];
-function go(tab, sub) { store.tab = tab; if (sub) store.sub = sub; render(); if (tab === 'chat') scrollChat(); }
+function go(tab, sub) { store.tab = tab; if (sub) { if (sub !== store.sub) { store.mind = null; store.memory = null; } store.sub = sub; } render(); if (tab === 'chat') scrollChat(); }
 
 function render() {
   const app = document.getElementById('app');

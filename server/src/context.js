@@ -19,9 +19,9 @@ COMPITI LUNGHI
 - Se la richiesta richiede più passaggi (un piano settimanale, una ricerca, un programma) avviala in background con start_job e di' che avviserai a lavoro finito.
 
 FORMATO DI RISPOSTA: rispondi SOLO con un oggetto JSON valido, senza testo prima o dopo:
-{"reply": "testo da leggere ad alta voce", "expect_reply": true|false, "card": "riassunto schematico dei numeri o stringa vuota", "topics": [{"area": "...", "topic": "..."}], "actions": [ ... ]}
+{"reply": "testo da leggere ad alta voce", "expect_reply": true|false, "card": "riassunto schematico dei numeri o stringa vuota", "topics": [{"area": "...", "topic": "...", "parent": "..."}], "actions": [ ... ]}
 - expect_reply: true se ti aspetti che l'utente continui; false se la richiesta è chiusa, se saluta o dice "basta", "grazie", "a posto".
-- topics: gli argomenti di questo scambio, per la mappa della tua mente. "area" è il campo generale (usa un modulo esistente se adatto, es. "programmazione", "lavoro", "dieta"), "topic" è l'argomento preciso (es. "programmazione a oggetti"). Al massimo 3; lista vuota per saluti e chiacchiere.
+- topics: gli argomenti di questo scambio, per la mappa della tua mente. "area" è il campo generale (usa un modulo esistente se adatto, es. "programmazione", "lavoro", "dieta"), "topic" è l'argomento preciso (es. "programmazione a oggetti"), "parent" (facoltativo) è l'argomento più generale già esistente sotto cui sta (es. topic "Joytify", parent "musica"). Riusa SEMPRE un argomento esistente (vedi ARGOMENTI GIÀ NELLA MAPPA) se è lo stesso concetto, anche scritto diversamente: niente doppioni come "joy tifi" e "app joytify". Al massimo 3; lista vuota per saluti e chiacchiere.
 - card: solo dati schematici da mostrare a schermo (es. "Pranzo: 520 kcal (P38 C45 G12) • Rimanenti: 680 kcal"); vuota se non servono.
 
 AZIONI DISPONIBILI (campo "type"):
@@ -122,7 +122,7 @@ export function parseReply(raw) {
     card: typeof obj.card === 'string' ? obj.card.trim() : '',
     actions: Array.isArray(obj.actions) ? obj.actions.filter(a => a && typeof a.type === 'string') : [],
     mood: obj.mood && typeof obj.mood === 'object' && typeof obj.mood.emozione === 'string' ? { emozione: obj.mood.emozione.slice(0, 30), intensita: Number(obj.mood.intensita) || 0.4 } : null,
-    topics: Array.isArray(obj.topics) ? obj.topics.filter(t => t && typeof t.area === 'string' && t.area.trim()).slice(0, 3).map(t => ({ area: t.area.trim().slice(0, 40), topic: String(t.topic || '').trim().slice(0, 60) })) : [],
+    topics: Array.isArray(obj.topics) ? obj.topics.filter(t => t && typeof t.area === 'string' && t.area.trim()).slice(0, 3).map(t => ({ area: t.area.trim().slice(0, 40), topic: String(t.topic || '').trim().slice(0, 60), parent: String(t.parent || '').trim().slice(0, 60) })) : [],
     parsed: true,
   };
 }
