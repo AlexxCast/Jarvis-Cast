@@ -238,6 +238,7 @@ export async function handleApi(db, env, deps, request) {
         exportedAt: nowIsoOf(ms, tz), diary: loadDiary(db), memories: db.all('SELECT module, text, created FROM memories ORDER BY id'),
         modules: db.all('SELECT * FROM modules'), reminders: db.all('SELECT * FROM reminders'), jobs: db.all('SELECT * FROM jobs'),
         messages: db.all('SELECT session, role, text, at FROM messages ORDER BY id'), sessions: db.all('SELECT id, summary FROM sessions'),
+        places: places.listPlaces(db), topics: db.all('SELECT * FROM topics'), layout: ui.loadLayout(db),
       });
     }
     return bad('non trovato', 404);
