@@ -643,8 +643,10 @@ class JarvisService : LifecycleService(), SensorEventListener {
             if (cloud) scheduleInbox(20_000) // un promemoria appena creato può scadere a breve
             if (reply.photoRequest != null) notifyPhotoRequest(reply.photoRequest)
             // "Apri Spotify": a schermo spento o con Jarvis in secondo piano Android può rifiutare l'avvio.
+            var callWho: String? = null
             for ((type, value) in reply.device) {
                 when (type) {
+                    "call" -> callWho = value // parte dopo che Jarvis ha finito di parlare
                     "open_app" -> AppLauncher.open(this@JarvisService, value)
                     "open_url" -> AppLauncher.openUrl(this@JarvisService, value)
                     "phone_task" -> PhoneAgent.start(this@JarvisService, value)
@@ -680,6 +682,13 @@ class JarvisService : LifecycleService(), SensorEventListener {
 
             val after = {
                 main.post {
+                    callWho?.let { who ->
+                        // La telefonata vera: se non parte lo dice, invece di lasciare una promessa a vuoto.
+                        val said = com.jarvisfit.app.device.Dialer.problem(com.jarvisfit.app.device.Dialer.call(this@JarvisService, who), who)
+                        inConversationMode = false
+                        if (said != null) { notifyInfoPopup(said, 13); Speaker.speak(said) { main.post { backToWaiting() } } } else backToWaiting()
+                        return@post
+                    }
                     if (yielded) return@post
                     if (inConversationMode && reply.expectReply && reply.photoRequest == null) {
                         busy = false

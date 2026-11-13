@@ -18,6 +18,8 @@ MEMORIA A MODULI
 COMPITI LUNGHI
 - Se la richiesta richiede più passaggi (un piano settimanale, una ricerca, un programma) avviala in background con start_job e di' che avviserai a lavoro finito.
 
+ONESTÀ SULLE AZIONI: una cosa è fatta SOLO se la sua azione è nel campo "actions" di questa risposta. Non dire mai "ho registrato", "ho aggiornato", "ho salvato", "chiamo", "fatto" se l'azione corrispondente non c'è: se ti manca un dato per farla, chiedilo.
+
 FORMATO DI RISPOSTA: rispondi SOLO con un oggetto JSON valido, senza testo prima o dopo:
 {"reply": "testo da leggere ad alta voce", "expect_reply": true|false, "card": "riassunto schematico dei numeri o stringa vuota", "topics": [{"area": "...", "topic": "...", "parent": "..."}], "actions": [ ... ]}
 - expect_reply: true se ti aspetti che l'utente continui; false se la richiesta è chiusa, se saluta o dice "basta", "grazie", "a posto".
@@ -40,6 +42,7 @@ AZIONI DISPONIBILI (campo "type"):
 - start_job {title, goal: descrizione completa e autosufficiente del lavoro da svolgere}
 - code_change {request} · code_approve {id} · code_discard {id}
 - ui_pin {widget, where} · ui_unpin {widget | id, where} · ui_note {text, title, where} · ui_reset {}
+- call {name: nome del contatto in rubrica, oppure un numero}: telefonata normale. Usala SOLO quando l'utente chiede esplicitamente di chiamare qualcuno (non per WhatsApp o altre app: lì serve phone_task).
 - open_app {name: nome dell'app come compare sul telefono, es. "Spotify", "Maps", "WhatsApp"} · open_url {url: indirizzo https completo}
   Usale solo quando l'utente chiede SOLO di aprire qualcosa, senza fare altro dentro.
 - phone_task {goal: obiettivo completo e autosufficiente, es. "Apri WhatsApp, chat con Marco, scrivi 'arrivo tra 10 minuti' e invialo"}: usi il telefono come lui (tocchi, scrivi, scorri, leggi lo schermo) finché l'obiettivo è raggiunto. Usalo SEMPRE quando chiede di fare qualcosa DENTRO un'app (mandare o leggere messaggi, cercare, mettere una canzone, impostare): apre l'app da solo, quindi non aggiungere open_app. Nel goal scrivi il nome esatto dell'app. Non dire mai "lo faccio", "apro", "mando" senza mettere davvero l'azione: se prometti un'azione sul telefono, phone_task deve esserci. Se nel goal c'è un invio o un pagamento scrivi esattamente cosa ha chiesto l'utente: prima di azioni irreversibili non richieste ti fermerai a chiedere conferma.
@@ -99,6 +102,28 @@ export function buildMessages(model, parts) {
   return [{ role: 'system', content: sections.join('\n\n') }, ...turns, user];
 }
 
+/** Da un JSON interrotto estrae "reply" e gli oggetti completi di "actions". Ritorna null se non c'è "reply". */
+function salvage(text) {
+  const m = /"reply"\s*:\s*"((?:[^"\\]|\\.)*)("?)/.exec(text);
+  if (!m) return null;
+  let reply = m[1];
+  try { reply = JSON.parse('"' + m[1].replace(/\\$/, '') + '"'); } catch { /* resta com'è */ }
+  const actions = [];
+  const at = text.search(/"actions"\s*:\s*\[/);
+  if (at >= 0) {
+    let depth = 0, start = -1, inStr = false, esc = false;
+    for (let i = text.indexOf('[', at) + 1; i < text.length; i++) {
+      const c = text[i];
+      if (inStr) { if (esc) esc = false; else if (c === '\\') esc = true; else if (c === '"') inStr = false; continue; }
+      if (c === '"') inStr = true;
+      else if (c === '{') { if (depth++ === 0) start = i; }
+      else if (c === '}') { if (--depth === 0 && start >= 0) { try { const o = JSON.parse(text.slice(start, i + 1)); if (o && typeof o.type === 'string') actions.push(o); } catch { /* scartata */ } start = -1; } }
+      else if (c === ']' && depth === 0) break;
+    }
+  }
+  return { reply: String(reply).trim(), actions };
+}
+
 /** Estrae l'oggetto JSON della risposta anche se il modello aggiunge testo o blocchi di codice. */
 export function parseReply(raw) {
   const text = String(raw || '').trim();
@@ -113,6 +138,9 @@ export function parseReply(raw) {
     if (a >= 0 && b > a) obj = tryParse(text.slice(a, b + 1));
   }
   if (!obj || typeof obj.reply !== 'string') {
+    // JSON tagliato a metà (risposta troppo lunga): recupera la frase e le azioni arrivate intere.
+    const cut = salvage(text);
+    if (cut) return { reply: cut.reply || 'Fatto.', expectReply: false, card: '', actions: cut.actions, topics: [], parsed: true, truncated: true };
     // Nessun JSON valido: usa il testo così com'è, senza azioni.
     const plain = text.replace(/```[\s\S]*?```/g, '').trim();
     return { reply: plain || 'Non ho capito, può ripetere?', expectReply: true, card: '', actions: [], topics: [], parsed: false };

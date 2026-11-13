@@ -89,6 +89,13 @@ function runDeviceActions(list) {
       if (nativeCall('openApp', a.name) !== true) toast(`Non trovo l'app "${a.name}" su questo telefono.`);
     } else if (a.type === 'open_url' && /^https:\/\//i.test(a.url)) {
       if (native) nativeCall('openUrl', a.url); else window.open(a.url, '_blank', 'noopener');
+    } else if (a.type === 'call') {
+      if (!native) { toast('Per telefonare serve l\'app Android di Jarvis.'); continue; }
+      const r = nativeCall('callContact', a.name);
+      if (r === 'permesso') toast('Conceda a Jarvis i permessi Contatti e Telefono, poi ripeta.');
+      else if (r === 'sconosciuto') toast(`Non trovo "${a.name}" nella rubrica.`);
+      else if (r === null) toast('Per telefonare aggiorni l\'app Android di Jarvis.');
+      else if (!String(r).startsWith('ok')) toast('Il telefono non ha avviato la chiamata.');
     } else if (a.type === 'save_place') savePlaceHere(a.name);
     else if (a.type === 'phone_task') {
       if (!native) { toast('Per usare il telefono serve l\'app Android di Jarvis.'); continue; }
@@ -672,6 +679,9 @@ function viewImpostazioni() {
           ? 'Jarvis può usare il telefono al posto suo (tocca, scrive, legge). Si ferma prima di inviare, pagare o eliminare cose non richieste.'
           : 'Per far usare il telefono a Jarvis ("scrivi a Marco che arrivo") attivi "Jarvis: usa il telefono" in Accessibilità.'),
         nativeCall('phoneControlStatus') === true ? null : h('button', { class: 'btn', onclick: () => nativeCall('openPhoneControlSettings') }, 'Apri Accessibilità')),
+      typeof native.callPermission === 'function' ? h('div', { class: 'row wrap' },
+        h('p', { class: 'grow' }, nativeCall('callPermission') === true ? 'Jarvis può telefonare ai contatti della rubrica ("chiama Marco").' : 'Per le telefonate ("chiama Marco") Jarvis ha bisogno dei permessi Contatti e Telefono.'),
+        nativeCall('callPermission') === true ? null : h('button', { class: 'btn', onclick: () => { nativeCall('requestCallPermission'); setTimeout(render, 2500); } }, 'Concedi')) : null,
       h('p', { class: 'muted' }, `App ${cfg.version || ''}. Quando un'altra app registra, Jarvis si mette in pausa e riprende da solo.`),
       h('div', { class: 'row wrap' },
         h('button', { class: 'btn', onclick: guard(async () => { store.state.legacyImported = null; await importLegacyIfNeeded(); render(); }) }, 'Reimporta i dati del telefono'),

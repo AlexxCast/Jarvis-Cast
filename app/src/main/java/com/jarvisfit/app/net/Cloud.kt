@@ -88,7 +88,7 @@ object Cloud {
                     when (val type = str(a, "type")) {
                         "open_app" -> str(a, "name").ifBlank { null }?.let { type to it }
                         "open_url" -> str(a, "url").ifBlank { null }?.let { type to it }
-                        "save_place" -> str(a, "name").ifBlank { null }?.let { type to it }
+                        "save_place", "call" -> str(a, "name").ifBlank { null }?.let { type to it }
                         "phone_task" -> str(a, "goal").ifBlank { null }?.let { type to it }
                         else -> null
                     }
