@@ -28,18 +28,27 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Ripara Gradle Wrapper e Compila APK
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Android aggiorna l'app senza perdere i dati solo se la firma è la stessa del telefono.
+      # Il segreto DEBUG_KEYSTORE_B64 contiene debug.keystore del PC in base64: Gradle lo usa al posto di una chiave nuova.
+      - name: Chiave di firma del PC
+        id: key
+        env:
+          KEYSTORE_B64: ${{ secrets.DEBUG_KEYSTORE_B64 }}
         run: |
-          # Scarica una distribuzione pulita di Gradle 8.9 (compatibile con AGP 8.x)
-          wget -q https://services.gradle.org/distributions/gradle-8.9-bin.zip -O /tmp/gradle.zip
-          unzip -q /tmp/gradle.zip -d /tmp
-          
-          # Rigenera i file del wrapper (gradlew e gradle-wrapper.jar) direttamente sul runner
-          /tmp/gradle-8.9/bin/gradle wrapper --gradle-version 8.9
-          chmod +x ./gradlew
-          
-          # Avvia la build usando il wrapper appena generato
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          if [ -n "$KEYSTORE_B64" ]; then
+            mkdir -p ~/.android
+            echo "$KEYSTORE_B64" | base64 -d > ~/.android/debug.keystore
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::Segreto DEBUG_KEYSTORE_B64 assente: l'APK è firmato con una chiave diversa e NON si installa sopra l'app esistente."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # gradle.properties punta al JDK del PC di sviluppo: qui si usa quello appena installato.
+      - name: Compila APK
+        run: ./gradlew --no-daemon "-Dorg.gradle.java.home=$JAVA_HOME" assembleDebug
 
       - name: Rinomina APK
         run: cp app/build/outputs/apk/debug/*.apk Jarvis.apk
@@ -50,7 +59,10 @@ jobs:
           name: Jarvis-apk
           path: Jarvis.apk
 
+      # La release si pubblica solo con la chiave giusta: un APK firmato diversamente
+      # costringerebbe a disinstallare l'app e a perdere i dati.
       - name: Pubblica release
+        if: steps.key.outputs.signed == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: apk-latest
