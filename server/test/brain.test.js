@@ -536,3 +536,31 @@ test('meteo: senza luogo noto chiede la città, e i messaggi senza meteo non chi
   await handleChat(db, ENV, deps(f2), { text: 'che tempo fa?' });
   assert.match(system, /METEO: non so ancora dove/);
 });
+
+test('telefono: se promette di farlo senza azione, o apre solo l\'app, parte comunque il compito sul telefono', async () => {
+  const db = makeDb();
+  let out = await handleChat(db, ENV, deps(fakeFetch(() => reply({ reply: 'Certo signore, mando subito il messaggio a Marco.' }))), { text: 'Jarvis manda un messaggio a Marco su WhatsApp che arrivo' });
+  assert.deepEqual(out.device, [{ type: 'phone_task', goal: 'manda un messaggio a Marco su WhatsApp che arrivo' }]);
+  out = await handleChat(db, ENV, deps(fakeFetch(() => reply({ reply: 'Apro Joytify.', actions: [{ type: 'open_app', name: 'Joytify' }] }))), { text: 'metti la playlist preferiti su joytify' });
+  assert.deepEqual(out.device, [{ type: 'phone_task', goal: 'metti la playlist preferiti su joytify (app: Joytify)' }]);
+  // Aprire e basta resta aprire.
+  out = await handleChat(db, ENV, deps(fakeFetch(() => reply({ reply: 'Apro Instagram.', actions: [{ type: 'open_app', name: 'Instagram' }] }))), { text: 'apri instagram' });
+  assert.deepEqual(out.device, [{ type: 'open_app', name: 'Instagram' }]);
+  // Una chiacchiera non diventa un compito.
+  out = await handleChat(db, ENV, deps(fakeFetch(() => reply({ reply: 'Faccio del mio meglio, signore.' }))), { text: 'come stai oggi?' });
+  assert.deepEqual(out.device, []);
+});
+
+test('telefono: una domanda di conferma resta in sospeso e la chat la riprende', async () => {
+  const db = makeDb();
+  const d = deps(fakeFetch(() => JSON.stringify({ do: 'ask', say: 'Invio "arrivo" a Marco?' })));
+  const move = await phone.step(db, ENV, d, { goal: 'Scrivi a Marco su WhatsApp che arrivo', step: 3, history: ['open_app WhatsApp', 'tap 4 Marco', 'type 9 "arrivo"'], screen: { app: 'com.whatsapp', items: [] } });
+  assert.equal(move.do, 'ask');
+  let system = '';
+  const out = await handleChat(db, ENV, deps(fakeFetch((url, body) => { system = body.messages[0].content; return reply({ reply: 'Invio.', actions: [{ type: 'phone_task', goal: 'Scrivi a Marco su WhatsApp che arrivo e invialo: l\'utente ha confermato' }] }); })), { text: 'sì invialo' });
+  assert.match(system, /COMPITO SUL TELEFONO IN SOSPESO: obiettivo "Scrivi a Marco su WhatsApp che arrivo".*Invio "arrivo" a Marco\?/s);
+  assert.equal(out.device[0].type, 'phone_task');
+  // Ripreso: non è più in sospeso.
+  await handleChat(db, ENV, deps(fakeFetch((url, body) => { system = body.messages[0].content; return reply({}); })), { text: 'grazie' });
+  assert.doesNotMatch(system, /IN SOSPESO/);
+});

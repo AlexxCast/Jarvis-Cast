@@ -36,16 +36,23 @@ object PhoneAgent {
         // Con il telefono bloccato Jarvis non agisce: chi parla deve essere chi l'ha sbloccato.
         val km = app.getSystemService(android.app.KeyguardManager::class.java)
         if (km?.isDeviceLocked == true) {
-            notify(app, "Sblocca il telefono e ripeti: con il telefono bloccato non uso le app.", ongoing = false)
+            tell(app, "Sblocca il telefono e ripeti: con il telefono bloccato non uso le app.")
             return "bloccato"
         }
         if (JarvisAccessibility.instance == null) {
-            notify(app, "Per usare il telefono al posto tuo attiva Jarvis in Impostazioni › Accessibilità.", ongoing = false)
+            tell(app, "Non posso farlo: devo essere attivato in Impostazioni, Accessibilità, Jarvis usa il telefono.")
             return "spento"
         }
         job?.cancel()
         job = JarvisApp.scope.launch { loop(app, goal) }
         return "ok"
+    }
+
+    /** Dice e mostra perché non può procedere: mai una promessa a vuoto. */
+    private fun tell(ctx: Context, text: String) {
+        notify(ctx, text, ongoing = false)
+        Speaker.init(ctx)
+        Speaker.speak(text)
     }
 
     fun stop(ctx: Context) {
@@ -58,11 +65,14 @@ object PhoneAgent {
         Speaker.init(ctx)
         val history = mutableListOf<String>()
         var finalSay = ""
+        var pause = 600L
         try {
             for (step in 0 until 25) {
-                delay(if (step == 0) 400 else 1300) // lascia caricare lo schermo
+                delay(pause) // lascia caricare lo schermo
                 val svc = JarvisAccessibility.instance ?: run { finalSay = "Il permesso di accessibilità è stato spento."; return }
-                val screen = svc.snapshot()
+                var screen = svc.snapshot()
+                // Schermo ancora vuoto (app che si sta aprendo): aspettiamo un attimo e rileggiamo.
+                repeat(3) { if (screen.items.size < 2) { delay(800); screen = svc.snapshot() } }
                 val move = Cloud.phoneStep(goal, step, history, screen)
                 val doing = move.say.ifBlank { move.kind }
                 notify(ctx, "Passo ${step + 1}: $doing", ongoing = true)
@@ -74,8 +84,9 @@ object PhoneAgent {
                     "home" -> { svc.home(); null }
                     "open_app" -> if (AppLauncher.open(ctx, move.text)) null else "app \"${move.text}\" non trovata"
                     "wait" -> null
-                    else -> { finalSay = move.say; return } // done / ask
+                    else -> { finalSay = move.say.ifBlank { if (move.kind == "done") "Fatto." else "Mi sono fermato: mi dica come proseguire." }; return } // done / ask
                 }
+                pause = when (move.kind) { "open_app" -> 2500L; "type" -> 700L; else -> 1300L }
                 val target = move.n?.let { n -> screen.items.firstOrNull { it.n == n }?.text?.take(40) }.orEmpty()
                 history += listOfNotNull(move.kind, move.n?.toString(), target.ifBlank { null }, move.text.ifBlank { null }?.let { "\"$it\"" }).joinToString(" ") +
                     (err?.let { " → ERRORE: $it" } ?: "")

@@ -1,5 +1,6 @@
 // Il "cervello": mette insieme contesto, router dei modelli, memoria e azioni.
 
+import * as phone from './phone.js';
 import { WEATHER_WORDS, weatherContext } from './weather.js';
 import * as router from './router.js';
 import { CORE_PROMPT, buildMessages, parseReply } from './context.js';
@@ -125,7 +126,7 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
   const parts = {
     core: CORE_PROMPT(diary.profile.name, nowHuman(ms, tz)) + '\n\n' + mood.MOOD_PROMPT(mood.current(db, ms)),
     brief: dietBrief(diary, today),
-    rules: [dietOn ? DIET_RULES : '', UI_WORDS.test(userText) ? ui.uiPrompt(ui.loadLayout(db)) : '', UI_WORDS.test(userText) ? coder.codePrompt(env, db) : '', DEVICE_WORDS.test(userText) ? appsPrompt(db) : ''].filter(Boolean).join('\n\n'),
+    rules: [dietOn ? DIET_RULES : '', UI_WORDS.test(userText) ? ui.uiPrompt(ui.loadLayout(db)) : '', UI_WORDS.test(userText) ? coder.codePrompt(env, db) : '', DEVICE_WORDS.test(userText) ? appsPrompt(db) : '', phone.pendingContext(db, ms)].filter(Boolean).join('\n\n'),
     blocks: dietOn ? dietContext(diary, today) : [],
     memories: recalled.entries.map(m => `- [${m.id}] (${m.module}) ${m.text}`),
     moduleIndex: [mods.length ? 'MODULI DI MEMORIA ESISTENTI: ' + mods.map(m => `${m.name}${m.description ? ` (${m.description})` : ''} [${m.entries}]`).join('; ') : '',
@@ -154,6 +155,17 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
     topicHits = memory.touchTopics(db, parsed.topics, nowIso);
     if (parsed.mood) mood.feel(db, parsed.mood.emozione, parsed.mood.intensita, ms);
     const done = applyActions(db, parsed.actions, { today, nowIso, ms, tz, hadPhoto: !!image });
+    // Ha promesso di farlo ma non ha messo l'azione: la aggiungiamo noi, così non resta una promessa a vuoto.
+    const goal = userText.replace(/^\W*(ehi|ciao|ok)?\W*jarvis\W*/i, '').slice(0, 1000);
+    if (!done.device.length && phone.DOING_WORDS.test(userText) && DEVICE_WORDS.test(userText) && phone.PROMISE_WORDS.test(parsed.reply)) {
+      done.device.push({ type: 'phone_task', goal });
+      done.applied.push('phone_task');
+    } else if (done.device.length && done.device.every(d => d.type === 'open_app') && phone.INSIDE_WORDS.test(userText)) {
+      // Ha solo aperto l'app ma l'utente voleva fare qualcosa dentro (mandare, cercare, mettere...).
+      done.device = [{ type: 'phone_task', goal: `${goal} (app: ${done.device[0].name})` }];
+      done.applied.push('phone_task');
+    }
+    if (done.device.some(d => d.type === 'phone_task')) kvSet(db, 'phonePending', null);
     for (const j of done.jobs) deps.startJob?.(j);
     for (const c of done.code) {
       try {

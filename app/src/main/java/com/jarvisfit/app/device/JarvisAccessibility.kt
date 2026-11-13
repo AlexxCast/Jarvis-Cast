@@ -42,7 +42,10 @@ class JarvisAccessibility : AccessibilityService() {
     private fun label(node: AccessibilityNodeInfo): String {
         val own = listOfNotNull(node.text, node.contentDescription, if (node.isEditable) node.hintText else null)
             .map { it.toString().trim() }.filter { it.isNotEmpty() }.distinct().joinToString(" · ")
-        if (own.isNotEmpty() || !node.isClickable) return own
+        if (own.isNotEmpty()) return own
+        // Icone senza testo (es. il tasto invia): il nome tecnico dice spesso cosa sono ("send", "search").
+        val id = node.viewIdResourceName?.substringAfter(":id/")?.replace('_', ' ')?.trim().orEmpty()
+        if (!node.isClickable) return if (node.isEditable && id.isNotEmpty()) "($id)" else ""
         // Pulsanti "contenitore" (es. una riga di chat): prendiamo i testi dei figli.
         val parts = mutableListOf<String>()
         fun collect(n: AccessibilityNodeInfo?, depth: Int) {
@@ -51,7 +54,7 @@ class JarvisAccessibility : AccessibilityService() {
             for (i in 0 until n.childCount) collect(n.getChild(i), depth + 1)
         }
         for (i in 0 until node.childCount) collect(node.getChild(i), 1)
-        return parts.joinToString(" · ")
+        return parts.joinToString(" · ").ifEmpty { if (id.isNotEmpty()) "(icona: $id)" else "" }
     }
 
     fun snapshot(): Screen {
@@ -67,7 +70,7 @@ class JarvisAccessibility : AccessibilityService() {
                 node.isScrollable -> "lista"
                 else -> "testo"
             }
-            val text = if (node.isPassword) "(password)" else label(node)
+            val text = (if (node.isPassword) "(password)" else label(node)) + if (node.isEditable && node.isFocused) " [cursore qui]" else ""
             if (kind != "testo" || text.isNotEmpty()) {
                 val n = items.size + 1
                 items += Item(n, kind, text.take(160))
@@ -106,9 +109,14 @@ class JarvisAccessibility : AccessibilityService() {
         val node = nodes[n] ?: return "elemento $n non trovato"
         if (node.isPassword) return "è un campo password: non lo compilo"
         if (!node.isEditable) return "l'elemento $n non è un campo di testo"
+        node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
         node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
         val args = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text) }
-        return if (node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) null else "non riesco a scrivere nel campo $n"
+        if (node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) return null
+        // Alcune app non accettano il testo diretto: lo incolliamo dagli appunti.
+        val cm = getSystemService(android.content.ClipboardManager::class.java)
+        cm?.setPrimaryClip(android.content.ClipData.newPlainText("jarvis", text))
+        return if (node.performAction(AccessibilityNodeInfo.ACTION_PASTE)) null else "non riesco a scrivere nel campo $n"
     }
 
     fun scroll(n: Int?, down: Boolean): String? {
