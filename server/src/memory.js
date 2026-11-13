@@ -2,6 +2,8 @@
 // (es. "lavoro", "auto", "viaggio-giappone"): Jarvis lo crea quando serve e lo riapre
 // solo quando la conversazione lo richiede, così il contesto resta piccolo.
 
+import { kvGet, kvSet } from './db.js';
+
 const STOP = new Set('il lo la i gli le un uno una di a da in con su per tra fra e o ma che chi cui non mi ti si ci vi ne è sono ho hai ha del della dei delle al alla ai alle dal dalla nel nella sul sulla come quando dove cosa quale quanto questo questa quello quella mio mia tuo tua suo sua più meno molto poco anche già poi ora oggi fare fatto essere avere jarvis'.split(' '));
 
 export function slug(name) {
@@ -107,4 +109,48 @@ export function graph(db, { perModule = 8 } = {}) {
     branches.push({ id: m.name, label: m.name.replace(/-/g, ' '), description: m.description, kind: 'module', entries: m.entries, children });
   }
   return { branches };
+}
+
+// ---------------------------------------------------------------- livelli della sfera
+// Ogni ramo sta su un guscio: dentro le informazioni leggere, personali e usate spesso (quelle che
+// "fanno" Jarvis per questo utente), fuori quelle pesanti, accessorie e usate di rado.
+
+const IDENTITY = /(person|profil|prefer|identit|caratter|famigli|valori|abitudin|obiettiv|salute|relazion|amic|carriera|sogn|emozion|umore|chi sono|io\b)/i;
+const HALF_LIFE_DAYS = 10;
+
+/** Quanto è "personale" un ramo: 1 definisce chi è l'utente, 0 è puro contorno. */
+export function personalOf(branch) {
+  if (branch.id === 'dieta' || branch.id === 'sport') return 0.7;
+  if (branch.id === 'agenda') return 0.55;
+  if (branch.id === 'compiti') return 0.2;
+  return IDENTITY.test(`${branch.id} ${branch.label || ''} ${branch.description || ''}`) ? 1 : 0.3;
+}
+
+/** Ogni volta che si parla di un ramo il suo uso sale; col tempo scende (mezza vita 10 giorni). */
+export function noteUse(db, ids, ms) {
+  const all = kvGet(db, 'branchUse', {});
+  for (const id of new Set(ids || [])) {
+    const u = all[id] || { score: 0, at: ms };
+    all[id] = { score: decayed(u, ms) + 1, at: ms };
+  }
+  kvSet(db, 'branchUse', all);
+}
+const decayed = (u, ms) => u.score * Math.pow(0.5, Math.max(0, ms - u.at) / (HALF_LIFE_DAYS * 86_400_000));
+
+/** Livello 0 (centro) .. 1 (esterno) bilanciando mole di informazioni, frequenza d'uso e quanto è personale. */
+export function levelOf({ size, use, personal }) {
+  const heavy = Math.min(1, Math.log10(1 + Math.max(0, size)) / 2.3);   // ~200 elementi = pesantissimo
+  const freq = 1 - Math.exp(-Math.max(0, use) / 4);                      // ~10 usi recenti = frequentissimo
+  return Math.round(Math.max(0, Math.min(1, 0.4 * heavy + 0.3 * (1 - freq) + 0.3 * (1 - personal))) * 100) / 100;
+}
+
+/** Aggiunge a ogni ramo level (0..1) e ring (0 interno, 1 medio, 2 esterno). sizes: {id: numero di elementi}. */
+export function addLevels(db, branches, sizes, ms) {
+  const use = kvGet(db, 'branchUse', {});
+  for (const b of branches) {
+    const size = sizes[b.id] ?? (b.entries || 0) + (b.children || []).length;
+    b.level = levelOf({ size, use: use[b.id] ? decayed(use[b.id], ms) : 0, personal: personalOf(b) });
+    b.ring = b.level < 0.4 ? 0 : b.level < 0.62 ? 1 : 2;
+  }
+  return branches;
 }

@@ -430,3 +430,17 @@ test('controllo del telefono: una mossa alla volta, mosse non valide diventano u
   const out = await handleChat(db, ENV, deps(fakeFetch(() => reply({ reply: 'Ci penso io.', actions: [{ type: 'phone_task', goal: 'Apri WhatsApp e scrivi a Marco "arrivo"' }, { type: 'phone_task', goal: '' }] }))), { text: 'scrivi a Marco che arrivo' });
   assert.deepEqual(out.device, [{ type: 'phone_task', goal: 'Apri WhatsApp e scrivi a Marco "arrivo"' }]);
 });
+
+test('sfera a livelli: dentro i rami personali, leggeri e usati spesso; fuori quelli pesanti e accessori', () => {
+  const db = makeDb();
+  const light = memory.levelOf({ size: 3, use: 8, personal: 1 });
+  const heavy = memory.levelOf({ size: 400, use: 0, personal: 0.3 });
+  assert.ok(light < 0.25 && heavy > 0.75, `${light} ${heavy}`);
+  assert.equal(memory.personalOf({ id: 'preferenze', label: 'preferenze' }), 1);
+  assert.equal(memory.personalOf({ id: 'auto', label: 'auto' }), 0.3);
+  memory.noteUse(db, ['valori', 'valori'], T0);
+  memory.noteUse(db, ['valori'], T0 + 1000);
+  const b = memory.addLevels(db, [{ id: 'valori', label: 'valori', kind: 'module', children: [{}] }, { id: 'manuali-auto', label: 'manuali auto', kind: 'module' }], { 'manuali-auto': 300 }, T0 + 2000);
+  assert.equal(b[0].ring, 0);
+  assert.equal(b[1].ring, 2);
+});
