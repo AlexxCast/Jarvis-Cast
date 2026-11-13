@@ -5,6 +5,7 @@ import { handleChat, isAddressed, applyActions, addMessage } from './brain.js';
 import { loadDiary, saveDiary, mergeLegacy, patchProfile, DIET_ACTIONS } from './diet.js';
 import * as N from './nutrition.js';
 import * as memory from './memory.js';
+import * as places from './places.js';
 import * as agenda from './agenda.js';
 import * as ui from './ui.js';
 import * as coder from './coder.js';
@@ -39,7 +40,7 @@ function statePayload(db, ms, tz, env = {}) {
   return {
     now: nowIsoOf(ms, tz), today: N.todaySummary(d, today), days,
     balance: complete ? (({ dailyProgressList, ...rest }) => rest)(N.cumulativeBalance(d, today)) : null,
-    diary: d, reminders: agenda.listReminders(db, tz), jobs: jobs.listJobs(db),
+    diary: d, reminders: agenda.listReminders(db, tz), jobs: jobs.listJobs(db), places: places.listPlaces(db),
     legacyImported: kvGet(db, 'legacyImported', null),
     layout: ui.loadLayout(db),
     mood: mood.current(db, ms),
@@ -174,6 +175,18 @@ export async function handleApi(db, env, deps, request) {
       const nextDue = agenda.fireDue(db, ms, tz);
       if (nextDue) deps.schedule?.(nextDue);
       return json({ id, reminders: agenda.listReminders(db, tz) });
+    }
+    if (path === '/api/places' && method === 'GET') return json({ places: places.listPlaces(db) });
+    if (path === '/api/places' && method === 'POST') {
+      const b = await body(request);
+      if (!places.savePlace(db, b)) return bad('nome o coordinate non validi');
+      return json({ places: places.listPlaces(db), reminders: agenda.listReminders(db, tz) });
+    }
+    const plc = /^\/api\/places\/([^/]+)$/.exec(path);
+    if (plc && method === 'DELETE') { places.deletePlace(db, decodeURIComponent(plc[1])); return json({ places: places.listPlaces(db) }); }
+    if (path === '/api/place-event' && method === 'POST') {
+      const b = await body(request);
+      return json({ items: agenda.placeEvent(db, b.place, b.event, ms, tz) });
     }
     const rem = /^\/api\/reminders\/([\w-]+)$/.exec(path);
     if (rem && method === 'DELETE') { agenda.deleteReminder(db, rem[1]); return json({ reminders: agenda.listReminders(db, tz) }); }

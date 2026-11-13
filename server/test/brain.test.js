@@ -376,3 +376,39 @@ test('umore: le emozioni spostano gli ormoni, che tornano piano alla quiete; ent
   const state = await (await handleApi(db, ENV, deps(f), new Request('https://x/api/state'))).json();
   assert.ok(state.mood.tensione > 0.3);
 });
+
+test('promemoria legati a un luogo: salvati da telefono, consegnati all\'arrivo e mai dal timer', async () => {
+  const db = makeDb();
+  const d = { ...deps(fakeFetch(() => reply({ reply: 'Va bene, signore.', actions: [
+    { type: 'add_reminder', text: 'Butta la spazzatura', place: 'a casa', when: 'arrivo', repeat: 'sempre' },
+    { type: 'add_reminder', text: 'Compra il latte', place: 'Casa', when: 'uscita' },
+    { type: 'save_place', name: 'Casa' },
+  ] }))), schedule: () => {} };
+  const call = async (method, path, payload) => {
+    const res = await handleApi(db, ENV, d, new Request('https://x' + path, { method, body: payload ? JSON.stringify(payload) : undefined }));
+    return { status: res.status, body: await res.json() };
+  };
+  const out = await handleChat(db, ENV, d, { text: 'quando arrivo a casa ricordami di buttare la spazzatura' });
+  assert.deepEqual(out.device, [{ type: 'save_place', name: 'Casa' }], 'la posizione la prende il telefono');
+  let list = agenda.listReminders(db, 'Europe/Rome');
+  assert.equal(list.length, 2);
+  assert.equal(list[0].place, 'casa');
+  assert.equal(list[0].placeKnown, false);
+  assert.match(agenda.agendaContext(db, 'Europe/Rome'), /luogo non ancora salvato/);
+  // Il timer non li tocca.
+  assert.equal(agenda.fireDue(db, T0 + 86_400_000, 'Europe/Rome'), null);
+  assert.equal((await call('POST', '/api/places', { name: 'Casa', lat: 'x', lon: 9 })).status, 400);
+  const saved = await call('POST', '/api/places', { name: 'Casa', lat: 45.46, lon: 9.19 });
+  assert.deepEqual(saved.body.places.map(p => [p.key, p.radius]), [['casa', 150]]);
+  assert.equal(saved.body.reminders[0].placeKnown, true);
+  assert.equal((await call('GET', '/api/state')).body.places.length, 1);
+  // Arrivo: solo quello di arrivo; si ripete, quindi resta attivo.
+  assert.deepEqual((await call('POST', '/api/place-event', { place: 'casa', event: 'arrivo' })).body.items, ['Butta la spazzatura']);
+  assert.deepEqual((await call('POST', '/api/place-event', { place: 'casa', event: 'arrivo' })).body.items, [], 'GPS che balla: niente doppioni');
+  assert.deepEqual((await call('POST', '/api/place-event', { place: 'casa', event: 'uscita' })).body.items, ['Compra il latte']);
+  list = agenda.listReminders(db, 'Europe/Rome');
+  assert.deepEqual(list.map(r => r.text), ['Butta la spazzatura'], 'quello senza ripetizione è fatto');
+  assert.equal((await call('POST', '/api/inbox/consume')).body.items.length, 0, 'già notificati dal telefono');
+  await call('DELETE', '/api/places/casa');
+  assert.equal((await call('GET', '/api/places')).body.places.length, 0);
+});

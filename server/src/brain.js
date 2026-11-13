@@ -4,6 +4,7 @@ import * as router from './router.js';
 import { CORE_PROMPT, buildMessages, parseReply } from './context.js';
 import { loadDiary, saveDiary, applyDietAction, dietBrief, dietContext, DIET_ACTIONS, DIET_KEYWORDS, DIET_RULES } from './diet.js';
 import * as memory from './memory.js';
+import * as places from './places.js';
 import * as agenda from './agenda.js';
 import * as ui from './ui.js';
 import * as coder from './coder.js';
@@ -17,7 +18,7 @@ const UI_WORDS = /(mostra|vedere|vedo|visualizz|schermat|riquadr|togli|nascond|i
 const SPORT_WORDS = /(allen|corsa|corr[eoi]|palestra|sport|cammin|bici|nuot|esercizi|pesi|passi)/i;
 const SUMMARIZE_AFTER = 24;   // messaggi non ancora riassunti oltre i quali si comprime
 const KEEP_VERBATIM = 10;     // messaggi recenti che restano sempre per intero
-const AGENDA_KEYWORDS = /(ricord|ogni (sera|mattina|giorno|settimana|mese|luned|marted|mercoled|gioved|venerd|sabato|domenica)|tutti i giorni|promemoria|appuntament|agenda|scadenz|sveglia|domani|dopodomani|stasera|settimana prossima|luned|marted|mercoled|gioved|venerd|sabato|domenica|alle \d|tra \d+ (minut|or))/i;
+const AGENDA_KEYWORDS = /(ricord|ogni (sera|mattina|giorno|settimana|mese|luned|marted|mercoled|gioved|venerd|sabato|domenica)|tutti i giorni|promemoria|quando (arriv|esc|torn|sono a|entro)|arrivo a|esco da|torno a casa|luogh|posizione|salva (questo|il) (posto|luogo)|appuntament|agenda|scadenz|sveglia|domani|dopodomani|stasera|settimana prossima|luned|marted|mercoled|gioved|venerd|sabato|domenica|alle \d|tra \d+ (minut|or))/i;
 
 function session(db, id) {
   let row = db.get('SELECT * FROM sessions WHERE id = ?', id);
@@ -56,7 +57,13 @@ export function applyActions(db, actions, ctx) {
         const name = String(a.name || '').trim().slice(0, 60);
         if (!name) continue;
         out.device.push({ type: 'open_app', name });
-      } else if (a.type === 'open_url') {
+      } else if (a.type === 'save_place') {
+        // Le coordinate le conosce solo il telefono: salva lui la posizione attuale con questo nome.
+        const name = String(a.name || '').trim().slice(0, 40);
+        if (!name) continue;
+        out.device.push({ type: 'save_place', name });
+      } else if (a.type === 'forget_place') places.deletePlace(db, a.name);
+      else if (a.type === 'open_url') {
         const url = String(a.url || '').trim().slice(0, 500);
         if (!/^https:\/\//i.test(url)) continue;
         out.device.push({ type: 'open_url', url });

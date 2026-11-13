@@ -35,6 +35,8 @@ AZIONI DISPONIBILI (campo "type"):
 - save_recipe {title, items, instructions, total_kcal, total_protein, total_carbs, total_fat} · delete_recipe {id | title}
 - remember {module, text, description: descrizione del modulo se è nuovo} · forget {id}
 - add_reminder {text, due: "yyyy-MM-ddTHH:mm" (la prima volta), repeat: ""|giorno|feriali|settimana|mese} · done_reminder {id} (per un promemoria che si ripete lo ferma per sempre)
+- add_reminder legato a un luogo {text, place: "casa"|"palestra"|..., when: arrivo|uscita, repeat: ""|sempre} (senza due). Se il luogo non è tra i LUOGHI SALVATI crealo lo stesso e chiedi all'utente di dirti "salva questo posto come <nome>" quando si trova lì.
+- save_place {name}: il telefono salva la posizione in cui si trova ADESSO con quel nome · forget_place {name}
 - start_job {title, goal: descrizione completa e autosufficiente del lavoro da svolgere}
 - code_change {request} · code_approve {id} · code_discard {id}
 - ui_pin {widget, where} · ui_unpin {widget | id, where} · ui_note {text, title, where} · ui_reset {}
