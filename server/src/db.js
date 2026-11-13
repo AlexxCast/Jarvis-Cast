@@ -40,6 +40,8 @@ export function wrapNodeSqlite(database) {
 // Colonne aggiunte dopo la prima versione: ALTER fallisce se esistono già, ed è giusto così.
 const ADDED_COLUMNS = [
   "ALTER TABLE reminders ADD COLUMN repeat TEXT NOT NULL DEFAULT ''",
+  "ALTER TABLE reminders ADD COLUMN place TEXT NOT NULL DEFAULT ''",
+  "ALTER TABLE reminders ADD COLUMN place_event TEXT NOT NULL DEFAULT ''",
 ];
 
 export function migrate(db) {

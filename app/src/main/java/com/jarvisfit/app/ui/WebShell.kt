@@ -5,6 +5,7 @@ import android.annotation.SuppressLint
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
+import android.os.Build
 import android.view.ViewGroup
 import android.webkit.JavascriptInterface
 import android.webkit.ValueCallback
@@ -49,6 +50,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.jarvisfit.app.data.Settings
 import com.jarvisfit.app.device.AppLauncher
+import com.jarvisfit.app.device.Places
 import com.jarvisfit.app.data.Store
 import com.jarvisfit.app.net.Cloud
 import com.jarvisfit.app.voice.JarvisService
@@ -72,6 +74,7 @@ class JarvisBridge(
     private val activity: ComponentActivity,
     private val requestListening: () -> Unit,
     private val onDisconnect: () -> Unit,
+    private val onRequestLocation: () -> Unit,
 ) {
     @JavascriptInterface
     fun getConfig(): String = buildJsonObject {
@@ -123,6 +126,22 @@ class JarvisBridge(
     fun openUrl(url: String): Boolean = AppLauncher.openUrl(activity, url)
 
     @JavascriptInterface
+    fun locationStatus(): String = Places.status(activity)
+
+    @JavascriptInterface
+    fun requestLocation() = activity.runOnUiThread { onRequestLocation() }
+
+    @JavascriptInterface
+    fun savePlaceHere(name: String): String {
+        val st = Places.saveHere(activity, name)
+        if (st == "permesso") activity.runOnUiThread { onRequestLocation() }
+        return st
+    }
+
+    @JavascriptInterface
+    fun syncPlaces(json: String) = Places.sync(activity, json)
+
+    @JavascriptInterface
     fun disconnectCloud() = activity.runOnUiThread { onDisconnect() }
 }
 
@@ -152,6 +171,19 @@ fun WebShell(onDisconnect: () -> Unit) {
     val requestListening: () -> Unit = {
         val hasMic = ContextCompat.checkSelfPermission(ctx, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
         if (hasMic) JarvisService.start(ctx) else listenPerms.launch(listeningPermissions())
+    }
+
+    // Posizione: prima "mentre usi l'app", poi (Android 10+) "consenti sempre" per gli avvisi ad app chiusa.
+    val backgroundLocation = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { Places.register(ctx) }
+    val foregroundLocation = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { granted ->
+        if (granted.values.any { it } && Build.VERSION.SDK_INT >= 29) backgroundLocation.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+        Places.register(ctx)
+    }
+    val requestLocation: () -> Unit = {
+        when (Places.status(ctx)) {
+            "none" -> foregroundLocation.launch(Places.foregroundPermissions())
+            "foreground" -> if (Build.VERSION.SDK_INT >= 29) backgroundLocation.launch(Manifest.permission.ACCESS_BACKGROUND_LOCATION)
+        }
     }
 
     val webView = remember {
@@ -196,7 +228,7 @@ fun WebShell(onDisconnect: () -> Unit) {
                     }
                 }
             }
-            addJavascriptInterface(JarvisBridge(activity, requestListening, onDisconnect), "JarvisNative")
+            addJavascriptInterface(JarvisBridge(activity, requestListening, onDisconnect, requestLocation), "JarvisNative")
             loadUrl(serverUrl)
         }
     }

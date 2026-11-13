@@ -90,8 +90,39 @@ function runDeviceActions(list) {
       if (nativeCall('openApp', a.name) !== true) toast(`Non trovo l'app "${a.name}" su questo telefono.`);
     } else if (a.type === 'open_url' && /^https:\/\//i.test(a.url)) {
       if (native) nativeCall('openUrl', a.url); else window.open(a.url, '_blank', 'noopener');
-    }
+    } else if (a.type === 'save_place') savePlaceHere(a.name);
   }
+}
+
+/** Salva la posizione attuale con un nome ("casa", "palestra"): la usa il telefono per i promemoria all'arrivo. */
+function savePlaceHere(name) {
+  name = String(name || '').trim();
+  if (!name) return;
+  if (native) {
+    const st = nativeCall('savePlaceHere', name);
+    if (st === 'permesso') return toast('Mi serve il permesso della posizione: scelga "Consenti sempre", poi ripeta.');
+    if (st === 'spento') return toast('La posizione del telefono è spenta: la accenda e ripeta.');
+    toast(`Prendo la posizione per "${name}"…`);
+    // Il telefono la invia al server da solo; dopo qualche secondo ricarichiamo.
+    setTimeout(() => refresh().then(render).catch(() => {}), 9000);
+    return;
+  }
+  if (!navigator.geolocation) return toast('Questo browser non conosce la posizione.');
+  navigator.geolocation.getCurrentPosition(async (p) => {
+    try {
+      await api('POST', '/places', { name, lat: p.coords.latitude, lon: p.coords.longitude });
+      await refresh(); render(); toast(`Luogo "${name}" salvato.`);
+    } catch (e) { toast(e.message); }
+  }, () => toast('Non riesco a leggere la posizione.'), { enableHighAccuracy: true, timeout: 20000 });
+}
+
+/** Il telefono controlla da solo quando entra o esce dai luoghi salvati: gli passiamo l'elenco aggiornato. */
+let syncedPlaces = '';
+function syncPlaces(list) {
+  const json = JSON.stringify(list || []);
+  if (!native || json === syncedPlaces) return;
+  syncedPlaces = json;
+  nativeCall('syncPlaces', json);
 }
 
 // ------------------------------------------------------------------ utilità
@@ -152,6 +183,7 @@ function logout(clear = true) {
 async function refresh() {
   store.state = await api('GET', '/state');
   applyMood(store.state.mood);
+  syncPlaces(store.state.places);
   store.error = '';
 }
 async function loadHistory() {
@@ -280,7 +312,7 @@ function widgetData(w) {
       return ['Peso', last ? last.kg + ' kg' : '—', last && ws.length > 1 ? `${kg(ws[0].kg - last.kg)} dal ${dateLabel(ws[0].date)}` : 'nessuna pesata'];
     }
     case 'deficit_medio': return b ? ['Deficit medio', fmt(b.avgDeficitPerDay) + ' kcal/g', `media netta ${fmt(b.avgNetKcalPerDay)} kcal`] : ['Deficit medio', '—', ''];
-    case 'promemoria': { const r = s.reminders[0]; return ['Promemoria', r ? r.text : 'nessuno', r ? r.due.replace('T', ' ') : '']; }
+    case 'promemoria': { const r = s.reminders.find(x => !x.place) || s.reminders[0]; return ['Promemoria', r ? r.text : 'nessuno', r ? (r.place ? reminderWhen(r) : r.due.replace('T', ' ')) : '']; }
     case 'compiti': { const run = s.jobs.filter(j => j.status !== 'done' && j.status !== 'failed'); return ['Compiti', run.length ? String(run.length) : 'nessuno', run[0]?.title || '']; }
     case 'nota': return [w.title || 'Nota', '', w.text];
     default: return null;
@@ -423,6 +455,30 @@ function viewCucina() {
 
 // ------------------------------------------------------------------ attività (promemoria e compiti)
 
+function reminderWhen(r) {
+  if (r.place) return `${r.when === 'uscita' ? 'Quando esce da' : 'Quando arriva a'} ${r.placeName}${r.repeat ? ' · ogni volta' : ''}${r.placeKnown ? '' : ' · luogo da salvare'}`;
+  return new Date(r.dueMs).toLocaleString('it-IT', { dateStyle: 'medium', timeStyle: 'short' }) + ({ giorno: ' · ogni giorno', feriali: ' · dal lunedì al venerdì', settimana: ' · ogni settimana', mese: ' · ogni mese' }[r.repeat] || '');
+}
+
+function viewLuoghi(s) {
+  const places = s.places || [];
+  const name = h('input', { placeholder: 'Es. Casa, Palestra, Lavoro', 'aria-label': 'Nome del luogo' });
+  const perm = native ? nativeCall('locationStatus') : 'always';
+  return h('div', { class: 'card' }, h('h2', {}, 'Luoghi'),
+    h('p', { class: 'muted' }, 'Per i promemoria "quando arrivo a casa". Si salva la posizione in cui si trova adesso.'),
+    native && perm !== 'always' ? h('div', { class: 'row wrap' },
+      h('p', { class: 'grow' }, perm === 'foreground' ? 'Per avvisarla anche ad app chiusa scelga "Consenti sempre" nella posizione.' : 'Jarvis non ha ancora il permesso della posizione.'),
+      h('button', { class: 'btn', onclick: () => { nativeCall('requestLocation'); setTimeout(render, 1500); } }, 'Concedi posizione')) : null,
+    h('div', { class: 'row wrap' }, name, h('button', { class: 'btn primary', onclick: () => {
+      if (!name.value.trim()) return toast('Dia un nome al luogo.');
+      savePlaceHere(name.value);
+    } }, 'Salva dove sono ora')),
+    places.length ? h('div', { class: 'list' }, places.map(p => h('div', { class: 'item' },
+      h('div', { class: 'grow' }, h('div', {}, p.name), h('div', { class: 'muted num' }, `raggio ${p.radius} m`)),
+      h('button', { class: 'btn icon ghost danger', 'aria-label': 'Elimina luogo', onclick: guard(async () => { s.places = (await api('DELETE', '/places/' + encodeURIComponent(p.key))).places; syncPlaces(s.places); render(); }) }, icon(ICONS.trash)))))
+      : h('p', { class: 'empty' }, 'Nessun luogo. Quando è a casa può dire: "Jarvis, salva questo posto come casa".'));
+}
+
 function viewAttivita() {
   const s = store.state;
   const text = h('input', { placeholder: 'Cosa devo ricordarle?', 'aria-label': 'Testo del promemoria' });
@@ -435,9 +491,10 @@ function viewAttivita() {
         s.reminders = (await api('POST', '/reminders', { text: text.value, due: due.value })).reminders; render();
       }) }, 'Aggiungi')),
       s.reminders.length ? h('div', { class: 'list' }, s.reminders.map(r => h('div', { class: 'item' },
-        h('div', { class: 'grow' }, h('div', {}, r.text), h('div', { class: 'muted num' }, new Date(r.dueMs).toLocaleString('it-IT', { dateStyle: 'medium', timeStyle: 'short' }) + ({ giorno: ' · ogni giorno', feriali: ' · dal lunedì al venerdì', settimana: ' · ogni settimana', mese: ' · ogni mese' }[r.repeat] || ''))),
+        h('div', { class: 'grow' }, h('div', {}, r.text), h('div', { class: 'muted num' }, reminderWhen(r))),
         h('button', { class: 'btn icon ghost danger', 'aria-label': 'Elimina promemoria', onclick: guard(async () => { s.reminders = (await api('DELETE', '/reminders/' + r.id)).reminders; render(); }) }, icon(ICONS.trash)))))
         : h('p', { class: 'empty' }, 'Nessun promemoria. Può anche dire: "Jarvis, ricordami alle 18 di chiamare il dentista".')),
+    viewLuoghi(s),
     h('div', { class: 'card' }, h('h2', {}, 'Compiti in background'),
       h('p', { class: 'muted' }, 'Jarvis divide il lavoro in passi, li svolge uno alla volta e avvisa quando ha finito.'),
       goal, h('button', { class: 'btn primary', onclick: guard(async () => {

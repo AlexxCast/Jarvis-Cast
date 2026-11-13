@@ -31,6 +31,7 @@ import com.jarvisfit.app.ai.Brain
 import com.jarvisfit.app.data.Settings
 import com.jarvisfit.app.data.Store
 import com.jarvisfit.app.device.AppLauncher
+import com.jarvisfit.app.device.Places
 import com.jarvisfit.app.net.Cloud
 import com.jarvisfit.app.ui.MainActivity
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -108,6 +109,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "JarvisFit::listen").apply { setReferenceCounted(false) }
         guard = MicGuard(this, main) { onRecordingChanged() }.also { it.start() }
         ticker.postDelayed(inboxPoll, 20_000)
+        Places.register(this)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -633,6 +635,10 @@ class JarvisService : LifecycleService(), SensorEventListener {
                 when (type) {
                     "open_app" -> AppLauncher.open(this@JarvisService, value)
                     "open_url" -> AppLauncher.openUrl(this@JarvisService, value)
+                    "save_place" -> when (Places.saveHere(this@JarvisService, value)) {
+                        "permesso" -> notifyInfoPopup("Per salvare \"$value\" apri Jarvis e concedi la posizione (Consenti sempre).", 12)
+                        "spento" -> notifyInfoPopup("Accendi la posizione del telefono e ripeti.", 12)
+                    }
                 }
             }
             

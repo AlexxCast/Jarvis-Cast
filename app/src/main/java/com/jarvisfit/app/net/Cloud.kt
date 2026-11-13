@@ -88,6 +88,7 @@ object Cloud {
                     when (val type = str(a, "type")) {
                         "open_app" -> str(a, "name").ifBlank { null }?.let { type to it }
                         "open_url" -> str(a, "url").ifBlank { null }?.let { type to it }
+                        "save_place" -> str(a, "name").ifBlank { null }?.let { type to it }
                         else -> null
                     }
                 } ?: emptyList(),
@@ -112,6 +113,22 @@ object Cloud {
             val o = request("POST", "/api/inbox/consume", JsonObject(emptyMap()), readTimeoutMs = 20_000)
             (o["items"] as? JsonArray)?.mapNotNull { el -> (el as? JsonObject)?.let { str(it, "text") }?.ifBlank { null } }
                 ?: emptyList()
+        }.getOrDefault(emptyList())
+    }
+
+    /** Salva un luogo; ritorna l'elenco aggiornato dei luoghi (JSON) o null se il server non risponde. */
+    suspend fun savePlace(name: String, lat: Double, lon: Double): String? = withContext(Dispatchers.IO) {
+        runCatching {
+            val o = request("POST", "/api/places", buildJsonObject { put("name", name); put("lat", lat); put("lon", lon) }, readTimeoutMs = 20_000)
+            (o["places"] as? JsonArray)?.toString()
+        }.getOrNull()
+    }
+
+    /** Arrivo/uscita da un luogo: il server risponde con i promemoria da mostrare. */
+    suspend fun placeEvent(place: String, event: String): List<String> = withContext(Dispatchers.IO) {
+        runCatching {
+            val o = request("POST", "/api/place-event", buildJsonObject { put("place", place); put("event", event) }, readTimeoutMs = 8_000)
+            (o["items"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.ifBlank { null } } ?: emptyList()
         }.getOrDefault(emptyList())
     }
 
