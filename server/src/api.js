@@ -157,6 +157,10 @@ export async function handleApi(db, env, deps, request) {
       const sport = g.branches.find(b => b.id === 'sport');
       sport.children = [...sport.children, ...[...kinds].sort((a, b) => b[1].n - a[1].n).slice(0, 8)
         .map(([name, k]) => ({ id: 'sport:' + name, label: `${name} · ${k.n === 1 ? "una volta" : k.n + " volte"}, ultima ${k.last.slice(5)}` }))];
+      const sizes = { dieta: (d.meals || []).length, sport: (d.activities || []).length + (d.weights || []).length,
+        agenda: db.get('SELECT COUNT(*) AS n FROM reminders WHERE done = 0').n, compiti: db.get('SELECT COUNT(*) AS n FROM jobs').n };
+      for (const b of g.branches) if (b.kind === 'module') sizes[b.id] = (b.entries || 0) + db.get('SELECT COUNT(*) AS n FROM topics WHERE module = ?', b.id).n;
+      memory.addLevels(db, g.branches, sizes, ms);
       return json({ ...g, last: kvGet(db, 'lastTouched', null) });
     }
     if (path === '/api/memory' && method === 'GET') {

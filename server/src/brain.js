@@ -170,6 +170,7 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
   result.touchedLeaves = [...topicHits.leaves, ...recalled.entries.map(m => 'm:' + m.id)];
   kvSet(db, 'lastTouched', { at: nowIso + '#' + ms, touched: result.touched, leaves: result.touchedLeaves });
   memory.markUsed(db, recalled.entries.map(m => m.id), nowIso);
+  memory.noteUse(db, result.touched, ms);
 
   // Aggiorna i moduli "caldi" della sessione.
   const next = {};
