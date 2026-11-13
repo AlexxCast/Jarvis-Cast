@@ -21,7 +21,7 @@ COMPITI LUNGHI
 FORMATO DI RISPOSTA: rispondi SOLO con un oggetto JSON valido, senza testo prima o dopo:
 {"reply": "testo da leggere ad alta voce", "expect_reply": true|false, "card": "riassunto schematico dei numeri o stringa vuota", "topics": [{"area": "...", "topic": "...", "parent": "..."}], "actions": [ ... ]}
 - expect_reply: true se ti aspetti che l'utente continui; false se la richiesta è chiusa, se saluta o dice "basta", "grazie", "a posto".
-- topics: gli argomenti di questo scambio, per la mappa della tua mente. "area" è il campo generale (usa un modulo esistente se adatto, es. "programmazione", "lavoro", "dieta"), "topic" è l'argomento preciso (es. "programmazione a oggetti"), "parent" (facoltativo) è l'argomento più generale già esistente sotto cui sta (es. topic "Joytify", parent "musica"). Riusa SEMPRE un argomento esistente (vedi ARGOMENTI GIÀ NELLA MAPPA) se è lo stesso concetto, anche scritto diversamente: niente doppioni come "joy tifi" e "app joytify". Al massimo 3; lista vuota per saluti e chiacchiere.
+- topics: gli argomenti di questo scambio, per la mappa della tua mente. "area" è il campo generale (usa un modulo esistente se adatto, es. "programmazione", "lavoro", "dieta"), "topic" è l'argomento preciso (es. "programmazione a oggetti"), "parent" (facoltativo) è l'argomento più generale già esistente sotto cui sta (es. topic "Joytify", parent "musica"). Riusa SEMPRE un argomento esistente (vedi ARGOMENTI GIÀ NELLA MAPPA) se è lo stesso concetto, anche scritto diversamente: niente doppioni come "joy tifi" e "app joytify". Se l'argomento è un'app, scrivi il suo nome corretto (quello dell'app installata), non come l'hai sentito. Al massimo 3; lista vuota per saluti e chiacchiere.
 - card: solo dati schematici da mostrare a schermo (es. "Pranzo: 520 kcal (P38 C45 G12) • Rimanenti: 680 kcal"); vuota se non servono.
 
 AZIONI DISPONIBILI (campo "type"):
@@ -47,7 +47,7 @@ Le date nelle azioni sono sempre yyyy-MM-dd.`;
 
 /**
  * Riempie il contesto entro il budget del modello.
- * parts: { core, brief, rules, blocks:[{prio,text}], memories:[string], moduleIndex, agenda, summary, history:[{role,text}], userText, image }
+ * parts: { core, brief, rules, blocks:[{prio,text}], memories:[string], moduleIndex, agenda, weather, summary, history:[{role,text}], userText, image }
  */
 export function buildMessages(model, parts) {
   const budget = Math.max(1500, Math.min(model.ctx * 0.55, 48000));
@@ -74,6 +74,7 @@ export function buildMessages(model, parts) {
   const blocks = [...(parts.blocks || [])].sort((a, b) => a.prio - b.prio);
   const rest = [];
   for (const b of blocks) { if (b.prio === 1) { if (take(b.text)) sections.push(b.text); } else rest.push(b); }
+  if (parts.weather && take(parts.weather)) sections.push(parts.weather);
   if (parts.agenda && take(parts.agenda)) sections.push(parts.agenda);
   if (parts.summary && take(parts.summary)) sections.push('RIASSUNTO DELLA CONVERSAZIONE FINORA\n' + parts.summary);
   if (parts.moduleIndex && take(parts.moduleIndex)) sections.push(parts.moduleIndex);

@@ -66,6 +66,30 @@ export function sameTopic(a, b) {
   return short >= 4 && 1 - editDistance(x, y) / long >= 0.72;
 }
 
+/**
+ * Se un argomento è il nome storpiato di un'app installata ("Joy Tifi", "pronuncia joytify"),
+ * lo riporta al nome vero dell'app, così tutte le varianti finiscono nello stesso nodo.
+ */
+export function appLabel(db, label) {
+  const key = topicKey(label);
+  if (key.length < 4) return label;
+  // Somiglianza larga solo quando la frase parla di un'app ("app joy-tyfiche", "pronuncia joytify"):
+  // altrimenti parole vere come "strada" o "calendario esami" diventerebbero Strava o Calendario.
+  const appish = /\b(app|applicazione|pronuncia|nome)\b/i.test(String(label));
+  let best = null, score = 0;
+  for (const app of kvGet(db, 'apps', [])) {
+    const k = topicKey(app);
+    if (k.length < 4) continue;
+    if (k === key) return app;
+    if (!appish) continue;
+    let sc = 1 - editDistance(k, key) / Math.max(k.length, key.length);
+    // "joytyfiche": la parte iniziale somiglia al nome dell'app e il resto è un suffisso storpiato.
+    if (key.length > k.length && key.length <= k.length * 1.6) sc = Math.max(sc, 0.95 * (1 - editDistance(k, key.slice(0, k.length)) / k.length));
+    if (sc > score) { best = app; score = sc; }
+  }
+  return best && score >= 0.55 ? best : label;
+}
+
 /** Trova nel modulo un argomento uguale o quasi; ritorna il suo name oppure null. */
 function findTopic(db, mod, label) {
   for (const t of db.all('SELECT name, label FROM topics WHERE module = ? ORDER BY uses DESC', mod)) {
@@ -75,6 +99,7 @@ function findTopic(db, mod, label) {
 }
 
 function upsertTopic(db, mod, label, nowIso) {
+  label = appLabel(db, label);
   const existing = findTopic(db, mod, label);
   if (existing) { db.run('UPDATE topics SET uses = uses + 1, last_used = ? WHERE module = ? AND name = ?', nowIso, mod, existing); return existing; }
   const name = slug(label);
@@ -112,8 +137,13 @@ export function tidyTopics(db) {
     const list = db.all('SELECT name, label, uses FROM topics WHERE module = ? ORDER BY uses DESC, last_used DESC', mod);
     const kept = [];
     for (const t of list) {
+      // Prima riporta i nomi storpiati di app al nome vero, poi cerca un nodo uguale.
+      const fixed = appLabel(db, t.label);
+      if (fixed !== t.label) { db.run('UPDATE topics SET label = ? WHERE module = ? AND name = ?', fixed, mod, t.name); t.label = fixed; }
       const into = kept.find(k => sameTopic(k.label, t.label) || sameTopic(k.name, t.label));
       if (!into) { kept.push(t); continue; }
+      // Se il doppione porta il nome vero di un'app, il nodo che resta prende quel nome.
+      if (fixed !== into.label && kvGet(db, 'apps', []).includes(fixed)) { db.run('UPDATE topics SET label = ? WHERE module = ? AND name = ?', fixed, mod, into.name); into.label = fixed; }
       db.run('UPDATE topics SET uses = uses + ? WHERE module = ? AND name = ?', t.uses, mod, into.name);
       db.run('UPDATE topics SET parent = ? WHERE module = ? AND parent = ?', into.name, mod, t.name);
       db.run('DELETE FROM topics WHERE module = ? AND name = ?', mod, t.name);
