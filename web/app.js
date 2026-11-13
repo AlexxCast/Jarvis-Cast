@@ -139,6 +139,25 @@ async function importLegacyIfNeeded() {
   toast(`Dati del telefono importati: ${res.meals} pasti, ${res.weights} pesate.`);
 }
 
+/** Backup scelto dall'utente: il diario.json della vecchia app o un backup scaricato da Jarvis. Si unisce, non sostituisce. */
+function importBackupFile() {
+  const input = h('input', { type: 'file', accept: '.json,application/json' });
+  input.addEventListener('change', guard(async () => {
+    const file = input.files?.[0];
+    if (!file) return;
+    let obj;
+    try { obj = JSON.parse(await file.text()); } catch { return toast('Il file non è un backup valido.'); }
+    const diary = obj && obj.diary && Array.isArray(obj.diary.meals) ? obj.diary : obj;
+    if (!diary || !Array.isArray(diary.meals)) return toast('Il file non contiene dati di Jarvis.');
+    const res = await api('POST', '/import/legacy', { diary });
+    store.state = res.state;
+    await loadHistory();
+    render();
+    toast(`Backup importato: ${res.meals} pasti, ${res.weights} pesate.`);
+  }));
+  input.click();
+}
+
 function syncSteps() {
   const s = nativeJson('getSteps');
   if (s && s.steps > 0 && s.steps !== store.state?.today?.steps) api('POST', '/steps', s).then(refresh).then(render).catch(() => {});
@@ -438,6 +457,7 @@ function viewImpostazioni() {
           const a = h('a', { href: URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' })), download: `jarvis-backup-${data.exportedAt.slice(0, 10)}.json` });
           a.click(); URL.revokeObjectURL(a.href);
         }) }, 'Scarica un backup'),
+        h('button', { class: 'btn', onclick: importBackupFile }, 'Importa un backup'),
         native ? null : h('button', { class: 'btn ghost danger', onclick: () => logout() }, 'Esci'))),
   ];
 }

@@ -1,5 +1,8 @@
 package com.jarvisfit.app.ui
 
+import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -36,6 +39,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
@@ -61,6 +65,25 @@ import kotlin.math.roundToInt
 @Composable
 fun ProfileScreen(onSaved: () -> Unit) {
     val scope = rememberCoroutineScope()
+    val ctx = LocalContext.current
+    var importMsg by remember { mutableStateOf("") }
+    // Backup del vecchio JarvisFit: si unisce al diario senza cancellare nulla.
+    val importBackup = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            val msg = withContext(Dispatchers.IO) {
+                runCatching {
+                    val text = ctx.contentResolver.openInputStream(uri)?.bufferedReader()?.use { it.readText() }.orEmpty()
+                    val r = Store.importJson(text)
+                    "Importati ${r.meals} pasti, ${r.activities} allenamenti e ${r.weights} pesate."
+                }.getOrElse { "Import non riuscito: ${it.message ?: "file non valido"}" }
+            }
+            Toast.makeText(ctx, msg, Toast.LENGTH_LONG).show()
+            importMsg = msg
+            // I campi qui sopra mostrano ancora il profilo di prima: si esce, così non vengono salvati sopra.
+            if (msg.startsWith("Importati")) onSaved()
+        }
+    }
     val p = Store.diary.profile
     var name by remember { mutableStateOf(p.name) }
     var birth by remember { mutableStateOf(toUi(p.birthDate)) }
@@ -210,6 +233,12 @@ fun ProfileScreen(onSaved: () -> Unit) {
         if (appearance.isNotBlank()) Text(appearance, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text("La foto resta sul telefono; viene inviata a Gemini una sola volta per una descrizione della corporatura.",
             fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+
+        Text("Dati", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
+        OutlinedButton(onClick = { importBackup.launch(arrayOf("application/json", "text/plain", "application/octet-stream")) }, modifier = Modifier.fillMaxWidth()) {
+            Text("Importa backup (file .json)")
+        }
+        if (importMsg.isNotBlank()) Text(importMsg, fontSize = 13.sp, color = MaterialTheme.colorScheme.primary)
 
         Text("Collegamenti", fontSize = 18.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(top = 8.dp))
         OutlinedButton(onClick = { CloudUi.showSetup.value = true }, modifier = Modifier.fillMaxWidth()) {
