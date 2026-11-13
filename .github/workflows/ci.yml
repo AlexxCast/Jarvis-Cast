@@ -36,3 +36,9 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       # gradle.properties punta al JDK del PC di sviluppo: in CI si usa quello appena installato.
       - run: ./gradlew --no-daemon "-Dorg.gradle.java.home=$JAVA_HOME" testDebugUnitTest assembleDebug
+      # L'APK compilato resta scaricabile per 14 giorni dalla pagina del run (va poi firmato con la chiave del telefono).
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jarvis-apk-debug
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 14
