@@ -83,6 +83,7 @@ class JarvisBridge(
         put("token", Settings.serverToken)
         put("listening", Settings.listeningEnabled)
         put("speakReplies", Settings.speakReplies)
+        put("sensitivity", Settings.sensitivity)
         put("micGuard", Settings.micGuard)
         put("status", JarvisState.status.value.name)
         put("version", runCatching { activity.packageManager.getPackageInfo(activity.packageName, 0).versionName }.getOrNull() ?: "")
@@ -111,6 +112,9 @@ class JarvisBridge(
 
     @JavascriptInterface
     fun setMicGuard(on: Boolean) { Settings.micGuard = on }
+
+    @JavascriptInterface
+    fun setSensitivity(value: Double) { Settings.sensitivity = value.toFloat().coerceIn(0f, 1f) }
 
     @JavascriptInterface
     fun speak(text: String) = activity.runOnUiThread { Speaker.speak(text) }

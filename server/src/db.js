@@ -42,6 +42,7 @@ const ADDED_COLUMNS = [
   "ALTER TABLE reminders ADD COLUMN repeat TEXT NOT NULL DEFAULT ''",
   "ALTER TABLE reminders ADD COLUMN place TEXT NOT NULL DEFAULT ''",
   "ALTER TABLE reminders ADD COLUMN place_event TEXT NOT NULL DEFAULT ''",
+  "ALTER TABLE topics ADD COLUMN parent TEXT NOT NULL DEFAULT ''",
 ];
 
 export function migrate(db) {

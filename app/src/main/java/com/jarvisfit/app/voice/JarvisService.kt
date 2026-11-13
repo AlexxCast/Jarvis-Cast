@@ -364,7 +364,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
     /** Decide cosa fare di una frase completa sentita in attesa. */
     private fun handleHeard(text: String) {
         wakeHeard = false
-        when (val w = VoiceText.wake(text)) {
+        when (val w = VoiceText.wake(text, Settings.sensitivity)) {
             is VoiceText.Wake.Direct -> onWakeWordDetected(w.command)
             is VoiceText.Wake.Ambiguous -> {
                 if (!Settings.cloudEnabled) {
