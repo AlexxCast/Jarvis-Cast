@@ -89,7 +89,8 @@ export function markUsed(db, ids, nowIso) {
  */
 export function graph(db, { perModule = 8 } = {}) {
   const branches = [
-    { id: 'dieta', label: 'Dieta e sport', kind: 'core', children: [] },
+    { id: 'dieta', label: 'Dieta', kind: 'core', children: [] },
+    { id: 'sport', label: 'Sport', kind: 'core', children: [] },
     { id: 'agenda', label: 'Agenda', kind: 'core', children: db.all('SELECT id, text FROM reminders WHERE done = 0 ORDER BY due LIMIT 8').map(r => ({ id: 'r:' + r.id, label: r.text })) },
   ];
   const jobs = db.all("SELECT id, title, status FROM jobs ORDER BY created DESC LIMIT 8");

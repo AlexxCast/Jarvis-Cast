@@ -291,3 +291,22 @@ test('parseReply: argomenti ripuliti e al massimo tre', () => {
   assert.deepEqual(r.topics, [{ area: 'a', topic: 'x' }, { area: 'b', topic: '' }, { area: 'c', topic: '' }]);
   assert.deepEqual(parseReply('testo semplice').topics, []);
 });
+
+test('sfera: Sport è un ramo a parte, con un nodo per tipo di attività', async () => {
+  const db = seeded();
+  const d0 = loadDiary(db);
+  d0.activities = [
+    { id: 'a1', date: '2026-11-10', type: 'corsa', description: '', durationMin: 30, kcalBurned: 300 },
+    { id: 'a2', date: '2026-11-12', type: 'Corsa', description: '', durationMin: 25, kcalBurned: 250 },
+    { id: 'a3', date: '2026-11-11', type: 'palestra', description: '', durationMin: 60, kcalBurned: 400 },
+  ];
+  saveDiary(db, d0);
+  const f = fakeFetch(() => reply({ reply: 'Bene.', topics: [{ area: 'sport', topic: 'tecnica di corsa' }] }));
+  const d = deps(f);
+  const out = await handleChat(db, ENV, d, { text: 'come miglioro la corsa?' });
+  assert.ok(out.touched.includes('sport'));
+  const g = await (await handleApi(db, ENV, d, new Request('https://x/api/graph'))).json();
+  const sport = g.branches.find(b => b.id === 'sport');
+  assert.deepEqual(sport.children.map(c => c.label), ['tecnica di corsa', 'corsa · 2 volte, ultima 11-12', 'palestra · una volta, ultima 11-11']);
+  assert.equal(g.branches.filter(b => b.id === 'sport').length, 1);
+});

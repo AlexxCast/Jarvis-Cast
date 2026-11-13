@@ -9,6 +9,7 @@ import { today as todayOf, nowIso as nowIsoOf, nowHuman } from './clock.js';
 import { logEvent, kvSet } from './db.js';
 
 const STICKY_TURNS = 3;
+const SPORT_WORDS = /(allen|corsa|corr[eoi]|palestra|sport|cammin|bici|nuot|esercizi|pesi|passi)/i;
 const SUMMARIZE_AFTER = 24;   // messaggi non ancora riassunti oltre i quali si comprime
 const KEEP_VERBATIM = 10;     // messaggi recenti che restano sempre per intero
 const AGENDA_KEYWORDS = /(ricord|promemoria|appuntament|agenda|scadenz|sveglia|domani|dopodomani|stasera|settimana prossima|luned|marted|mercoled|gioved|venerd|sabato|domenica|alle \d|tra \d+ (minut|or))/i;
@@ -130,7 +131,7 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
   addMessage(db, sessionId, 'assistant', result.reply, nowIso, { model: result.model, card: result.card || undefined });
   // Cosa ha "acceso" questo scambio: la sfera illumina questi rami e foglie.
   const touched = new Set(recalled.active);
-  if (dietOn) touched.add('dieta');
+  if (dietOn) touched.add(SPORT_WORDS.test(userText) ? 'sport' : 'dieta');
   if (agendaOn) touched.add('agenda');
   for (const r of remembered) touched.add(r);
   for (const m of topicHits.modules) touched.add(m);

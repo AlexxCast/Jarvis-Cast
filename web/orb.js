@@ -1,82 +1,60 @@
-// La "mente" di Jarvis: un nucleo di nodi collegati con impulsi, e attorno i rami della sua memoria.
-// Ogni ramo è un modulo (un argomento, un progetto, la dieta, l'agenda, i compiti) e le sue foglie
-// sono le informazioni dentro. Quando si parla di un argomento, il suo ramo e le sue foglie si accendono;
-// toccando un ramo la sfera ruota verso di lui e lo ingrandisce.
+// La "mente" di Jarvis: al centro c'è solo il nodo Jarvis. Ogni argomento di cui si parla diventa un nodo
+// sulla superficie di una sfera, collegato al centro; i sotto-argomenti sono nodi vicini, uniti da piste
+// di circuito stampato che corrono sulla superficie curva (prima lungo un parallelo, poi lungo un meridiano).
+// La sfera quindi non è finta: si compone piano piano, un nodo alla volta.
+// Quando si parla di un argomento il suo ramo si accende; toccando un ramo la sfera ruota verso di lui e fa zoom.
 // Velocità, impulsi e respiro cambiano con lo stato (in attesa, in ascolto, sta pensando, sta parlando).
 
-const NODES = 90;
-const LINKS_PER_NODE = 3;
-const CORE = 0.42;        // raggio del nucleo rispetto alla sfera dei rami
-const HUB = 1;            // raggio a cui stanno i nodi dei rami
-const LEAF = 1.3;         // raggio a cui stanno le foglie
-const ZOOM = 2;         // ingrandimento quando un ramo è aperto
+const ZOOM = 2;           // ingrandimento quando un ramo è aperto
+const SPREAD = 0.42;      // distanza (in radianti) delle foglie dal loro ramo, sulla superficie
+const STEPS = 7;          // punti per tratto di pista curva
 
-// Parametri per stato: rotazione (rad/s), impulsi al secondo, luminosità, ampiezza del "respiro".
 const MODES = {
-  idle:      { spin: 0.12, rate: 3,  glow: 0.55, breathe: 0.015, label: 'Pronto' },
-  listening: { spin: 0.22, rate: 9,  glow: 0.8,  breathe: 0.05,  label: 'In ascolto' },
-  thinking:  { spin: 0.85, rate: 34, glow: 1,    breathe: 0.02,  label: 'Sto pensando' },
-  speaking:  { spin: 0.3,  rate: 14, glow: 0.95, breathe: 0.09,  label: 'Sto parlando' },
-  off:       { spin: 0.05, rate: 0.6, glow: 0.3, breathe: 0.008, label: 'Ascolto spento' },
+  idle:      { spin: 0.12, rate: 1.2, glow: 0.6,  breathe: 0.03, label: 'Pronto' },
+  listening: { spin: 0.2,  rate: 3,   glow: 0.85, breathe: 0.08, label: 'In ascolto' },
+  thinking:  { spin: 0.7,  rate: 12,  glow: 1,    breathe: 0.04, label: 'Sto pensando' },
+  speaking:  { spin: 0.28, rate: 5,   glow: 0.95, breathe: 0.14, label: 'Sto parlando' },
+  off:       { spin: 0.05, rate: 0.3, glow: 0.35, breathe: 0.01, label: 'Ascolto spento' },
 };
 
-const norm = (v) => { const l = Math.hypot(v.x, v.y, v.z) || 1; return { x: v.x / l, y: v.y / l, z: v.z / l }; };
-const scale = (v, k) => ({ x: v.x * k, y: v.y * k, z: v.z * k });
-const add = (a, b) => ({ x: a.x + b.x, y: a.y + b.y, z: a.z + b.z });
-const cross = (a, b) => ({ x: a.y * b.z - a.z * b.y, y: a.z * b.x - a.x * b.z, z: a.x * b.y - a.y * b.x });
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
+const clampLat = (v) => Math.max(-1.3, Math.min(1.3, v));
+/** Punto sulla sfera di raggio r da latitudine e longitudine. */
+const onSphere = (lat, lon, r = 1) => ({ x: Math.cos(lat) * Math.cos(lon) * r, y: Math.sin(lat) * r, z: Math.cos(lat) * Math.sin(lon) * r });
 
-function buildCore() {
-  // Punti distribuiti in modo uniforme (spirale di Fibonacci), con un po' di irregolarità "organica".
+/** Pista "a circuito" sulla superficie: prima lungo il parallelo, poi lungo il meridiano. */
+function surfaceTrace(a, b) {
   const pts = [];
-  const golden = Math.PI * (3 - Math.sqrt(5));
-  for (let i = 0; i < NODES; i++) {
-    const y = 1 - (i / (NODES - 1)) * 2;
-    const r = Math.sqrt(1 - y * y);
-    const t = golden * i;
-    const jitter = (0.9 + ((i * 7919) % 100) / 500) * CORE; // deterministico
-    pts.push({ x: Math.cos(t) * r * jitter, y: y * jitter, z: Math.sin(t) * r * jitter, heat: 0 });
-  }
-  const seen = new Set();
-  const links = [];
-  const link = (a, b) => {
-    const k = a < b ? a + '-' + b : b + '-' + a;
-    if (a === b || seen.has(k)) return;
-    seen.add(k); links.push([a, b]);
-  };
-  pts.forEach((p, i) => {
-    pts.map((q, j) => [j, (p.x - q.x) ** 2 + (p.y - q.y) ** 2 + (p.z - q.z) ** 2])
-      .sort((a, b) => a[1] - b[1]).slice(1, LINKS_PER_NODE + 1).forEach(([j]) => link(i, j));
-    if (i % 9 === 0) link(i, (i * 37 + 53) % NODES);
-  });
-  const byNode = pts.map(() => []);
-  links.forEach((l, idx) => { byNode[l[0]].push(idx); byNode[l[1]].push(idx); });
-  return { pts, links, byNode };
+  const dLon = wrap(b.lon - a.lon);
+  for (let i = 0; i <= STEPS; i++) pts.push(onSphere(a.lat, a.lon + dLon * (i / STEPS)));
+  for (let i = 1; i <= STEPS; i++) pts.push(onSphere(a.lat + (b.lat - a.lat) * (i / STEPS), b.lon));
+  return pts;
 }
 
-/** Dispone i rami sulla sfera: nucleo → gomito → nodo del ramo → foglie, con piste "a circuito". */
+/** Dispone i rami: nodo sulla sfera per ogni argomento, foglie attorno, piste verso il centro e tra i nodi. */
 function layoutBranches(list, old) {
   const golden = Math.PI * (3 - Math.sqrt(5));
   const n = list.length;
   return list.map((b, i) => {
-    const y = n === 1 ? 0.2 : (1 - ((i + 0.5) / n) * 2) * 0.82;
-    const r = Math.sqrt(1 - y * y), t = golden * i + 0.6;
-    const dir = norm({ x: Math.cos(t) * r, y, z: Math.sin(t) * r });
-    const u = norm(cross(dir, Math.abs(dir.y) > 0.9 ? { x: 1, y: 0, z: 0 } : { x: 0, y: 1, z: 0 }));
-    const v = cross(dir, u);
+    const y = n === 1 ? 0.15 : (1 - ((i + 0.5) / n) * 2) * 0.8;
+    const lat = Math.asin(y), lon = golden * i + 0.6;
     const prev = old.get(b.id);
-    const hub = { ...scale(dir, HUB), heat: prev ? prev.hub.heat : 0 };
-    const start = scale(dir, CORE * 1.05);
-    const elbow = add(scale(dir, 0.72), scale(u, 0.12 * (i % 2 ? 1 : -1)));
+    const hub = { ...onSphere(lat, lon), lat, lon, heat: prev ? prev.hub.heat : 0 };
+    // Dal centro: dritto verso l'esterno, poi una curva a gomito fino al nodo (come una pista).
+    const bend = onSphere(lat + (i % 2 ? 0.25 : -0.25), lon - 0.2, 0.6);
+    const spoke = [{ x: 0, y: 0, z: 0 }, bend, hub];
     const kids = (b.children || []).slice(0, 10);
     const leaves = kids.map((c, k) => {
-      const a = (k / Math.max(1, kids.length)) * Math.PI * 2 + i;
-      const off = add(scale(u, Math.cos(a) * 0.3), scale(v, Math.sin(a) * 0.3));
+      const a = (k / Math.max(1, kids.length)) * Math.PI * 2 + i * 0.7;
+      const dist = SPREAD * (k % 2 ? 1.25 : 1);
+      const llat = clampLat(lat + Math.sin(a) * dist);
+      const llon = lon + (Math.cos(a) * dist) / Math.max(0.35, Math.cos(llat));
       const before = prev?.leaves.find(l => l.id === c.id);
-      return { id: c.id, label: String(c.label || ''), turn: { ...add(hub, off) }, ...add(scale(dir, LEAF), off), heat: before ? before.heat : 0 };
+      const pos = { ...onSphere(llat, llon), lat: llat, lon: llon };
+      return { id: c.id, label: String(c.label || ''), ...pos, path: surfaceTrace(hub, pos), heat: before ? before.heat : 0 };
     });
-    return { id: b.id, label: String(b.label || b.id), kind: b.kind || 'module', dir, start, elbow, hub, leaves };
+    return { id: b.id, label: String(b.label || b.id), kind: b.kind || 'module', dir: hub, hub, spoke, leaves, fade: prev?.fade ?? 0 };
   });
 }
 
@@ -90,16 +68,15 @@ export function createOrb() {
   el.append(canvas, label);
 
   const ctx = canvas.getContext('2d');
-  const { pts, links, byNode } = buildCore();
   const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  const center = { x: 0, y: 0, z: 0, heat: 0 };
   let mode = 'idle';
   let cur = { ...MODES.idle, zoom: 1 };    // valori correnti, che scivolano verso quelli dello stato
-  let pulses = [];                          // impulsi del nucleo: { link, t (0..1), dir, speed, hops }
-  let trails = [];                          // impulsi sui rami: { path: [punti], t, speed, then }
+  let trails = [];                          // impulsi lungo le piste: { path: [punti], t, speed, then }
   let branches = [];
   let focus = null;
   let onPick = null;
-  let angle = 0, tilt = 0.35, last = 0, spawn = 0, raf = 0, w = 0, hgt = 0;
+  let angle = 0.4, tilt = 0.35, last = 0, spawn = 0, raf = 0, w = 0, hgt = 0, spinRing = 0;
 
   function resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
@@ -110,21 +87,16 @@ export function createOrb() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
-  function firePulse(from) {
-    const options = byNode[from];
-    if (!options.length || pulses.length > 160) return;
-    const link = options[Math.floor(Math.random() * options.length)];
-    const dir = links[link][0] === from ? 1 : -1;
-    pulses.push({ link, t: 0, dir, speed: 1.4 + Math.random() * 1.6, hops: 0 });
-  }
-
-  /** Manda un impulso dal nucleo al ramo; arrivato, prosegue verso le foglie indicate. */
-  function fireBranch(b, leafIds = null, speed = 1.1) {
-    if (trails.length > 60) return;
-    trails.push({ path: [b.start, b.elbow, b.hub], t: 0, speed, then: () => {
-      b.hub.heat = 1;
-      const targets = leafIds ? b.leaves.filter(l => leafIds.has(l.id)) : [];
-      for (const l of targets) trails.push({ path: [b.hub, l.turn, l], t: 0, speed: speed * 1.3, then: () => { l.heat = 1; } });
+  /** Un impulso parte da Jarvis, raggiunge il ramo e, se indicato, prosegue verso le foglie. */
+  function fireBranch(b, leafIds = null, speed = 1) {
+    if (trails.length > 50) return;
+    center.heat = 1;
+    trails.push({ path: b.spoke, t: 0, speed, then: () => {
+      b.hub.heat = Math.max(b.hub.heat, leafIds ? 1 : 0.6);
+      const targets = leafIds === null
+        ? (b.leaves.length && Math.random() < 0.6 ? [b.leaves[Math.floor(Math.random() * b.leaves.length)]] : [])
+        : b.leaves.filter(l => leafIds.has(l.id));
+      for (const l of targets) trails.push({ path: l.path, t: 0, speed: speed * 0.9, then: () => { l.heat = Math.max(l.heat, leafIds ? 1 : 0.6); } });
     } });
   }
 
@@ -140,125 +112,92 @@ export function createOrb() {
     for (const k of ['spin', 'rate', 'glow', 'breathe']) cur[k] += (target[k] - cur[k]) * ease;
     const slow = reduced ? 0.25 : 1;
     const focused = focus && branches.find(b => b.id === focus);
-    cur.zoom += ((focused ? ZOOM : 1) - cur.zoom) * (1 - Math.exp(-dt * 3));
+    const camEase = 1 - Math.exp(-dt * 3);
+    cur.zoom += ((focused ? ZOOM : 1) - cur.zoom) * camEase;
     if (focused) {
       // Ruota finché il ramo aperto guarda verso chi usa il telefono.
-      const { x, y, z } = focused.dir;
-      angle += wrap(Math.atan2(-x, z) - angle) * (1 - Math.exp(-dt * 3));
-      tilt += (Math.atan2(y, Math.hypot(x, z)) - tilt) * (1 - Math.exp(-dt * 3));
+      const { x, y, z } = focused.hub;
+      angle += wrap(Math.atan2(-x, z) - angle) * camEase;
+      tilt += (Math.atan2(y, Math.hypot(x, z)) - tilt) * camEase;
     } else {
       angle += cur.spin * dt * slow;
       tilt += (0.35 - tilt) * (1 - Math.exp(-dt * 2));
     }
+    spinRing += dt * (mode === 'thinking' ? 5 : 0.8) * slow;
     const time = now / 1000;
 
-    // Respiro: lento in attesa, ritmo di voce quando parla, onde regolari quando ascolta.
+    // Respiro del nodo centrale: lento in attesa, ritmo di voce quando parla, onde quando ascolta.
     let pulse;
     if (mode === 'speaking') pulse = Math.sin(time * 9) * 0.5 + Math.sin(time * 14.3) * 0.3 + Math.sin(time * 5.1) * 0.2;
     else if (mode === 'listening') pulse = Math.sin(time * 3.2);
     else pulse = Math.sin(time * 1.2);
     const breath = 1 + cur.breathe * pulse * slow;
 
-    // Nuovi impulsi nel nucleo, e ogni tanto uno che esce lungo un ramo a caso.
+    // Impulsi spontanei dal centro verso i rami (più fitti quando pensa).
     spawn += cur.rate * dt * slow;
     while (spawn >= 1) {
       spawn -= 1;
-      firePulse(Math.floor(Math.random() * NODES));
-      if (branches.length && Math.random() < 0.08) fireBranch(branches[Math.floor(Math.random() * branches.length)], null, 0.8);
+      if (branches.length) fireBranch(branches[Math.floor(Math.random() * branches.length)], null, mode === 'thinking' ? 1.6 : 0.9);
     }
 
     const compact = hgt < 170;
-    const R = Math.min(w, hgt) * (branches.length ? 0.4 : 0.38 / CORE) * breath * cur.zoom;
+    const R = Math.min(w, hgt) * 0.36 * cur.zoom;
     const cx = w / 2, cy = hgt / 2;
     const ca = Math.cos(angle), sa = Math.sin(angle), ct = Math.cos(tilt), st = Math.sin(tilt);
-    const project = (p, radius = LEAF) => {
+    const project = (p) => {
       const x = p.x * ca + p.z * sa, z0 = -p.x * sa + p.z * ca;
       const y = p.y * ct - z0 * st, z = p.y * st + z0 * ct;
       const persp = 1 / (2.1 - z * 0.55);
-      p.sx = cx + x * R * persp * 1.5; p.sy = cy + y * R * persp * 1.5;
-      p.d = Math.max(0, Math.min(1, (z / radius + 1) / 2)); // 0 dietro, 1 davanti
+      p.sx = cx + x * R * persp * 2; p.sy = cy + y * R * persp * 2;
+      p.d = Math.max(0, Math.min(1, (z + 1) / 2)); // 0 dietro, 1 davanti
     };
-    for (const p of pts) { project(p, CORE); p.heat = Math.max(0, p.heat - dt * 2.2); }
+    project(center);
+    center.heat = Math.max(0, center.heat - dt * 1.5);
     for (const b of branches) {
-      for (const p of [b.start, b.elbow, b.hub]) project(p);
-      b.hub.heat = Math.max(0, b.hub.heat - dt * 0.3);
-      b.fade += ((!focused || focused === b ? 1 : 0.12) - b.fade) * ease;
-      for (const l of b.leaves) { project(l.turn); project(l); l.heat = Math.max(0, l.heat - dt * 0.25); }
+      for (const p of b.spoke) project(p);
+      b.hub.heat = Math.max(0, b.hub.heat - dt * 0.35);
+      b.fade += ((!focused || focused === b ? 1 : 0.12) - b.fade) * ease; // i nodi nuovi compaiono piano
+      for (const l of b.leaves) { project(l); for (const p of l.path) project(p); l.heat = Math.max(0, l.heat - dt * 0.3); }
     }
-    const coreFade = focused ? 0.15 + 0.85 * (1 - (cur.zoom - 1) / (ZOOM - 1)) : 1;
 
     ctx.clearRect(0, 0, w, hgt);
 
-    // Alone centrale
-    const halo = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.min(w, hgt) * 0.55);
-    halo.addColorStop(0, `rgba(57,255,20,${0.16 * cur.glow})`);
-    halo.addColorStop(0.55, `rgba(34,160,60,${0.06 * cur.glow})`);
+    // Alone attorno a Jarvis
+    const halo = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.min(w, hgt) * 0.5);
+    halo.addColorStop(0, `rgba(57,255,20,${0.14 * cur.glow})`);
+    halo.addColorStop(0.5, `rgba(34,160,60,${0.05 * cur.glow})`);
     halo.addColorStop(1, 'rgba(5,15,5,0)');
     ctx.fillStyle = halo;
     ctx.fillRect(0, 0, w, hgt);
 
-    // Rami: piste dal nucleo ai nodi e dai nodi alle foglie, più accese se l'argomento è attivo.
-    const poly = (list, alpha, width) => {
+    const color = (heat, alpha) => `rgba(${60 + heat * 160},${205 + heat * 50},${80 + heat * 130},${alpha})`;
+    const trace = (pts, alpha, width) => {
       ctx.lineWidth = width; ctx.strokeStyle = alpha;
-      ctx.beginPath(); ctx.moveTo(list[0].sx, list[0].sy);
-      for (let i = 1; i < list.length; i++) ctx.lineTo(list[i].sx, list[i].sy);
+      ctx.beginPath(); ctx.moveTo(pts[0].sx, pts[0].sy);
+      for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].sx, pts[i].sy);
       ctx.stroke();
     };
-    for (const b of branches) {
-      const hot = b.hub.heat, depth = b.hub.d;
-      poly([b.start, b.elbow, b.hub], `rgba(${60 + hot * 150},${200 + hot * 55},${90 + hot * 110},${((0.1 + depth * 0.3) * cur.glow + hot * 0.5) * b.fade})`, 1 + hot * 1.2);
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+
+    // Piste: prima quelle dietro, poi quelle davanti, così la sfera si legge in profondità.
+    const order = [...branches].sort((a, b) => a.hub.d - b.hub.d);
+    for (const b of order) {
+      const hot = b.hub.heat;
       for (const l of b.leaves) {
-        const lh = Math.max(l.heat, hot * 0.4);
-        poly([b.hub, l.turn, l], `rgba(${60 + lh * 150},${200 + lh * 55},${90 + lh * 110},${((0.06 + l.d * 0.22) * cur.glow + lh * 0.5) * b.fade})`, 0.8 + lh);
+        const lh = Math.max(l.heat, hot * 0.35);
+        const depth = (b.hub.d + l.d) / 2;
+        trace(l.path, color(lh, ((0.12 + depth * 0.4) * cur.glow + lh * 0.5) * b.fade), 1 + lh * 1.3 + depth * 0.6);
       }
+      trace(b.spoke, color(hot, ((0.15 + b.hub.d * 0.4) * cur.glow + hot * 0.5) * b.fade), 1.3 + hot * 1.5 + b.hub.d * 0.7);
     }
 
-    // Connessioni del nucleo (piste da circuito)
-    ctx.lineWidth = 1;
-    for (const [a, b] of links) {
-      const p = pts[a], q = pts[b];
-      const depth = (p.d + q.d) / 2;
-      const hot = Math.max(p.heat, q.heat);
-      ctx.strokeStyle = `rgba(${60 + hot * 120},${200 + hot * 55},${90 + hot * 60},${((0.06 + depth * 0.22) * cur.glow + hot * 0.35) * coreFade})`;
-      ctx.beginPath(); ctx.moveTo(p.sx, p.sy); ctx.lineTo(q.sx, q.sy); ctx.stroke();
-    }
-
-    const spark = (x, y, depth, alpha = 1) => {
-      ctx.fillStyle = `rgba(225,255,215,${(0.5 + depth * 0.5) * alpha})`;
-      ctx.beginPath(); ctx.arc(x, y, 1.3 + depth * 1.4, 0, Math.PI * 2); ctx.fill();
+    // Impulsi che corrono lungo le piste
+    const spark = (x, y, depth) => {
+      ctx.fillStyle = `rgba(225,255,215,${0.55 + depth * 0.45})`;
+      ctx.beginPath(); ctx.arc(x, y, 1.6 + depth * 1.6, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = `rgba(57,255,20,${0.12 + depth * 0.12})`;
+      ctx.beginPath(); ctx.arc(x, y, 5 + depth * 4, 0, Math.PI * 2); ctx.fill();
     };
-
-    // Impulsi del nucleo che viaggiano e si propagano al nodo successivo
-    const next = [];
-    for (const pu of pulses) {
-      pu.t += pu.speed * dt * slow;
-      const [a, b] = links[pu.link];
-      const from = pu.dir > 0 ? pts[a] : pts[b], to = pu.dir > 0 ? pts[b] : pts[a];
-      if (pu.t >= 1) {
-        to.heat = 1;
-        const chance = mode === 'thinking' ? 0.72 : 0.45;
-        if (pu.hops < 6 && Math.random() < chance) {
-          const idx = pu.dir > 0 ? b : a;
-          const options = byNode[idx].filter(l => l !== pu.link);
-          if (options.length) {
-            const link = options[Math.floor(Math.random() * options.length)];
-            next.push({ link, t: 0, dir: links[link][0] === idx ? 1 : -1, speed: pu.speed, hops: pu.hops + 1 });
-          }
-        }
-        continue;
-      }
-      const x = from.sx + (to.sx - from.sx) * pu.t, y = from.sy + (to.sy - from.sy) * pu.t;
-      const depth = from.d + (to.d - from.d) * pu.t;
-      const tx = from.sx + (to.sx - from.sx) * Math.max(0, pu.t - 0.25), ty = from.sy + (to.sy - from.sy) * Math.max(0, pu.t - 0.25);
-      ctx.strokeStyle = `rgba(160,255,140,${(0.25 + depth * 0.55) * coreFade})`;
-      ctx.lineWidth = 1.6;
-      ctx.beginPath(); ctx.moveTo(tx, ty); ctx.lineTo(x, y); ctx.stroke();
-      spark(x, y, depth, coreFade);
-      next.push(pu);
-    }
-    pulses = next;
-
-    // Impulsi sui rami (lungo spezzate di più segmenti)
     const nextTrails = [];
     for (const tr of trails) {
       tr.t += tr.speed * dt * slow;
@@ -270,25 +209,23 @@ export function createOrb() {
     }
     trails = nextTrails;
 
-    // Nodi del nucleo
-    for (const p of pts) {
-      const r = (0.9 + p.d * 1.7 + p.heat * 2.2) * Math.min(1.6, Math.sqrt(cur.zoom)) * (branches.length ? 0.85 : 1);
-      ctx.fillStyle = `rgba(${57 + p.heat * 180},255,${20 + p.heat * 190},${((0.25 + p.d * 0.6) * cur.glow + p.heat * 0.4) * coreFade})`;
-      ctx.beginPath(); ctx.arc(p.sx, p.sy, r, 0, Math.PI * 2); ctx.fill();
-      if (p.heat > 0.3) {
-        ctx.fillStyle = `rgba(57,255,20,${p.heat * 0.18 * coreFade})`;
-        ctx.beginPath(); ctx.arc(p.sx, p.sy, r * 3.2, 0, Math.PI * 2); ctx.fill();
-      }
-    }
-
-    // Nodi dei rami e foglie, con le etichette quando c'è spazio.
+    // Nodi: foglie (cerchietti come nel disegno) e nodi dei rami, dal fondo verso il davanti.
     ctx.textBaseline = 'middle';
-    for (const b of branches) {
+    const ring = (p, r, heat, alpha, fill) => {
+      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = color(heat, alpha);
+      ctx.fillStyle = `rgba(${8 + heat * 30},${40 + heat * 120},${8 + heat * 30},${Math.min(1, alpha + 0.2)})`;
+      ctx.beginPath(); ctx.arc(p.sx, p.sy, r, 0, Math.PI * 2); if (fill) ctx.fill(); ctx.stroke();
+      if (heat > 0.2) {
+        ctx.fillStyle = `rgba(57,255,20,${heat * 0.16 * alpha})`;
+        ctx.beginPath(); ctx.arc(p.sx, p.sy, r * 2.8, 0, Math.PI * 2); ctx.fill();
+      }
+    };
+    const scale = Math.min(1.5, Math.sqrt(cur.zoom));
+    for (const b of order) {
       for (const l of b.leaves) {
-        const r = 1.6 + l.d * 1.8 + l.heat * 2.4;
-        ctx.fillStyle = `rgba(${57 + l.heat * 180},255,${20 + l.heat * 190},${((0.3 + l.d * 0.5) * cur.glow + l.heat * 0.5) * b.fade})`;
-        ctx.beginPath(); ctx.arc(l.sx, l.sy, r, 0, Math.PI * 2); ctx.fill();
-        if (focused === b && cur.zoom > 1.6 && !compact) {
+        ring(l, (2.6 + l.d * 2 + l.heat * 1.8) * scale, l.heat, ((0.35 + l.d * 0.6) * cur.glow + l.heat * 0.4) * b.fade, true);
+        if (!compact && b.fade > 0.5 && (focused === b ? cur.zoom > 1.6 : (l.heat > 0.3 && l.d > 0.4))) {
           const right = l.sx >= cx;
           ctx.font = '12px system-ui, sans-serif';
           ctx.textAlign = right ? 'left' : 'right';
@@ -300,22 +237,42 @@ export function createOrb() {
           ctx.fillText(text, l.sx + (right ? 9 : -9), l.sy);
         }
       }
-      const h = b.hub, r = (3 + h.d * 2.6 + h.heat * 3) * (focused === b ? 1.5 : 1);
-      ctx.strokeStyle = `rgba(${120 + h.heat * 120},255,${110 + h.heat * 120},${((0.45 + h.d * 0.5) * cur.glow + h.heat * 0.4) * b.fade})`;
-      ctx.lineWidth = 1.4;
-      ctx.beginPath(); ctx.arc(h.sx, h.sy, r, 0, Math.PI * 2); ctx.stroke();
-      ctx.fillStyle = `rgba(57,255,20,${(0.18 + h.heat * 0.5) * b.fade})`;
-      ctx.fill();
-      if (h.heat > 0.2) {
-        ctx.fillStyle = `rgba(57,255,20,${h.heat * 0.16 * b.fade})`;
-        ctx.beginPath(); ctx.arc(h.sx, h.sy, r * 3, 0, Math.PI * 2); ctx.fill();
-      }
-      if (!compact && (focused === b || (!focused && (h.d > 0.5 || h.heat > 0.2)))) {
-        ctx.font = focused === b ? '600 14px system-ui, sans-serif' : '11px system-ui, sans-serif';
+      const h = b.hub, r = (4 + h.d * 2.8 + h.heat * 2) * scale * (focused === b ? 1.3 : 1);
+      ring(h, r, h.heat, ((0.5 + h.d * 0.5) * cur.glow + h.heat * 0.4) * b.fade, true);
+      ctx.fillStyle = color(h.heat, (0.6 + h.heat * 0.4) * b.fade);
+      ctx.beginPath(); ctx.arc(h.sx, h.sy, r * 0.4, 0, Math.PI * 2); ctx.fill();
+      if (!compact && b.fade > 0.3 && (focused === b || (!focused && (h.d > 0.35 || h.heat > 0.2)))) {
+        ctx.font = focused === b ? '600 14px system-ui, sans-serif' : '600 11px system-ui, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillStyle = `rgba(190,255,180,${focused === b ? 0.95 : (0.25 + h.d * 0.4 + h.heat * 0.5) * cur.glow})`;
-        ctx.fillText(clip(b.label, 22), h.sx, h.sy - r - 9);
+        ctx.fillStyle = `rgba(190,255,180,${focused === b ? 0.95 : Math.min(1, (0.3 + h.d * 0.5 + h.heat * 0.5) * cur.glow) * b.fade})`;
+        ctx.fillText(clip(b.label.toUpperCase(), 22), h.sx, h.sy - r - 9);
       }
+    }
+
+    // Il nodo Jarvis al centro: anello doppio con il nucleo luminoso, come nel disegno.
+    const fadeCenter = focused ? Math.max(0.25, 1 - (cur.zoom - 1) / (ZOOM - 1) * 0.75) : 1;
+    const cr = Math.min(w, hgt) * (compact ? 0.07 : 0.045) * breath * Math.min(1.3, scale);
+    const heat = center.heat;
+    const g = ctx.createRadialGradient(center.sx, center.sy, 0, center.sx, center.sy, cr * 3.2);
+    g.addColorStop(0, `rgba(57,255,20,${(0.35 + heat * 0.2) * cur.glow * fadeCenter})`);
+    g.addColorStop(1, 'rgba(57,255,20,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(center.sx, center.sy, cr * 3.2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = `rgba(8,30,8,${0.9 * fadeCenter})`;
+    ctx.strokeStyle = `rgba(120,255,100,${(0.7 + heat * 0.3) * cur.glow * fadeCenter})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(center.sx, center.sy, cr, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+    // Arco che gira attorno: lento in attesa, veloce quando pensa.
+    ctx.strokeStyle = `rgba(160,255,140,${0.8 * cur.glow * fadeCenter})`;
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(center.sx, center.sy, cr * 1.35, spinRing, spinRing + Math.PI * 0.7); ctx.stroke();
+    ctx.beginPath(); ctx.arc(center.sx, center.sy, cr * 1.35, spinRing + Math.PI, spinRing + Math.PI * 1.35); ctx.stroke();
+    ctx.fillStyle = `rgba(225,255,215,${(0.75 + heat * 0.25) * fadeCenter})`;
+    ctx.beginPath(); ctx.arc(center.sx, center.sy, cr * 0.45, 0, Math.PI * 2); ctx.fill();
+    if (!compact && !focused) {
+      ctx.font = '600 11px system-ui, sans-serif'; ctx.textAlign = 'center';
+      ctx.fillStyle = `rgba(190,255,180,${0.75 * cur.glow})`;
+      ctx.fillText('JARVIS', center.sx, center.sy + cr * 1.35 + 12);
     }
   }
 
@@ -330,7 +287,7 @@ export function createOrb() {
     if (!onPick || !branches.length) return;
     const r = canvas.getBoundingClientRect();
     const x = e.clientX - r.left, y = e.clientY - r.top;
-    let best = null, bestD = 28 * 28;
+    let best = null, bestD = 30 * 30;
     for (const b of branches) {
       if (b.fade < 0.5) continue;
       const d = (b.hub.sx - x) ** 2 + (b.hub.sy - y) ** 2;
@@ -347,7 +304,7 @@ export function createOrb() {
 
   function setState(next) {
     if (!MODES[next]) next = 'idle';
-    if (next !== mode && next === 'thinking') for (let i = 0; i < 14; i++) firePulse(Math.floor(Math.random() * NODES));
+    if (next !== mode && next === 'thinking') { center.heat = 1; for (const b of branches.slice(0, 6)) fireBranch(b, null, 1.6); }
     mode = next;
     el.dataset.state = next;
     setLabel();
@@ -356,10 +313,11 @@ export function createOrb() {
 
   return {
     el, setState,
-    /** I rami da disegnare: [{ id, label, kind, children: [{ id, label }] }] (da /api/graph). */
+    /** I rami da disegnare: [{ id, label, kind, children: [{ id, label }] }] (da /api/graph). Quelli vuoti non si vedono. */
     setGraph(list) {
       const old = new Map(branches.map(b => [b.id, b]));
-      branches = layoutBranches(Array.isArray(list) ? list : [], old).map(b => ({ ...b, fade: old.get(b.id)?.fade ?? 1 }));
+      const shown = (Array.isArray(list) ? list : []).filter(b => (b.children || []).length || b.kind !== 'core');
+      branches = layoutBranches(shown, old);
       if (focus && !branches.some(b => b.id === focus)) focus = null;
       setLabel();
     },
