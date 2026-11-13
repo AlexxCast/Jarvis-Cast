@@ -115,6 +115,14 @@ export async function handleApi(db, env, deps, request) {
       return json({ ok: true, meals: merged.meals.length, activities: merged.activities.length, weights: merged.weights.length, state: statePayload(db, ms, tz) });
     }
 
+    if (path === '/api/graph' && method === 'GET') {
+      // Foglie della dieta: gli ultimi pasti e allenamenti registrati.
+      const g = memory.graph(db), d = loadDiary(db);
+      const meals = (d.meals || []).slice(-6).reverse().map(m => ({ id: 'meal:' + m.id, label: `${m.date.slice(5)} ${m.meal}: ${m.description || (m.items || []).map(i => i.name).filter(Boolean).slice(0, 3).join(', ')}` }));
+      const acts = (d.activities || []).slice(-3).reverse().map(a => ({ id: 'act:' + a.id, label: `${a.date.slice(5)} ${a.type} ${a.durationMin || ''} min` }));
+      g.branches.find(b => b.id === 'dieta').children = [...meals, ...acts];
+      return json({ ...g, last: kvGet(db, 'lastTouched', null) });
+    }
     if (path === '/api/memory' && method === 'GET') {
       return json({ modules: memory.listModules(db), entries: db.all('SELECT id, module, text, created, uses FROM memories ORDER BY module, id DESC LIMIT 1000') });
     }

@@ -25,6 +25,33 @@ function orbState() {
   return 'idle';
 }
 function updateOrb() { orb.setState(orbState()); }
+
+// I rami della sfera sono i moduli di memoria di Jarvis (più dieta, agenda e compiti).
+let lastLit = '';
+async function loadGraph(lightUp = false) {
+  try {
+    const g = await api('GET', '/graph');
+    store.graph = g.branches || [];
+    orb.setGraph(store.graph);
+    const at = g.last?.at || '';
+    if (lightUp && at && at !== lastLit) orb.highlight(g.last.touched || [], g.last.leaves || []);
+    lastLit = at;
+  } catch { /* la sfera resta com'era */ }
+}
+/** Accende subito i rami di cui sembra parlare il messaggio, senza aspettare il server. */
+const TOPIC_HINTS = {
+  dieta: /(mangiat|pranz|cena|colazion|spuntin|calori|kcal|protein|pes[oa]|dieta|allenament|corsa|palestra|passi)/i,
+  agenda: /(ricord|promemoria|appuntament|agenda|domani|stasera|sveglia)/i,
+  compiti: /(compito|ricerca|cerca|organizza|pianifica)/i,
+};
+function guessTopics(text) {
+  const words = new Set(String(text || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/[^a-z0-9]+/).filter(w => w.length > 3));
+  return (store.graph || []).filter(b => TOPIC_HINTS[b.id]?.test(text) ||
+    `${b.id} ${b.label} ${b.description || ''}`.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/[^a-z0-9]+/).some(w => w.length > 3 && words.has(w))).map(b => b.id);
+}
+function syncCompact() { orb.el.classList.toggle('compact', store.tab === 'chat' && store.messages.length > 0 && !orb.focused); }
+// Toccare un ramo lo apre (zoom); toccarlo di nuovo, o toccare altrove, torna alla vista intera.
+orb.onPick((id) => { orb.focus(id && id !== orb.focused ? id : null); syncCompact(); });
 /** Tiene la sfera in "sto parlando" per la durata stimata della risposta. */
 function markSpeaking(text) {
   store.speakingUntil = Date.now() + Math.min(20000, 900 + String(text || '').length * 60);
@@ -118,7 +145,7 @@ async function boot() {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
   if (!store.token) return render();
   try {
-    await Promise.all([refresh(), loadHistory()]);
+    await Promise.all([refresh(), loadHistory(), loadGraph(false)]);
     await importLegacyIfNeeded();
     syncSteps();
   } catch (e) { store.error = e.message; }
@@ -164,7 +191,7 @@ function syncSteps() {
 }
 
 // L'app Android chiama questa funzione dopo uno scambio vocale, per aggiornare lo schermo.
-window.jarvisRefresh = guard(async () => { await Promise.all([refresh(), loadHistory()]); render(); scrollChat(); });
+window.jarvisRefresh = guard(async () => { await Promise.all([refresh(), loadHistory(), loadGraph(true)]); render(); scrollChat(); });
 document.addEventListener('visibilitychange', () => { if (!document.hidden && store.token && !store.sending) window.jarvisRefresh(); });
 
 // ------------------------------------------------------------------ chat
@@ -179,14 +206,16 @@ async function send(text) {
   store.messages.push({ role: 'user', text: text || 'Guarda questa foto.', image: !!image });
   store.speakingUntil = 0;
   render(); scrollChat();
+  orb.highlight(guessTopics(text));
   try {
     const out = await api('POST', '/chat', { text, image });
+    orb.highlight(out.touched || [], out.touchedLeaves || []);
     store.messages.push({ role: 'assistant', text: out.reply, card: out.card, model: out.model });
     if (out.photoRequest) toast('Jarvis chiede una foto: ' + out.photoRequest);
     if ((nativeJson('getConfig') || {}).speakReplies) nativeCall('speak', out.reply);
     markSpeaking(out.reply);
     runDeviceActions(out.device);
-    await refresh();
+    await Promise.all([refresh(), loadGraph(false)]);
   } catch (e) {
     store.messages.push({ role: 'assistant', text: 'Non riesco a contattare il server: ' + e.message });
   }
@@ -213,7 +242,7 @@ function pickPhoto(camera = false) {
 }
 
 function viewChat() {
-  orb.el.classList.toggle('compact', store.messages.length > 0);
+  syncCompact();
   const list = h('div', { class: 'chat' },
     store.messages.length ? null : h('p', { class: 'empty' }, 'Scriva o parli a Jarvis: pasti, allenamenti, promemoria, cose da ricordare, compiti da svolgere.'),
     store.messages.map(m => h('div', { class: 'msg ' + (m.role === 'user' ? 'user' : 'assistant') },
@@ -471,7 +500,7 @@ function viewLogin() {
     if (!store.token) return;
     try { await refresh(); } catch (e) { store.token = ''; throw e; }
     localStorage.setItem('jarvis_token', store.token);
-    await loadHistory(); render(); scrollChat();
+    await Promise.all([loadHistory(), loadGraph(false)]); render(); scrollChat();
   });
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
   return h('div', { class: 'card login' }, h('img', { src: '/logo.jpg', alt: '' }), h('h1', { style: 'text-align:center' }, 'Jarvis'),

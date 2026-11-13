@@ -62,3 +62,21 @@ export function recall(db, text, { sticky = [], limit = 24 } = {}) {
 export function markUsed(db, ids, nowIso) {
   for (const id of ids) db.run('UPDATE memories SET uses = uses + 1, last_used = ? WHERE id = ?', nowIso, id);
 }
+
+/**
+ * La "mappa" di Jarvis per la sfera: ogni modulo è un ramo, i suoi ricordi più usati sono le foglie.
+ * Più dati fissi: dieta e agenda (sempre presenti), compiti in corso.
+ */
+export function graph(db, { perModule = 8 } = {}) {
+  const branches = [
+    { id: 'dieta', label: 'Dieta e sport', kind: 'core', children: [] },
+    { id: 'agenda', label: 'Agenda', kind: 'core', children: db.all('SELECT id, text FROM reminders WHERE done = 0 ORDER BY due LIMIT 8').map(r => ({ id: 'r:' + r.id, label: r.text })) },
+  ];
+  const jobs = db.all("SELECT id, title, status FROM jobs ORDER BY created DESC LIMIT 8");
+  if (jobs.length) branches.push({ id: 'compiti', label: 'Compiti', kind: 'core', children: jobs.map(j => ({ id: 'j:' + j.id, label: j.title, status: j.status })) });
+  for (const m of listModules(db)) {
+    const rows = db.all('SELECT id, text FROM memories WHERE module = ? ORDER BY uses DESC, id DESC LIMIT ?', m.name, perModule);
+    branches.push({ id: m.name, label: m.name.replace(/-/g, ' '), description: m.description, kind: 'module', entries: m.entries, children: rows.map(r => ({ id: 'm:' + r.id, label: r.text })) });
+  }
+  return { branches };
+}

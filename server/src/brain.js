@@ -6,7 +6,7 @@ import { loadDiary, saveDiary, applyDietAction, dietBrief, dietContext, DIET_ACT
 import * as memory from './memory.js';
 import * as agenda from './agenda.js';
 import { today as todayOf, nowIso as nowIsoOf, nowHuman } from './clock.js';
-import { logEvent } from './db.js';
+import { logEvent, kvSet } from './db.js';
 
 const STICKY_TURNS = 3;
 const SUMMARIZE_AFTER = 24;   // messaggi non ancora riassunti oltre i quali si comprime
@@ -107,6 +107,7 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
   addMessage(db, sessionId, 'user', userText, nowIso, image ? { image: true } : null);
 
   let result;
+  let remembered = [];
   const tier = router.classifyTier(userText, !!image);
   try {
     const res = await router.chat(db, env, {
@@ -114,9 +115,10 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
       build: (model) => buildMessages(model, parts), fetchFn: deps.fetchFn, now: deps.now, tz,
     });
     const parsed = parseReply(res.text);
+    remembered = parsed.actions.filter(a => a && a.type === 'remember').map(a => memory.slug(a.module) || 'generale');
     const done = applyActions(db, parsed.actions, { today, nowIso, ms, tz, hadPhoto: !!image });
     for (const j of done.jobs) deps.startJob?.(j);
-    result = { reply: parsed.reply, expectReply: parsed.expectReply, card: parsed.card, photoRequest: done.photoRequest, model: res.key, switched: res.switched, actions: done.applied, device: done.device };
+    result = { reply: parsed.reply, expectReply: parsed.expectReply, card: parsed.card, photoRequest: done.photoRequest, model: res.key, switched: res.switched, actions: done.applied, device: done.device, tier };
     sess.model = res.key;
   } catch (e) {
     logEvent(db, nowIso, 'error', `chat: ${e.message} ${(e.tried || []).join(' | ')}`);
@@ -124,6 +126,15 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
   }
 
   addMessage(db, sessionId, 'assistant', result.reply, nowIso, { model: result.model, card: result.card || undefined });
+  // Cosa ha "acceso" questo scambio: la sfera illumina questi rami e foglie.
+  const touched = new Set(recalled.active);
+  if (dietOn) touched.add('dieta');
+  if (agendaOn) touched.add('agenda');
+  for (const r of remembered) touched.add(r);
+  if ((result.actions || []).includes('start_job')) touched.add('compiti');
+  result.touched = [...touched];
+  result.touchedLeaves = recalled.entries.map(m => 'm:' + m.id);
+  kvSet(db, 'lastTouched', { at: nowIso + '#' + ms, touched: result.touched, leaves: result.touchedLeaves });
   memory.markUsed(db, recalled.entries.map(m => m.id), nowIso);
 
   // Aggiorna i moduli "caldi" della sessione.
