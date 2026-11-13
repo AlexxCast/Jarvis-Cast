@@ -89,6 +89,7 @@ object Cloud {
                         "open_app" -> str(a, "name").ifBlank { null }?.let { type to it }
                         "open_url" -> str(a, "url").ifBlank { null }?.let { type to it }
                         "save_place" -> str(a, "name").ifBlank { null }?.let { type to it }
+                        "phone_task" -> str(a, "goal").ifBlank { null }?.let { type to it }
                         else -> null
                     }
                 } ?: emptyList(),
@@ -131,6 +132,35 @@ object Cloud {
             (o["items"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull?.ifBlank { null } } ?: emptyList()
         }.getOrDefault(emptyList())
     }
+
+    data class PhoneMove(val kind: String, val n: Int?, val text: String, val dir: String, val say: String)
+
+    /** Una mossa per il controllo del telefono: mandiamo lo schermo, il server sceglie cosa fare. */
+    suspend fun phoneStep(goal: String, step: Int, history: List<String>, screen: com.jarvisfit.app.device.JarvisAccessibility.Screen): PhoneMove =
+        withContext(Dispatchers.IO) {
+            try {
+                val o = request("POST", "/api/phone/step", buildJsonObject {
+                    put("goal", goal)
+                    put("step", step)
+                    put("history", JsonArray(history.map { JsonPrimitive(it) }))
+                    put("screen", buildJsonObject {
+                        put("app", screen.app)
+                        put("items", JsonArray(screen.items.map { i ->
+                            buildJsonObject { put("n", i.n); put("kind", i.kind); put("text", i.text) }
+                        }))
+                    })
+                }, readTimeoutMs = 45_000)
+                PhoneMove(
+                    kind = str(o, "do").ifBlank { "ask" },
+                    n = (o["n"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull(),
+                    text = str(o, "text"),
+                    dir = str(o, "dir"),
+                    say = str(o, "say"),
+                )
+            } catch (e: Exception) {
+                PhoneMove("ask", null, "", "", "Non riesco a contattare il server: ${e.message ?: "errore di rete"}.")
+            }
+        }
 
     suspend fun sendSteps(date: String, steps: Int) = withContext(Dispatchers.IO) {
         runCatching {

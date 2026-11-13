@@ -9,6 +9,7 @@ import * as agenda from '../src/agenda.js';
 import * as jobs from '../src/jobs.js';
 import * as ui from '../src/ui.js';
 import * as mood from '../src/mood.js';
+import * as phone from '../src/phone.js';
 import { handleApi } from '../src/api.js';
 import { localToMs, nowIso } from '../src/clock.js';
 import { makeDb, fakeFetch, deps, reply, T0 } from './helpers.js';
@@ -411,4 +412,21 @@ test('promemoria legati a un luogo: salvati da telefono, consegnati all\'arrivo 
   assert.equal((await call('POST', '/api/inbox/consume')).body.items.length, 0, 'già notificati dal telefono');
   await call('DELETE', '/api/places/casa');
   assert.equal((await call('GET', '/api/places')).body.places.length, 0);
+});
+
+test('controllo del telefono: una mossa alla volta, mosse non valide diventano una domanda', async () => {
+  const db = makeDb();
+  let seen = '';
+  const d = deps(fakeFetch((url, body) => { seen = JSON.stringify(body); return reply({ do: 'tap', n: 3, say: 'Apro la chat' }); }));
+  const move = await phone.step(db, ENV, d, { goal: 'scrivi a Marco', step: 1, history: ['open_app WhatsApp'], screen: { app: 'WhatsApp', items: [{ n: 3, kind: 'pulsante', text: 'Marco' }] } });
+  assert.deepEqual(move, { do: 'tap', n: 3, say: 'Apro la chat' });
+  assert.match(seen, /\[3\] pulsante: Marco/);
+  assert.equal(phone.parseMove('boh').do, 'ask');
+  assert.equal(phone.parseMove('{"do":"rm -rf"}').do, 'ask');
+  assert.equal(phone.parseMove('{"do":"tap"}').do, 'ask', 'tap senza elemento');
+  assert.deepEqual(phone.parseMove('{"do":"scroll","dir":"x"}'), { do: 'scroll', say: '', dir: 'giu' });
+  assert.equal((await phone.step(db, ENV, d, { goal: 'x', step: phone.MAX_STEPS })).do, 'ask', 'troppi passi');
+  assert.equal((await phone.step(db, ENV, d, { goal: ' ' })).do, 'done');
+  const out = await handleChat(db, ENV, deps(fakeFetch(() => reply({ reply: 'Ci penso io.', actions: [{ type: 'phone_task', goal: 'Apri WhatsApp e scrivi a Marco "arrivo"' }, { type: 'phone_task', goal: '' }] }))), { text: 'scrivi a Marco che arrivo' });
+  assert.deepEqual(out.device, [{ type: 'phone_task', goal: 'Apri WhatsApp e scrivi a Marco "arrivo"' }]);
 });

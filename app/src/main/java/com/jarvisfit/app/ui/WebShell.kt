@@ -51,6 +51,8 @@ import androidx.core.content.FileProvider
 import com.jarvisfit.app.data.Settings
 import com.jarvisfit.app.device.AppLauncher
 import com.jarvisfit.app.device.Places
+import com.jarvisfit.app.device.PhoneAgent
+import com.jarvisfit.app.device.JarvisAccessibility
 import com.jarvisfit.app.data.Store
 import com.jarvisfit.app.net.Cloud
 import com.jarvisfit.app.voice.JarvisService
@@ -137,6 +139,15 @@ class JarvisBridge(
         if (st == "permesso") activity.runOnUiThread { onRequestLocation() }
         return st
     }
+
+    @JavascriptInterface
+    fun phoneControlStatus(): Boolean = JarvisAccessibility.enabled(activity)
+
+    @JavascriptInterface
+    fun openPhoneControlSettings() = activity.runOnUiThread { PhoneAgent.openSettings(activity) }
+
+    @JavascriptInterface
+    fun runPhoneTask(goal: String): String = PhoneAgent.start(activity, goal)
 
     @JavascriptInterface
     fun syncPlaces(json: String) = Places.sync(activity, json)
