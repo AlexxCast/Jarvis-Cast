@@ -54,7 +54,9 @@ export async function step(db, env, deps, b) {
   const items = (Array.isArray(screen.items) ? screen.items : []).slice(0, 120)
     .map(i => `[${Number(i.n)}] ${String(i.kind || 'testo').slice(0, 12)}: ${String(i.text || '').replace(/\s+/g, ' ').slice(0, 120)}`).join('\n');
   const history = (Array.isArray(b.history) ? b.history : []).slice(-12).map(h => '- ' + String(h).slice(0, 160)).join('\n');
-  const apps = kvGet(db, 'apps', []);
+  // L'elenco delle app serve solo finché non ne ha aperta una: dopo sarebbero token sprecati a ogni mossa.
+  const opened = (Array.isArray(b.history) ? b.history : []).some(h => /^open_app/.test(String(h)) && !/ERRORE/.test(String(h)));
+  const apps = opened ? [] : kvGet(db, 'apps', []);
   const user = `${apps.length ? 'APP INSTALLATE (per open_app usa uno di questi nomi): ' + apps.join(', ').slice(0, 2500) + '\n\n' : ''}OBIETTIVO: ${goal}\n\nMOSSE GIÀ FATTE (${n}):\n${history || '- nessuna'}\n\nSCHERMO ATTUALE (app: ${String(screen.app || '?').slice(0, 80)}):\n${items || '(vuoto)'}`;
   try {
     const res = await router.chat(db, env, {

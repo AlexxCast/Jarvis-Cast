@@ -123,3 +123,21 @@ test('classificazione della complessità', () => {
   assert.equal(router.classifyTier('pianificami i pasti della settimana'), 'smart');
   assert.equal(router.classifyTier('cosa vedi?', true), 'vision');
 });
+
+test('modelli che pensano: più margine di token e pensiero breve; se il provider lo rifiuta si riprova senza', async () => {
+  const db = makeDb();
+  const bodies = [];
+  const f = async (url, init) => {
+    const b = JSON.parse(init.body); bodies.push(b);
+    if (b.reasoning_effort) return new Response(JSON.stringify({ error: { message: 'unknown field reasoning_effort' } }), { status: 400 });
+    return new Response(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }));
+  };
+  const res = await router.chat(db, { GEMINI_API_KEY: 'g' }, { tier: 'smart', maxTokens: 300, fetchFn: f, now: () => T0, tz: 'Europe/Rome', build: () => [{ role: 'user', content: 'ciao' }] });
+  assert.equal(res.text, 'ok');
+  assert.equal(res.key, 'gemini:gemini-flash-latest');
+  assert.equal(bodies.length, 2);
+  assert.equal(bodies[0].reasoning_effort, 'low');
+  assert.equal(bodies[0].max_tokens, 1800);
+  assert.equal(bodies[1].reasoning_effort, undefined);
+  assert.ok(!router.thinks({ model: "gemini-flash-lite-latest" }) && !router.thinks({ model: 'llama-3.3-70b-versatile' }) && router.thinks({ model: "openai/gpt-oss-120b" }));
+});

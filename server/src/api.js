@@ -248,7 +248,8 @@ export async function handleApi(db, env, deps, request) {
       if (nextDue) deps.schedule?.(nextDue);
       const items = db.all('SELECT id, kind, text, at FROM inbox WHERE delivered = 0 ORDER BY id LIMIT 10');
       for (const i of items) db.run('UPDATE inbox SET delivered = 1 WHERE id = ?', i.id);
-      return json({ items });
+      // Tra quanto scade il prossimo promemoria: il telefono torna a chiedere proprio allora, non minuti dopo.
+      return json({ items, nextInMs: nextDue ? Math.max(0, nextDue - ms) : null });
     }
 
     if (path === '/api/models' && method === 'GET') {

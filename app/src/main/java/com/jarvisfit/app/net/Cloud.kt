@@ -108,13 +108,18 @@ object Cloud {
         }.getOrNull()
     }
 
+    /** Avvisi da consegnare e tra quanti ms scade il prossimo promemoria (null se non ce ne sono). */
+    data class Inbox(val items: List<String>, val nextInMs: Long?)
+
     /** Promemoria scaduti e avvisi di compiti completati non ancora consegnati. */
-    suspend fun consumeInbox(): List<String> = withContext(Dispatchers.IO) {
+    suspend fun consumeInbox(): Inbox = withContext(Dispatchers.IO) {
         runCatching {
             val o = request("POST", "/api/inbox/consume", JsonObject(emptyMap()), readTimeoutMs = 20_000)
-            (o["items"] as? JsonArray)?.mapNotNull { el -> (el as? JsonObject)?.let { str(it, "text") }?.ifBlank { null } }
-                ?: emptyList()
-        }.getOrDefault(emptyList())
+            Inbox(
+                (o["items"] as? JsonArray)?.mapNotNull { el -> (el as? JsonObject)?.let { str(it, "text") }?.ifBlank { null } } ?: emptyList(),
+                (o["nextInMs"] as? JsonPrimitive)?.contentOrNull?.toDoubleOrNull()?.toLong(),
+            )
+        }.getOrDefault(Inbox(emptyList(), null))
     }
 
     /** Salva un luogo; ritorna l'elenco aggiornato dei luoghi (JSON) o null se il server non risponde. */

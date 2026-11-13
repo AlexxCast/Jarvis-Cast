@@ -64,6 +64,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
         const val ACTION_START = "start"
         const val ACTION_STOP = "stop"
         const val ACTION_LISTEN = "listen"     // ascolta subito, senza parola chiave
+        const val ACTION_ANSWER = "answer"     // ascolta la risposta a una domanda, senza portare Jarvis in primo piano
         private const val NOTIF_ID = 1
         private const val PHOTO_NOTIF_ID = 2
         private const val INBOX_POLL_MS = 5 * 60_000L
@@ -78,6 +79,11 @@ class JarvisService : LifecycleService(), SensorEventListener {
         }
         fun listenNow(ctx: Context) =
             ctx.startForegroundService(Intent(ctx, JarvisService::class.java).setAction(ACTION_LISTEN))
+        /** Jarvis ha fatto una domanda mentre usava un'altra app: ascolta la risposta restando dov'è. */
+        fun listenForAnswer(ctx: Context) {
+            if (!Settings.listeningEnabled) return
+            runCatching { ctx.startForegroundService(Intent(ctx, JarvisService::class.java).setAction(ACTION_ANSWER)) }
+        }
     }
 
     private val main = Handler(Looper.getMainLooper())
@@ -123,6 +129,8 @@ class JarvisService : LifecycleService(), SensorEventListener {
                     // Richiesta esplicita dell'utente: esce dall'eventuale pausa e ascolta subito.
                     if (yielded) { yielded = false; main.removeCallbacks(resumeCheck) }
                     if (!busy) onWakeWord(beep = true) else Unit
+                } else if (intent?.action == ACTION_ANSWER) {
+                    if (!busy && !yielded) { stopSession(cancel = true); onWakeWordDetected("", openApp = false) }
                 } else if (!busy && !yielded) {
                     startWakeWord()
                 }
@@ -446,7 +454,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
         }, 6_000)
     }
 
-    private fun onWakeWordDetected(remainingCommand: String) {
+    private fun onWakeWordDetected(remainingCommand: String, openApp: Boolean = true) {
         if (busy) return
         // Ferma immediatamente qualsiasi discorso del TTS per non ascoltare se stesso
         Speaker.stop()
@@ -467,10 +475,12 @@ class JarvisService : LifecycleService(), SensorEventListener {
         }
 
         // 2. Apri l'app sul telefono
-        val openIntent = Intent(this, MainActivity::class.java).apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        if (openApp) {
+            val openIntent = Intent(this, MainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            }
+            runCatching { startActivity(openIntent) }
         }
-        startActivity(openIntent)
 
         // 3. Suono di conferma (beep)
         tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 150)
@@ -630,6 +640,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
             val cloud = Settings.cloudEnabled
             val reply = if (cloud) Cloud.chat(text) else Brain.handle(text)
             JarvisState.exchanges.value = JarvisState.exchanges.value + 1
+            if (cloud) scheduleInbox(20_000) // un promemoria appena creato può scadere a breve
             if (reply.photoRequest != null) notifyPhotoRequest(reply.photoRequest)
             // "Apri Spotify": a schermo spento o con Jarvis in secondo piano Android può rifiutare l'avvio.
             for ((type, value) in reply.device) {
@@ -729,7 +740,10 @@ class JarvisService : LifecycleService(), SensorEventListener {
         override fun run() {
             if (Settings.cloudEnabled) {
                 lifecycleScope.launch {
-                    val items = Cloud.consumeInbox()
+                    val inbox = Cloud.consumeInbox()
+                    val items = inbox.items
+                    // Se un promemoria scade prima del prossimo giro, si torna a chiedere proprio a quell'ora.
+                    inbox.nextInMs?.let { if (it < INBOX_POLL_MS) scheduleInbox(it + 2_000) }
                     items.forEachIndexed { i, text ->
                         notifyInfoPopup(text, 20 + i)
                     }
@@ -744,6 +758,11 @@ class JarvisService : LifecycleService(), SensorEventListener {
             }
             ticker.postDelayed(this, INBOX_POLL_MS)
         }
+    }
+
+    private fun scheduleInbox(delayMs: Long) {
+        ticker.removeCallbacks(inboxPoll)
+        ticker.postDelayed(inboxPoll, delayMs.coerceIn(3_000, INBOX_POLL_MS))
     }
 
     // ---------------------------------------------------------------- contapassi
