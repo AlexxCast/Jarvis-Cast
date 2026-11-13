@@ -2,7 +2,7 @@
 // il modello sceglie UNA mossa alla volta e il telefono la esegue. Il ciclo lo guida il telefono.
 
 import * as router from './router.js';
-import { logEvent } from './db.js';
+import { logEvent, kvGet } from './db.js';
 import { nowIso } from './clock.js';
 
 export const MAX_STEPS = 25;
@@ -48,7 +48,8 @@ export async function step(db, env, deps, b) {
   const items = (Array.isArray(screen.items) ? screen.items : []).slice(0, 120)
     .map(i => `[${Number(i.n)}] ${String(i.kind || 'testo').slice(0, 12)}: ${String(i.text || '').replace(/\s+/g, ' ').slice(0, 120)}`).join('\n');
   const history = (Array.isArray(b.history) ? b.history : []).slice(-12).map(h => '- ' + String(h).slice(0, 160)).join('\n');
-  const user = `OBIETTIVO: ${goal}\n\nMOSSE GIÀ FATTE (${n}):\n${history || '- nessuna'}\n\nSCHERMO ATTUALE (app: ${String(screen.app || '?').slice(0, 80)}):\n${items || '(vuoto)'}`;
+  const apps = kvGet(db, 'apps', []);
+  const user = `${apps.length ? 'APP INSTALLATE (per open_app usa uno di questi nomi): ' + apps.join(', ').slice(0, 2500) + '\n\n' : ''}OBIETTIVO: ${goal}\n\nMOSSE GIÀ FATTE (${n}):\n${history || '- nessuna'}\n\nSCHERMO ATTUALE (app: ${String(screen.app || '?').slice(0, 80)}):\n${items || '(vuoto)'}`;
   try {
     const res = await router.chat(db, env, {
       tier: 'smart', maxTokens: 300, fetchFn: deps.fetchFn, now: deps.now, tz: deps.tz,

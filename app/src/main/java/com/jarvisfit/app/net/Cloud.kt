@@ -162,6 +162,12 @@ object Cloud {
             }
         }
 
+    /** Elenco delle app installate, così Jarvis capisce anche i nomi detti male. */
+    suspend fun sendApps(apps: List<String>) = withContext(Dispatchers.IO) {
+        runCatching { request("POST", "/api/apps", buildJsonObject { put("apps", JsonArray(apps.map { JsonPrimitive(it) })) }, readTimeoutMs = 20_000) }
+        Unit
+    }
+
     suspend fun sendSteps(date: String, steps: Int) = withContext(Dispatchers.IO) {
         runCatching {
             request("POST", "/api/steps", buildJsonObject { put("date", date); put("steps", steps) }, readTimeoutMs = 20_000)

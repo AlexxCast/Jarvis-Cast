@@ -122,12 +122,12 @@ export function createOrb() {
   /** Colore della rete a distanza rad dal centro: dietro l'onda il nuovo umore, davanti il vecchio. */
   const tintAt = (rad) => {
     const k = Math.max(0, Math.min(1, (wave - rad) / 0.3));
-    return mix(BASE, mix(tintFrom, tintTo, k * k * (3 - 2 * k)), 0.25 + tintA * 0.7);
+    return mix(BASE, mix(tintFrom, tintTo, k * k * (3 - 2 * k)), 0.55 + tintA * 0.45);
   };
   /** Colore di un impulso: di solito l'umore dominante, a volte un'emozione secondaria. */
   function pulseColor() {
     let x = Math.random();
-    for (const p of parts) { if ((x -= p.w) <= 0) return mix(BASE, p.rgb, 0.35 + tintA * 0.65); }
+    for (const p of parts) { if ((x -= p.w) <= 0) return mix(BASE, p.rgb, 0.6 + tintA * 0.4); }
     return tintAt(0);
   }
   /** Zone: ogni ramo prende anche un po' del colore di un'emozione secondaria, se c'è. */

@@ -10,11 +10,13 @@ import * as ui from './ui.js';
 import * as coder from './coder.js';
 import * as mood from './mood.js';
 import { today as todayOf, nowIso as nowIsoOf, nowHuman } from './clock.js';
-import { logEvent, kvSet } from './db.js';
+import { logEvent, kvSet, kvGet } from './db.js';
 
 const STICKY_TURNS = 3;
 // Richieste di cambiare cosa mostra l'app: solo allora il modello riceve le istruzioni per personalizzarla.
 const UI_WORDS = /(mostra|vedere|vedo|visualizz|schermat|riquadr|togli|nascond|in vista|personalizz|interfaccia|nell'app|sull'app|home|pagina|funzion|modific|riprogramm|riscriv|programm|pulsant|bottone|anteprima|approv|unisci|scarta)/i;
+// Richieste di usare il telefono: solo allora il modello riceve l'elenco delle app installate.
+const DEVICE_WORDS = /(apri|app\b|applicazion|mand|invi|scriv|messagg|chiam|cerca|metti|music|canzon|playlist|ascolt|video|foto|leggi|whatsapp|telegram|instagram|telefono|impostazion|sveglia|naviga|mappa|portami|accendi|spegni|volume)/i;
 const SPORT_WORDS = /(allen|corsa|corr[eoi]|palestra|sport|cammin|bici|nuot|esercizi|pesi|passi)/i;
 const SUMMARIZE_AFTER = 24;   // messaggi non ancora riassunti oltre i quali si comprime
 const KEEP_VERBATIM = 10;     // messaggi recenti che restano sempre per intero
@@ -35,10 +37,19 @@ export function addMessage(db, sessionId, role, text, at, meta = null) {
   db.run('INSERT INTO messages (session, role, text, at, meta) VALUES (?, ?, ?, ?, ?)', sessionId, role, text, at, meta ? JSON.stringify(meta) : null);
 }
 
+/** App installate sul telefono (le manda l'app Android), così "joytify" diventa Spotify. */
+export function appsPrompt(db) {
+  const apps = kvGet(db, 'apps', []);
+  if (!apps.length) return '';
+  return 'APP INSTALLATE SUL TELEFONO (usa sempre questi nomi esatti; se l\'utente storpia un nome o il riconoscimento vocale lo sbaglia, es. "joytify", scegli l\'app più simile per suono o per contesto, es. musica = Spotify): ' + apps.join(', ').slice(0, 3500);
+}
+
 /** Applica le azioni restituite dal modello. Ritorna { photoRequest, jobs, applied }. */
 export function applyActions(db, actions, ctx) {
   const out = { photoRequest: null, jobs: [], applied: [], device: [], code: [] };
   let diary = null;
+  // phone_task apre l'app da solo: un open_app in più la riaprirebbe a metà lavoro.
+  if (actions.some(a => a?.type === 'phone_task')) actions = actions.filter(a => a?.type !== 'open_app');
   for (const a of actions.slice(0, 20)) {
     try {
       if (DIET_ACTIONS.has(a.type)) {
@@ -113,7 +124,7 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
   const parts = {
     core: CORE_PROMPT(diary.profile.name, nowHuman(ms, tz)) + '\n\n' + mood.MOOD_PROMPT(mood.current(db, ms)),
     brief: dietBrief(diary, today),
-    rules: [dietOn ? DIET_RULES : '', UI_WORDS.test(userText) ? ui.uiPrompt(ui.loadLayout(db)) : '', UI_WORDS.test(userText) ? coder.codePrompt(env, db) : ''].filter(Boolean).join('\n\n'),
+    rules: [dietOn ? DIET_RULES : '', UI_WORDS.test(userText) ? ui.uiPrompt(ui.loadLayout(db)) : '', UI_WORDS.test(userText) ? coder.codePrompt(env, db) : '', DEVICE_WORDS.test(userText) ? appsPrompt(db) : ''].filter(Boolean).join('\n\n'),
     blocks: dietOn ? dietContext(diary, today) : [],
     memories: recalled.entries.map(m => `- [${m.id}] (${m.module}) ${m.text}`),
     moduleIndex: mods.length ? 'MODULI DI MEMORIA ESISTENTI: ' + mods.map(m => `${m.name}${m.description ? ` (${m.description})` : ''} [${m.entries}]`).join('; ') : '',

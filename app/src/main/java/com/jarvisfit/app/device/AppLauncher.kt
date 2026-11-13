@@ -33,8 +33,39 @@ object AppLauncher {
             }
             if (score > bestScore) { bestScore = score; best = i }
         }
-        return best
+        if (best >= 0 || q.length < 4) return best
+        // Nome storpiato ("joytify", "uozzap"): l'etichetta più simile, se lo è abbastanza.
+        var bestSim = 0.0
+        labels.forEachIndexed { i, raw ->
+            val l = normalize(raw)
+            if (l.isEmpty()) return@forEachIndexed
+            val sim = 1.0 - distance(q, l).toDouble() / maxOf(q.length, l.length)
+            if (sim > bestSim) { bestSim = sim; best = i }
+        }
+        return if (bestSim >= 0.55) best else -1
     }
+
+    /** Distanza di modifica (quante lettere cambiare, togliere o aggiungere). */
+    fun distance(a: String, b: String): Int {
+        var prev = IntArray(b.length + 1) { it }
+        for (i in 1..a.length) {
+            val cur = IntArray(b.length + 1)
+            cur[0] = i
+            for (j in 1..b.length) {
+                cur[j] = minOf(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + if (a[i - 1] == b[j - 1]) 0 else 1)
+            }
+            prev = cur
+        }
+        return prev[b.length]
+    }
+
+    /** Nomi delle app con icona, per farli conoscere a Jarvis. */
+    fun installedLabels(ctx: Context): List<String> = runCatching {
+        val pm = ctx.packageManager
+        val launcher = Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER)
+        pm.queryIntentActivities(launcher, 0).filter { it.activityInfo.packageName != ctx.packageName }
+            .map { it.loadLabel(pm).toString().trim() }.filter { it.isNotEmpty() }.distinct().sorted()
+    }.getOrDefault(emptyList())
 
     /** Ritorna true se l'app è stata trovata e avviata. */
     fun open(ctx: Context, name: String): Boolean {
