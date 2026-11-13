@@ -77,4 +77,41 @@ object Store {
 
     private val exportJsonFormat = Json { prettyPrint = true; encodeDefaults = true }
     fun exportJson(): String = exportJsonFormat.encodeToString(Diary.serializer(), diary)
+
+    data class ImportResult(val meals: Int, val activities: Int, val weights: Int)
+
+    /**
+     * Importa un backup (lo stesso formato di diary.json) unendolo al diario attuale:
+     * non cancella nulla e non duplica ciò che c'è già (stesso id, o stessa data per pesate e passi).
+     * Il profilo del backup vale solo se quello attuale non è ancora completo.
+     * Lancia un'eccezione se il testo non è un backup valido.
+     */
+    fun importJson(text: String): ImportResult {
+        val b = json.decodeFromString(Diary.serializer(), text)
+        require(b.meals.isNotEmpty() || b.weights.isNotEmpty() || b.profile.isComplete) { "Il file non contiene dati di Jarvis." }
+        var added = ImportResult(0, 0, 0)
+        update { cur ->
+            fun <T> union(a: List<T>, extra: List<T>, key: (T) -> String): List<T> {
+                val seen = a.map(key).toHashSet()
+                return a + extra.filter { seen.add(key(it)) }
+            }
+            val meals = union(cur.meals, b.meals) { it.id }
+            val acts = union(cur.activities, b.activities) { it.id }
+            val weights = union(cur.weights, b.weights) { it.date }.sortedBy { it.date }
+            added = ImportResult(meals.size - cur.meals.size, acts.size - cur.activities.size, weights.size - cur.weights.size)
+            val steps = (b.steps.keys + cur.steps.keys).associateWith { d -> maxOf(b.steps[d] ?: 0, cur.steps[d] ?: 0) }
+            cur.copy(
+                profile = if (cur.profile.isComplete) cur.profile else b.profile,
+                meals = meals,
+                activities = acts,
+                weights = weights,
+                steps = steps,
+                chat = if (cur.chat.isEmpty()) b.chat.takeLast(300) else cur.chat,
+                pantry = union(cur.pantry, b.pantry) { it.id },
+                savedRecipes = union(cur.savedRecipes, b.savedRecipes) { it.id },
+                activeRecipeSession = cur.activeRecipeSession ?: b.activeRecipeSession,
+            )
+        }
+        return added
+    }
 }

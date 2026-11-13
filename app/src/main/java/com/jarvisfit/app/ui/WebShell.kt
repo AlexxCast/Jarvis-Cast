@@ -178,7 +178,13 @@ fun WebShell(onDisconnect: () -> Unit) {
                     fileCallback?.onReceiveValue(null)
                     fileCallback = callback
                     return runCatching {
-                        if (params.isCaptureEnabled) takePhoto() else gallery.launch("image/*")
+                        // Le foto passano dalla fotocamera o dalla galleria; un backup (.json) dal selettore dei file.
+                        val wantsImage = params.acceptTypes.orEmpty().all { it.isBlank() || it.startsWith("image/") }
+                        when {
+                            params.isCaptureEnabled -> takePhoto()
+                            wantsImage -> gallery.launch("image/*")
+                            else -> gallery.launch("*/*")
+                        }
                         true
                     }.getOrElse {
                         deliver(null)

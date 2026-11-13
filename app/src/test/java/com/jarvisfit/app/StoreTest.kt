@@ -130,4 +130,35 @@ class StoreTest {
         assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS))
         assertEquals(threadCount * iterationsPerThread, seenIds.size)
     }
+
+    @Test
+    fun importBackupMergesWithoutDuplicatesOrLosses() {
+        val existing = Meal(id = "m1", date = "2026-11-13", meal = "colazione")
+        Store.resetForTest(Diary(meals = listOf(existing), steps = mapOf("2026-11-13" to 500)))
+        val backup = Diary(
+            profile = Profile(name = "A", birthDate = "2003-05-23", heightCm = 185.0, weightKg = 88.0),
+            meals = listOf(existing, Meal(id = "m2", date = "2026-10-10", meal = "pranzo")),
+            weights = listOf(WeightEntry("2026-10-10", 88.0)),
+            steps = mapOf("2026-11-13" to 300, "2026-10-10" to 4000),
+        )
+        val text = kotlinx.serialization.json.Json.encodeToString(Diary.serializer(), backup)
+
+        val r = Store.importJson(text)
+
+        assertEquals(1, r.meals)
+        assertEquals(1, r.weights)
+        assertEquals(listOf("m1", "m2"), Store.diary.meals.map { it.id })
+        assertEquals("A", Store.diary.profile.name)
+        assertEquals(500, Store.diary.steps["2026-11-13"])
+        assertEquals(4000, Store.diary.steps["2026-10-10"])
+        // Importare due volte lo stesso file non duplica nulla.
+        assertEquals(0, Store.importJson(text).meals)
+        assertEquals(2, Store.diary.meals.size)
+    }
+
+    @Test(expected = Exception::class)
+    fun importRejectsFilesThatAreNotBackups() {
+        Store.resetForTest()
+        Store.importJson("{\"foo\": 1}")
+    }
 }

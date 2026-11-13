@@ -13,8 +13,23 @@ android {
         applicationId = "com.jarvisfit.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "2.0"
+        versionCode = 3
+        versionName = "2.1"
+    }
+
+    // In GitHub Actions la chiave del PC arriva dal segreto DEBUG_KEYSTORE_B64 (vedi build-apk.yml):
+    // così l'APK ha la stessa firma dell'app installata e si aggiorna senza perdere dati.
+    // Sul PC la variabile non c'è e si usa la chiave di sviluppo predefinita, che è la stessa.
+    signingConfigs {
+        getByName("debug") {
+            val ciKeystore = System.getenv("JARVIS_DEBUG_KEYSTORE")?.let { file(it) }
+            if (ciKeystore != null && ciKeystore.exists()) {
+                storeFile = ciKeystore
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
     }
 
     buildTypes {

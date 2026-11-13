@@ -28,21 +28,45 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Ripara Gradle Wrapper e Compila APK
+      - uses: gradle/actions/setup-gradle@v4
+
+      # Android aggiorna l'app senza perdere i dati solo se la firma è la stessa del telefono.
+      # Il segreto DEBUG_KEYSTORE_B64 contiene debug.keystore del PC in base64: Gradle lo usa al posto di una chiave nuova.
+      - name: Chiave di firma del PC
+        env:
+          KEYSTORE_B64: ${{ secrets.DEBUG_KEYSTORE_B64 }}
         run: |
-          # Scarica una distribuzione pulita di Gradle 8.9 (compatibile con AGP 8.x)
-          wget -q https://services.gradle.org/distributions/gradle-8.9-bin.zip -O /tmp/gradle.zip
-          unzip -q /tmp/gradle.zip -d /tmp
-          
-          # Rigenera i file del wrapper (gradlew e gradle-wrapper.jar) direttamente sul runner
-          /tmp/gradle-8.9/bin/gradle wrapper --gradle-version 8.9
-          chmod +x ./gradlew
-          
-          # Avvia la build usando il wrapper appena generato
-          ./gradlew assembleDebug --no-daemon --stacktrace
+          if [ -n "$KEYSTORE_B64" ]; then
+            KS="$RUNNER_TEMP/jarvis-debug.keystore"
+            echo "$KEYSTORE_B64" | tr -d ' \r\n' | base64 -d > "$KS"
+            echo "JARVIS_DEBUG_KEYSTORE=$KS" >> "$GITHUB_ENV"
+            # Impronta del certificato della chiave (pubblica): deve essere CBE33F52…0E07.
+            keytool -list -v -keystore "$KS" -storepass android | grep -m1 "SHA256:" || echo "::warning::Il segreto non contiene una chiave valida."
+          else
+            echo "::warning::Segreto DEBUG_KEYSTORE_B64 assente: l'APK sarà firmato con una chiave diversa da quella del telefono."
+          fi
+
+      # gradle.properties punta al JDK del PC di sviluppo: qui si usa quello appena installato.
+      - name: Compila APK
+        run: ./gradlew --no-daemon "-Dorg.gradle.java.home=$JAVA_HOME" assembleDebug
 
       - name: Rinomina APK
         run: cp app/build/outputs/apk/debug/*.apk Jarvis.apk
+
+      # Impronta del certificato dell'app installata sul telefono (JarvisFit 1.0).
+      - name: Controlla che la firma coincida con l'app installata
+        id: key
+        env:
+          EXPECTED: CBE33F52DF0FCE8EF19F5A16A1475D8E4854D23AE0A01047F5AFEA624C2F0E07
+        run: |
+          GOT=$(python3 scripts/apk_cert.py Jarvis.apk | awk '{print $2}' | head -1)
+          echo "Firma APK: $GOT"
+          if [ "$GOT" = "$EXPECTED" ]; then
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::La firma non coincide con l'app sul telefono: niente release (installarlo richiederebbe di disinstallare e perdere i dati)."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          fi
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
@@ -50,7 +74,10 @@ jobs:
           name: Jarvis-apk
           path: Jarvis.apk
 
+      # La release si pubblica solo se la firma è quella giusta: un APK firmato diversamente
+      # costringerebbe a disinstallare l'app e a perdere i dati.
       - name: Pubblica release
+        if: steps.key.outputs.signed == 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: apk-latest
