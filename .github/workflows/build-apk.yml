@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   apk:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -28,17 +28,18 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          # Se il tuo gradle-wrapper.jar nel repo è corrotto o mancante,
-          # specificare 'gradle-version: wrapper' (default) fallisce.
-          # Impostando una versione esplicita (es. 8.7 o 8.9), GitHub Actions
-          # scarica ed esegue Gradle anche senza il jar nel repository:
-          gradle-version: '8.7'
-
-      - name: Compila APK
-        run: gradle assembleDebug --no-daemon --stacktrace
+      - name: Ripara Gradle Wrapper e Compila APK
+        run: |
+          # Scarica una distribuzione pulita di Gradle 8.9 (compatibile con AGP 8.x)
+          wget -q https://services.gradle.org/distributions/gradle-8.9-bin.zip -O /tmp/gradle.zip
+          unzip -q /tmp/gradle.zip -d /tmp
+          
+          # Rigenera i file del wrapper (gradlew e gradle-wrapper.jar) direttamente sul runner
+          /tmp/gradle-8.9/bin/gradle wrapper --gradle-version 8.9
+          chmod +x ./gradlew
+          
+          # Avvia la build usando il wrapper appena generato
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Rinomina APK
         run: cp app/build/outputs/apk/debug/*.apk Jarvis.apk
