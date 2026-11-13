@@ -442,5 +442,7 @@ test('sfera a livelli: dentro i rami personali, leggeri e usati spesso; fuori qu
   memory.noteUse(db, ['valori'], T0 + 1000);
   const b = memory.addLevels(db, [{ id: 'valori', label: 'valori', kind: 'module', children: [{}] }, { id: 'manuali-auto', label: 'manuali auto', kind: 'module' }], { 'manuali-auto': 300 }, T0 + 2000);
   assert.equal(b[0].ring, 0);
-  assert.equal(b[1].ring, 2);
+  assert.ok(b[1].ring >= 2);
+  // Nessun tetto: più informazioni = gusci sempre più esterni.
+  assert.ok(memory.ringOf(memory.levelOf({ size: 50000, use: 0, personal: 0.3 })) > memory.ringOf(heavy));
 });
