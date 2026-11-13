@@ -94,24 +94,36 @@ function toAnthropic(model, messages, maxTokens) {
   return { model, max_tokens: maxTokens, system, messages: rest };
 }
 
-async function callProvider(fetchFn, env, m, messages, maxTokens) {
+/** Modelli che "pensano" prima di rispondere: il pensiero consuma max_tokens, quindi serve margine
+ * (altrimenti la risposta arriva vuota) e, dove si può, si chiede un pensiero breve per restare veloci. */
+export const thinks = (m) => /(gpt-oss|deepseek-reasoner|deepseek-r1|thinking|qwq|gemini-(?!.*lite))/i.test(m.model);
+const TIMEOUT_MS = { fast: 22_000, smart: 45_000, vision: 45_000 };
+
+async function callProvider(fetchFn, env, m, messages, maxTokens, tier = 'smart', plain = false) {
   const p = PROVIDERS[m.provider];
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 45_000);
+  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS[tier] || 45_000);
   try {
     const anth = p.kind === 'anthropic';
+    const reasoning = !anth && !plain && thinks(m);
+    const payload = anth ? toAnthropic(m.model, messages, maxTokens)
+      : { model: m.model, messages, max_tokens: maxTokens + (thinks(m) ? 1500 : 0), temperature: 0.4, ...(reasoning ? { reasoning_effort: 'low' } : {}) };
     const res = await fetchFn(p.url, {
       method: 'POST',
       signal: controller.signal,
       headers: anth
         ? { 'content-type': 'application/json', 'x-api-key': env[p.env], 'anthropic-version': '2023-06-01' }
         : { 'content-type': 'application/json', authorization: `Bearer ${env[p.env]}` },
-      body: JSON.stringify(anth ? toAnthropic(m.model, messages, maxTokens) : { model: m.model, messages, max_tokens: maxTokens, temperature: 0.4 }),
+      body: JSON.stringify(payload),
     });
     const raw = await res.text();
     let data = null;
     try { data = JSON.parse(raw); } catch { /* corpo non JSON */ }
-    if (!res.ok) return { ok: false, status: res.status, error: (data?.error?.message || data?.message || raw || '').toString().slice(0, 300), headers: res.headers };
+    if (!res.ok) {
+      // Il provider non accetta "reasoning_effort": si riprova una volta senza, invece di perdere il modello.
+      if (reasoning && (res.status === 400 || res.status === 422)) { clearTimeout(timer); return callProvider(fetchFn, env, m, messages, maxTokens, tier, true); }
+      return { ok: false, status: res.status, error: (data?.error?.message || data?.message || raw || '').toString().slice(0, 300), headers: res.headers };
+    }
     const text = anth
       ? (data?.content || []).filter(c => c.type === 'text').map(c => c.text).join('\n')
       : (typeof data?.choices?.[0]?.message?.content === 'string' ? data.choices[0].message.content : '');
@@ -164,7 +176,7 @@ export async function chat(db, env, { tier = 'fast', needsVision = false, prefer
     if (promptTokens > c.model.ctx * 0.9) { tried.push(`${c.key}: contesto troppo grande`); continue; }
     if (loadFraction(c.model, usageOf(db, c.key, ms), promptTokens) > 1) { tried.push(`${c.key}: limite token`); continue; }
 
-    const res = await callProvider(fetchFn, env, c.model, messages, maxTokens);
+    const res = await callProvider(fetchFn, env, c.model, messages, maxTokens, needsVision ? 'vision' : tier);
     const st = stateOf(db, c.key);
     if (res.ok) {
       addUsage(db, c.key, ms, res.tokens || promptTokens + estimateTokens(res.text));

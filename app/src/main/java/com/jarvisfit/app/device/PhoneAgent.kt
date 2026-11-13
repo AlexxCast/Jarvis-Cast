@@ -65,6 +65,7 @@ object PhoneAgent {
         Speaker.init(ctx)
         val history = mutableListOf<String>()
         var finalSay = ""
+        var asked = false
         var pause = 600L
         try {
             for (step in 0 until 25) {
@@ -84,7 +85,7 @@ object PhoneAgent {
                     "home" -> { svc.home(); null }
                     "open_app" -> if (AppLauncher.open(ctx, move.text)) null else "app \"${move.text}\" non trovata"
                     "wait" -> null
-                    else -> { finalSay = move.say.ifBlank { if (move.kind == "done") "Fatto." else "Mi sono fermato: mi dica come proseguire." }; return } // done / ask
+                    else -> { asked = move.kind == "ask"; finalSay = move.say.ifBlank { if (move.kind == "done") "Fatto." else "Mi sono fermato: mi dica come proseguire." }; return } // done / ask
                 }
                 pause = when (move.kind) { "open_app" -> 2500L; "type" -> 700L; else -> 1300L }
                 val target = move.n?.let { n -> screen.items.firstOrNull { it.n == n }?.text?.take(40) }.orEmpty()
@@ -95,7 +96,9 @@ object PhoneAgent {
         } finally {
             if (finalSay.isNotBlank()) {
                 notify(ctx, finalSay, ongoing = false)
-                Speaker.speak(finalSay)
+                // Dopo una domanda ascolta subito la risposta, senza dover ridire "Jarvis".
+                if (asked) Speaker.speak(finalSay) { com.jarvisfit.app.voice.JarvisService.listenForAnswer(ctx) }
+                else Speaker.speak(finalSay)
             } else NotificationManagerCompat.from(ctx).cancel(NOTIF_ID)
         }
     }
