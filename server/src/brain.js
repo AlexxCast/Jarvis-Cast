@@ -108,6 +108,7 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
 
   let result;
   let remembered = [];
+  let topicHits = { modules: [], leaves: [] };
   const tier = router.classifyTier(userText, !!image);
   try {
     const res = await router.chat(db, env, {
@@ -116,6 +117,7 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
     });
     const parsed = parseReply(res.text);
     remembered = parsed.actions.filter(a => a && a.type === 'remember').map(a => memory.slug(a.module) || 'generale');
+    topicHits = memory.touchTopics(db, parsed.topics, nowIso);
     const done = applyActions(db, parsed.actions, { today, nowIso, ms, tz, hadPhoto: !!image });
     for (const j of done.jobs) deps.startJob?.(j);
     result = { reply: parsed.reply, expectReply: parsed.expectReply, card: parsed.card, photoRequest: done.photoRequest, model: res.key, switched: res.switched, actions: done.applied, device: done.device, tier };
@@ -131,9 +133,10 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
   if (dietOn) touched.add('dieta');
   if (agendaOn) touched.add('agenda');
   for (const r of remembered) touched.add(r);
+  for (const m of topicHits.modules) touched.add(m);
   if ((result.actions || []).includes('start_job')) touched.add('compiti');
   result.touched = [...touched];
-  result.touchedLeaves = recalled.entries.map(m => 'm:' + m.id);
+  result.touchedLeaves = [...topicHits.leaves, ...recalled.entries.map(m => 'm:' + m.id)];
   kvSet(db, 'lastTouched', { at: nowIso + '#' + ms, touched: result.touched, leaves: result.touchedLeaves });
   memory.markUsed(db, recalled.entries.map(m => m.id), nowIso);
 

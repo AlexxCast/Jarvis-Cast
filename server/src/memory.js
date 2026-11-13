@@ -13,7 +13,7 @@ export function keywords(text) {
 }
 
 export function listModules(db) {
-  return db.all(`SELECT m.name, m.description, m.created, COUNT(x.id) AS entries FROM modules m LEFT JOIN memories x ON x.module = m.name GROUP BY m.name ORDER BY m.name`);
+  return db.all(`SELECT m.name, m.description, m.created, (SELECT COUNT(*) FROM memories x WHERE x.module = m.name) AS entries FROM modules m ORDER BY m.name`);
 }
 
 export function remember(db, { module, text, description }, nowIso) {
@@ -31,7 +31,27 @@ export function remember(db, { module, text, description }, nowIso) {
 
 export function forget(db, id) {
   db.run('DELETE FROM memories WHERE id = ?', Number(id));
-  db.run('DELETE FROM modules WHERE name NOT IN (SELECT DISTINCT module FROM memories)');
+  db.run('DELETE FROM modules WHERE name NOT IN (SELECT DISTINCT module FROM memories) AND name NOT IN (SELECT DISTINCT module FROM topics)');
+}
+
+/**
+ * Segna gli argomenti di cui si è parlato: l'area diventa un ramo (un modulo), l'argomento una sua foglia.
+ * Ritorna { modules: [nome], leaves: [id foglia] } per accenderli sulla sfera.
+ */
+export function touchTopics(db, topics, nowIso) {
+  const out = { modules: [], leaves: [] };
+  for (const t of topics || []) {
+    const mod = slug(t.area);
+    if (!mod) continue;
+    db.run('INSERT INTO modules (name, description, created) VALUES (?, \'\', ?) ON CONFLICT(name) DO NOTHING', mod, nowIso);
+    out.modules.push(mod);
+    const name = slug(t.topic);
+    if (!name || name === mod) continue;
+    db.run('INSERT INTO topics (module, name, label, last_used) VALUES (?, ?, ?, ?) ON CONFLICT(module, name) DO UPDATE SET uses = uses + 1, last_used = excluded.last_used',
+      mod, name, String(t.topic).trim().slice(0, 60), nowIso);
+    out.leaves.push(`t:${mod}/${name}`);
+  }
+  return out;
 }
 
 /**
@@ -75,8 +95,15 @@ export function graph(db, { perModule = 8 } = {}) {
   const jobs = db.all("SELECT id, title, status FROM jobs ORDER BY created DESC LIMIT 8");
   if (jobs.length) branches.push({ id: 'compiti', label: 'Compiti', kind: 'core', children: jobs.map(j => ({ id: 'j:' + j.id, label: j.title, status: j.status })) });
   for (const m of listModules(db)) {
-    const rows = db.all('SELECT id, text FROM memories WHERE module = ? ORDER BY uses DESC, id DESC LIMIT ?', m.name, perModule);
-    branches.push({ id: m.name, label: m.name.replace(/-/g, ' '), description: m.description, kind: 'module', entries: m.entries, children: rows.map(r => ({ id: 'm:' + r.id, label: r.text })) });
+    const topics = db.all('SELECT name, label FROM topics WHERE module = ? ORDER BY uses DESC, last_used DESC LIMIT ?', m.name, perModule)
+      .map(t => ({ id: `t:${m.name}/${t.name}`, label: t.label, kind: 'topic' }));
+    const rows = db.all('SELECT id, text FROM memories WHERE module = ? ORDER BY uses DESC, id DESC LIMIT ?', m.name, Math.max(2, perModule - topics.length))
+      .map(r => ({ id: 'm:' + r.id, label: r.text }));
+    const children = [...topics, ...rows].slice(0, perModule + 2);
+    // Un'area con lo stesso nome di un ramo fisso (es. "dieta") si aggiunge a quel ramo.
+    const fixed = branches.find(b => b.id === m.name && b.kind === 'core');
+    if (fixed) { fixed.children.push(...children); continue; }
+    branches.push({ id: m.name, label: m.name.replace(/-/g, ' '), description: m.description, kind: 'module', entries: m.entries, children });
   }
   return { branches };
 }

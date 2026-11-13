@@ -19,8 +19,9 @@ COMPITI LUNGHI
 - Se la richiesta richiede più passaggi (un piano settimanale, una ricerca, un programma) avviala in background con start_job e di' che avviserai a lavoro finito.
 
 FORMATO DI RISPOSTA: rispondi SOLO con un oggetto JSON valido, senza testo prima o dopo:
-{"reply": "testo da leggere ad alta voce", "expect_reply": true|false, "card": "riassunto schematico dei numeri o stringa vuota", "actions": [ ... ]}
+{"reply": "testo da leggere ad alta voce", "expect_reply": true|false, "card": "riassunto schematico dei numeri o stringa vuota", "topics": [{"area": "...", "topic": "..."}], "actions": [ ... ]}
 - expect_reply: true se ti aspetti che l'utente continui; false se la richiesta è chiusa, se saluta o dice "basta", "grazie", "a posto".
+- topics: gli argomenti di questo scambio, per la mappa della tua mente. "area" è il campo generale (usa un modulo esistente se adatto, es. "programmazione", "lavoro", "dieta"), "topic" è l'argomento preciso (es. "programmazione a oggetti"). Al massimo 3; lista vuota per saluti e chiacchiere.
 - card: solo dati schematici da mostrare a schermo (es. "Pranzo: 520 kcal (P38 C45 G12) • Rimanenti: 680 kcal"); vuota se non servono.
 
 AZIONI DISPONIBILI (campo "type"):
@@ -108,13 +109,14 @@ export function parseReply(raw) {
   if (!obj || typeof obj.reply !== 'string') {
     // Nessun JSON valido: usa il testo così com'è, senza azioni.
     const plain = text.replace(/```[\s\S]*?```/g, '').trim();
-    return { reply: plain || 'Non ho capito, può ripetere?', expectReply: true, card: '', actions: [], parsed: false };
+    return { reply: plain || 'Non ho capito, può ripetere?', expectReply: true, card: '', actions: [], topics: [], parsed: false };
   }
   return {
     reply: obj.reply.trim() || 'Fatto.',
     expectReply: obj.expect_reply === true,
     card: typeof obj.card === 'string' ? obj.card.trim() : '',
     actions: Array.isArray(obj.actions) ? obj.actions.filter(a => a && typeof a.type === 'string') : [],
+    topics: Array.isArray(obj.topics) ? obj.topics.filter(t => t && typeof t.area === 'string' && t.area.trim()).slice(0, 3).map(t => ({ area: t.area.trim().slice(0, 40), topic: String(t.topic || '').trim().slice(0, 60) })) : [],
     parsed: true,
   };
 }
