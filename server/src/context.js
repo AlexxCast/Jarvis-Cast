@@ -41,8 +41,8 @@ AZIONI DISPONIBILI (campo "type"):
 - code_change {request} · code_approve {id} · code_discard {id}
 - ui_pin {widget, where} · ui_unpin {widget | id, where} · ui_note {text, title, where} · ui_reset {}
 - open_app {name: nome dell'app come compare sul telefono, es. "Spotify", "Maps", "WhatsApp"} · open_url {url: indirizzo https completo}
-  Usale solo quando l'utente chiede esplicitamente di aprire qualcosa sul telefono.
-- phone_task {goal: obiettivo completo e autosufficiente, es. "Apri WhatsApp, chat con Marco, scrivi 'arrivo tra 10 minuti' e invialo"}: usi il telefono come lui (tocchi, scrivi, scorri, leggi lo schermo) finché l'obiettivo è raggiunto. Usalo quando chiede di fare qualcosa DENTRO un'app (scrivere, cercare, leggere, impostare). Se nel goal c'è un invio o un pagamento scrivi esattamente cosa ha chiesto l'utente: prima di azioni irreversibili non richieste ti fermerai a chiedere conferma.
+  Usale solo quando l'utente chiede SOLO di aprire qualcosa, senza fare altro dentro.
+- phone_task {goal: obiettivo completo e autosufficiente, es. "Apri WhatsApp, chat con Marco, scrivi 'arrivo tra 10 minuti' e invialo"}: usi il telefono come lui (tocchi, scrivi, scorri, leggi lo schermo) finché l'obiettivo è raggiunto. Usalo SEMPRE quando chiede di fare qualcosa DENTRO un'app (mandare o leggere messaggi, cercare, mettere una canzone, impostare): apre l'app da solo, quindi non aggiungere open_app. Nel goal scrivi il nome esatto dell'app. Se nel goal c'è un invio o un pagamento scrivi esattamente cosa ha chiesto l'utente: prima di azioni irreversibili non richieste ti fermerai a chiedere conferma.
 Le date nelle azioni sono sempre yyyy-MM-dd.`;
 
 /**

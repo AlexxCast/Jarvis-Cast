@@ -33,6 +33,12 @@ object PhoneAgent {
     /** "ok" se è partito, "spento" se manca il permesso di accessibilità. */
     fun start(ctx: Context, goal: String): String {
         val app = ctx.applicationContext
+        // Con il telefono bloccato Jarvis non agisce: chi parla deve essere chi l'ha sbloccato.
+        val km = app.getSystemService(android.app.KeyguardManager::class.java)
+        if (km?.isDeviceLocked == true) {
+            notify(app, "Sblocca il telefono e ripeti: con il telefono bloccato non uso le app.", ongoing = false)
+            return "bloccato"
+        }
         if (JarvisAccessibility.instance == null) {
             notify(app, "Per usare il telefono al posto tuo attiva Jarvis in Impostazioni › Accessibilità.", ongoing = false)
             return "spento"

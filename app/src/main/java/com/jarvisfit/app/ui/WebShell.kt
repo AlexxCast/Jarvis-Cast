@@ -197,6 +197,9 @@ fun WebShell(onDisconnect: () -> Unit) {
         }
     }
 
+    // Jarvis impara i nomi delle app installate (una volta per avvio).
+    LaunchedEffect(Unit) { Cloud.sendApps(AppLauncher.installedLabels(ctx)) }
+
     val webView = remember {
         WebView(ctx).apply {
             // Senza questo la WebView prende l'altezza del contenuto (wrap_content) e la pagina,

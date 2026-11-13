@@ -12,5 +12,7 @@ class AppLauncherTest {
     @Test fun prefixMatches() = assertEquals(5, AppLauncher.bestMatch("calcola", labels))
     @Test fun longerRequestMatchesShorterLabel() = assertEquals(3, AppLauncher.bestMatch("Maps Google", labels))
     @Test fun unknownAppIsNotFound() = assertEquals(-1, AppLauncher.bestMatch("telegram", labels))
+    @Test fun misheardNameFindsClosestApp() = assertEquals(4, AppLauncher.bestMatch("joytify", labels))
+    @Test fun editDistance() = assertEquals(3, AppLauncher.distance("joytify", "spotify"))
     @Test fun tooShortQueryIsIgnored() = assertEquals(-1, AppLauncher.bestMatch("a", labels))
 }

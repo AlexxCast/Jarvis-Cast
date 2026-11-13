@@ -69,6 +69,13 @@ export async function handleApi(db, env, deps, request) {
       if (nextDue) deps.schedule?.(nextDue);
       return json(out);
     }
+    if (path === '/api/apps' && method === 'POST') {
+      // Etichette delle app installate, mandate dal telefono quando cambiano.
+      const b = await body(request);
+      const apps = [...new Set((Array.isArray(b.apps) ? b.apps : []).map(a => String(a || '').trim().slice(0, 40)).filter(Boolean))].sort((x, y) => x.localeCompare(y)).slice(0, 400);
+      kvSet(db, 'apps', apps);
+      return json({ count: apps.length });
+    }
     if (path === '/api/phone/step' && method === 'POST') return json(await phone.step(db, env, deps, await body(request)));
     if (path === '/api/addressed' && method === 'POST') {
       const b = await body(request);
