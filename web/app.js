@@ -40,7 +40,8 @@ async function loadGraph(lightUp = false) {
 }
 /** Accende subito i rami di cui sembra parlare il messaggio, senza aspettare il server. */
 const TOPIC_HINTS = {
-  dieta: /(mangiat|pranz|cena|colazion|spuntin|calori|kcal|protein|pes[oa]|dieta|allenament|corsa|palestra|passi)/i,
+  dieta: /(mangiat|pranz|cena|colazion|spuntin|calori|kcal|protein|pes[oa]|dieta)/i,
+  sport: /(allenament|corsa|corr[eoi]|palestra|sport|cammin|bici|nuot|passi)/i,
   agenda: /(ricord|promemoria|appuntament|agenda|domani|stasera|sveglia)/i,
   compiti: /(compito|ricerca|cerca|organizza|pianifica)/i,
 };
