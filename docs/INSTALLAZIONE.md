@@ -48,6 +48,19 @@ Al primo collegamento l'app copia sul server pasti, attività, pesate, passi, di
 - **Modelli**: *Altro → Modelli* mostra quali provider sono attivi, quanto sono carichi e ogni cambio automatico. Se un provider rinomina un modello, lo correggi lì senza aggiornare nulla.
 - **Backup**: *Altro → Impostazioni → Scarica un backup*.
 
+## Promemoria "quando arrivo" (app 2.4 o successiva)
+
+1. In Jarvis apri **Attività › Luoghi** e premi **Concedi posizione**. Scegli **Consenti sempre**: senza quello l'avviso arriva solo con l'app aperta.
+2. Quando sei nel posto di', per esempio, "Jarvis, salva questo posto come casa" (oppure scrivi il nome e premi **Salva dove sono ora**).
+3. Poi: "quando arrivo a casa ricordami di buttare la spazzatura, ogni volta". L'avviso scatta entro circa 150 metri.
+
+## Jarvis che usa il telefono (app 2.5 o successiva)
+
+1. In Jarvis apri **Altro › Impostazioni** e premi **Apri Accessibilità**, poi attiva **Jarvis: usa il telefono**.
+2. Se Android dice che è un'**impostazione con limitazioni**: Impostazioni › App › Jarvis Assistente, menu **⋮** in alto a destra, **Consenti impostazioni con limitazioni**, poi ripeti il punto 1.
+3. Prova: "Jarvis, apri WhatsApp e scrivi a Marco che arrivo tra 10 minuti". Mentre lavora c'è una notifica con **Ferma**.
+   Prima di inviare, pagare o eliminare qualcosa che non hai chiesto in modo esplicito si ferma e chiede; non compila mai i campi password.
+
 ## Sviluppo
 
 ```
