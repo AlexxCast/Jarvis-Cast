@@ -267,3 +267,27 @@ test('sfera: la mappa ha un ramo per modulo e ogni risposta dice quali rami ha a
   const res = await handleApi(db, ENV, d, new Request('https://x/api/graph'));
   assert.equal((await res.json()).branches.length, g.branches.length);
 });
+
+test('sfera: ogni argomento di cui si parla diventa un nodo, sotto la sua area', async () => {
+  const db = seeded();
+  const f = fakeFetch(() => reply({ reply: 'Certo.', topics: [{ area: 'Programmazione', topic: 'Programmazione a oggetti' }, { area: 'programmazione', topic: 'ereditarietà' }] }));
+  const d = deps(f);
+  const out = await handleChat(db, ENV, d, { text: 'spiegami la programmazione orientata agli oggetti' });
+  assert.deepEqual(out.touched, ['programmazione']);
+  assert.deepEqual(out.touchedLeaves, ['t:programmazione/programmazione-a-oggetti', 't:programmazione/ereditarieta']);
+  await handleChat(db, ENV, d, { text: 'e il polimorfismo?' });
+  const prog = memory.graph(db).branches.find(b => b.id === 'programmazione');
+  assert.deepEqual(prog.children.map(c => c.label).sort(), ['Programmazione a oggetti', 'ereditarietà']);
+  // L'area resta anche senza ricordi salvati, e forget di altri ricordi non la cancella.
+  memory.remember(db, { module: 'auto', text: 'Tagliando a 60000 km' }, '2026-11-13T10:00');
+  memory.forget(db, db.get('SELECT id FROM memories').id);
+  assert.ok(memory.graph(db).branches.some(b => b.id === 'programmazione'));
+  assert.ok(!memory.graph(db).branches.some(b => b.id === 'auto'));
+  assert.match(systemOf(f.calls[0]), /"topics"/);
+});
+
+test('parseReply: argomenti ripuliti e al massimo tre', () => {
+  const r = parseReply(JSON.stringify({ reply: 'ok', topics: [{ area: 'a', topic: 'x' }, { area: '' }, 'no', { area: 'b' }, { area: 'c' }, { area: 'd' }] }));
+  assert.deepEqual(r.topics, [{ area: 'a', topic: 'x' }, { area: 'b', topic: '' }, { area: 'c', topic: '' }]);
+  assert.deepEqual(parseReply('testo semplice').topics, []);
+});

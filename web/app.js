@@ -10,7 +10,7 @@ const nativeJson = (name, ...args) => { try { return JSON.parse(nativeCall(name,
 const store = {
   token: (nativeJson('getConfig') || {}).token || localStorage.getItem('jarvis_token') || '',
   tab: 'chat', sub: 'storico', state: null, messages: [], sending: false, pendingImage: null,
-  memory: null, models: null, inbox: [], openJob: null, error: '',
+  memory: null, models: null, inbox: [], openJob: null, error: '', chatOpen: false,
   voice: (nativeJson('getConfig') || {}).status || 'OFF', speakingUntil: 0,
 };
 
@@ -49,7 +49,11 @@ function guessTopics(text) {
   return (store.graph || []).filter(b => TOPIC_HINTS[b.id]?.test(text) ||
     `${b.id} ${b.label} ${b.description || ''}`.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/[^a-z0-9]+/).some(w => w.length > 3 && words.has(w))).map(b => b.id);
 }
-function syncCompact() { orb.el.classList.toggle('compact', store.tab === 'chat' && store.messages.length > 0 && !orb.focused); }
+function syncCompact() {
+  // Chat chiusa: la sfera occupa lo schermo. Chat aperta: la sfera si rimpicciolisce (se non c'è un ramo aperto).
+  orb.el.classList.toggle('full', !store.chatOpen || !!orb.focused);
+  orb.el.classList.toggle('compact', store.chatOpen && !orb.focused);
+}
 // Toccare un ramo lo apre (zoom); toccarlo di nuovo, o toccare altrove, torna alla vista intera.
 orb.onPick((id) => { orb.focus(id && id !== orb.focused ? id : null); syncCompact(); });
 /** Tiene la sfera in "sto parlando" per la durata stimata della risposta. */
@@ -209,13 +213,14 @@ async function send(text) {
   orb.highlight(guessTopics(text));
   try {
     const out = await api('POST', '/chat', { text, image });
-    orb.highlight(out.touched || [], out.touchedLeaves || []);
+    // Prima la mappa aggiornata (possono essere nati rami nuovi), poi si accendono.
+    loadGraph(false).then(() => orb.highlight(out.touched || [], out.touchedLeaves || []));
     store.messages.push({ role: 'assistant', text: out.reply, card: out.card, model: out.model });
     if (out.photoRequest) toast('Jarvis chiede una foto: ' + out.photoRequest);
     if ((nativeJson('getConfig') || {}).speakReplies) nativeCall('speak', out.reply);
     markSpeaking(out.reply);
     runDeviceActions(out.device);
-    await Promise.all([refresh(), loadGraph(false)]);
+    await refresh();
   } catch (e) {
     store.messages.push({ role: 'assistant', text: 'Non riesco a contattare il server: ' + e.message });
   }
@@ -243,6 +248,13 @@ function pickPhoto(camera = false) {
 
 function viewChat() {
   syncCompact();
+  // La conversazione completa si apre solo se richiesta; altrimenti sotto la sfera c'è solo l'ultima risposta.
+  const lastReply = [...store.messages].reverse().find(m => m.role === 'assistant');
+  const lastUser = [...store.messages].reverse().find(m => m.role === 'user');
+  const caption = store.sending
+    ? h('div', { class: 'caption pending' }, lastUser ? h('span', { class: 'you' }, lastUser.text) : null, 'Sto pensando…')
+    : h('div', { class: 'caption', 'aria-live': 'polite' }, lastReply ? lastReply.text : (native ? 'Dica "Jarvis" oppure scriva qui sotto.' : 'Scriva a Jarvis qui sotto.'),
+      lastReply?.card ? h('span', { class: 'cardline' }, lastReply.card) : null);
   const list = h('div', { class: 'chat' },
     store.messages.length ? null : h('p', { class: 'empty' }, 'Scriva o parli a Jarvis: pasti, allenamenti, promemoria, cose da ricordare, compiti da svolgere.'),
     store.messages.map(m => h('div', { class: 'msg ' + (m.role === 'user' ? 'user' : 'assistant') },
@@ -256,9 +268,10 @@ function viewChat() {
     h('button', { class: 'btn icon', 'aria-label': native ? 'Scatta una foto' : 'Allega una foto', onclick: () => pickPhoto(!!native) }, icon(ICONS.photo)),
     native ? h('button', { class: 'btn icon', 'aria-label': 'Scegli dalla galleria', onclick: () => pickPhoto(false) }, icon(ICONS.gallery)) : null,
     native ? h('button', { class: 'btn icon', 'aria-label': 'Parla ora', onclick: () => nativeCall('listenNow') }, icon(ICONS.mic)) : null,
+    h('button', { class: 'btn icon' + (store.chatOpen ? ' on' : ''), 'aria-label': store.chatOpen ? 'Chiudi la chat' : 'Apri la chat', 'aria-pressed': store.chatOpen ? 'true' : 'false', onclick: () => { store.chatOpen = !store.chatOpen; render(); if (store.chatOpen) scrollChat(); } }, icon(ICONS.chat)),
     ta,
     h('button', { class: 'btn primary icon', 'aria-label': 'Invia', disabled: store.sending, onclick: () => { const v = ta.value; ta.value = ''; send(v); } }, icon(ICONS.send)));
-  return [orb.el, list, composer];
+  return store.chatOpen ? [orb.el, list, composer] : [orb.el, caption, composer];
 }
 
 // ------------------------------------------------------------------ oggi
@@ -503,7 +516,7 @@ function viewLogin() {
     await Promise.all([loadHistory(), loadGraph(false)]); render(); scrollChat();
   });
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
-  return h('div', { class: 'card login' }, h('img', { src: '/logo.jpg', alt: '' }), h('h1', { style: 'text-align:center' }, 'Jarvis'),
+  return h('div', { class: 'card login' }, h('img', { src: '/logo.png', alt: '' }), h('h1', { style: 'text-align:center' }, 'Jarvis Assistente'),
     h('p', { class: 'muted', style: 'text-align:center' }, 'Inserisca il token scelto durante l\'installazione (JARVIS_TOKEN).'), input, h('button', { class: 'btn primary', onclick: submit }, 'Entra'));
 }
 

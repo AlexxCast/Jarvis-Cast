@@ -120,7 +120,8 @@ export async function handleApi(db, env, deps, request) {
       const g = memory.graph(db), d = loadDiary(db);
       const meals = (d.meals || []).slice(-6).reverse().map(m => ({ id: 'meal:' + m.id, label: `${m.date.slice(5)} ${m.meal}: ${m.description || (m.items || []).map(i => i.name).filter(Boolean).slice(0, 3).join(', ')}` }));
       const acts = (d.activities || []).slice(-3).reverse().map(a => ({ id: 'act:' + a.id, label: `${a.date.slice(5)} ${a.type} ${a.durationMin || ''} min` }));
-      g.branches.find(b => b.id === 'dieta').children = [...meals, ...acts];
+      const dieta = g.branches.find(b => b.id === 'dieta');
+      dieta.children = [...dieta.children, ...meals, ...acts];
       return json({ ...g, last: kvGet(db, 'lastTouched', null) });
     }
     if (path === '/api/memory' && method === 'GET') {
