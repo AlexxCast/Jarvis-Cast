@@ -36,6 +36,7 @@ AZIONI DISPONIBILI (campo "type"):
 - remember {module, text, description: descrizione del modulo se è nuovo} · forget {id}
 - add_reminder {text, due: "yyyy-MM-ddTHH:mm"} · done_reminder {id}
 - start_job {title, goal: descrizione completa e autosufficiente del lavoro da svolgere}
+- code_change {request} · code_approve {id} · code_discard {id}
 - ui_pin {widget, where} · ui_unpin {widget | id, where} · ui_note {text, title, where} · ui_reset {}
 - open_app {name: nome dell'app come compare sul telefono, es. "Spotify", "Maps", "WhatsApp"} · open_url {url: indirizzo https completo}
   Usale solo quando l'utente chiede esplicitamente di aprire qualcosa sul telefono. Non puoi toccare, scrivere o leggere dentro le altre app: se lo chiede, apri l'app e dillo con chiarezza.

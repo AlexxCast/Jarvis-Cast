@@ -6,12 +6,13 @@ import { loadDiary, saveDiary, applyDietAction, dietBrief, dietContext, DIET_ACT
 import * as memory from './memory.js';
 import * as agenda from './agenda.js';
 import * as ui from './ui.js';
+import * as coder from './coder.js';
 import { today as todayOf, nowIso as nowIsoOf, nowHuman } from './clock.js';
 import { logEvent, kvSet } from './db.js';
 
 const STICKY_TURNS = 3;
 // Richieste di cambiare cosa mostra l'app: solo allora il modello riceve le istruzioni per personalizzarla.
-const UI_WORDS = /(mostra|vedere|vedo|visualizz|schermat|riquadr|togli|nascond|in vista|personalizz|interfaccia|nell'app|sull'app|home|pagina)/i;
+const UI_WORDS = /(mostra|vedere|vedo|visualizz|schermat|riquadr|togli|nascond|in vista|personalizz|interfaccia|nell'app|sull'app|home|pagina|funzion|modific|riprogramm|riscriv|programm|pulsant|bottone|anteprima|approv|unisci|scarta)/i;
 const SPORT_WORDS = /(allen|corsa|corr[eoi]|palestra|sport|cammin|bici|nuot|esercizi|pesi|passi)/i;
 const SUMMARIZE_AFTER = 24;   // messaggi non ancora riassunti oltre i quali si comprime
 const KEEP_VERBATIM = 10;     // messaggi recenti che restano sempre per intero
@@ -34,7 +35,7 @@ export function addMessage(db, sessionId, role, text, at, meta = null) {
 
 /** Applica le azioni restituite dal modello. Ritorna { photoRequest, jobs, applied }. */
 export function applyActions(db, actions, ctx) {
-  const out = { photoRequest: null, jobs: [], applied: [], device: [] };
+  const out = { photoRequest: null, jobs: [], applied: [], device: [], code: [] };
   let diary = null;
   for (const a of actions.slice(0, 20)) {
     try {
@@ -46,6 +47,7 @@ export function applyActions(db, actions, ctx) {
       else if (a.type === 'forget') memory.forget(db, a.id);
       else if (a.type === 'add_reminder') agenda.addReminder(db, a, ctx.ms, ctx.tz);
       else if (a.type === 'done_reminder') agenda.doneReminder(db, a.id);
+      else if (coder.CODE_ACTIONS.has(a.type)) out.code.push({ type: a.type, id: String(a.id || ''), request: String(a.request || '').trim().slice(0, 2000) });
       else if (ui.UI_ACTIONS.has(a.type)) { if (!ui.applyUiAction(db, a, ctx.nowIso)) continue; out.ui = true; }
       else if (a.type === 'start_job') { if (String(a.goal || '').trim()) out.jobs.push({ title: String(a.title || 'Compito').slice(0, 80), goal: String(a.goal).slice(0, 2000) }); }
       else if (a.type === 'open_app') {
@@ -98,7 +100,7 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
   const parts = {
     core: CORE_PROMPT(diary.profile.name, nowHuman(ms, tz)),
     brief: dietBrief(diary, today),
-    rules: [dietOn ? DIET_RULES : '', UI_WORDS.test(userText) ? ui.uiPrompt(ui.loadLayout(db)) : ''].filter(Boolean).join('\n\n'),
+    rules: [dietOn ? DIET_RULES : '', UI_WORDS.test(userText) ? ui.uiPrompt(ui.loadLayout(db)) : '', UI_WORDS.test(userText) ? coder.codePrompt(env, db) : ''].filter(Boolean).join('\n\n'),
     blocks: dietOn ? dietContext(diary, today) : [],
     memories: recalled.entries.map(m => `- [${m.id}] (${m.module}) ${m.text}`),
     moduleIndex: mods.length ? 'MODULI DI MEMORIA ESISTENTI: ' + mods.map(m => `${m.name}${m.description ? ` (${m.description})` : ''} [${m.entries}]`).join('; ') : '',
@@ -125,6 +127,15 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
     topicHits = memory.touchTopics(db, parsed.topics, nowIso);
     const done = applyActions(db, parsed.actions, { today, nowIso, ms, tz, hadPhoto: !!image });
     for (const j of done.jobs) deps.startJob?.(j);
+    for (const c of done.code) {
+      try {
+        if (!coder.enabled(env)) { done.applied.push('code_disabled'); continue; }
+        if (c.type === 'code_change' && c.request) { const id = coder.propose(db, c.request, deps.now(), tz); const w = coder.work(db, env, deps, id); if (deps.defer) deps.defer(w); else await w; }
+        else if (c.type === 'code_approve') await coder.approve(db, env, deps, c.id);
+        else if (c.type === 'code_discard') await coder.discard(db, env, deps, c.id);
+        done.applied.push(c.type);
+      } catch (e) { logEvent(db, nowIso, 'error', `${c.type}: ${e.message}`); }
+    }
     result = { reply: parsed.reply, expectReply: parsed.expectReply, card: parsed.card, photoRequest: done.photoRequest, model: res.key, switched: res.switched, actions: done.applied, device: done.device, tier, layoutChanged: !!done.ui };
     sess.model = res.key;
   } catch (e) {

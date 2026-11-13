@@ -55,3 +55,13 @@ npm install        # solo la prima volta
 npm test           # test del server
 echo JARVIS_TOKEN=prova > .dev.vars && npm run dev   # server locale su http://localhost:8787
 ```
+
+## Jarvis che modifica l'app (facoltativo)
+
+Jarvis può preparare modifiche alla web app (solo la cartella `web/`) quando glielo chiedi. Le prepara su un ramo a parte, te le mostra in anteprima dentro l'app e le pubblica solo se premi **Approva** (o glielo dici a voce).
+
+1. Crea un token su GitHub: https://github.com/settings/personal-access-tokens/new
+   - Nome: `jarvis`, scadenza a piacere.
+   - Repository access: **Only select repositories**, scegli `Jarvis-Cast`.
+   - Permissions → Repository permissions: **Contents: Read and write** e **Pull requests: Read and write**.
+2. Copia il token e mettilo su Cloudflare, nel worker `jarvis-cast` → Impostazioni → Variabili e segreti → Aggiungi, tipo **Segreto**, nome `GITHUB_TOKEN`.
