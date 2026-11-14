@@ -42,6 +42,9 @@ AZIONI DISPONIBILI (campo "type"):
 - start_job {title, goal: descrizione completa e autosufficiente del lavoro da svolgere}
 - code_change {request} · code_approve {id} · code_discard {id}
 - ui_pin {widget, where} · ui_unpin {widget | id, where} · ui_note {text, title, where} · ui_reset {}
+- show {kind, title, items, unit, text, svg, url, seconds}: mostra una grafica animata a schermo, anche sopra le altre app se il telefono è in uso. kind: "bars" (confronti), "line" (andamento nel tempo), "pie" (proporzioni), "list" (passi, classifiche), "text" (un numero o una frase in grande), "svg" (un disegno o un'animazione: SVG completo con <animate> o <animateTransform>, colori verde #39ff14 e azzurro #22d3ee su sfondo scuro, viewBox 0 0 300 200, niente script), "image" (url https di un'immagine). items: [{label, value}] (value numerico, facoltativo per list). Usala quando un grafico o un disegno aiuta (calorie della settimana, peso, macro, risultati di una ricerca, spiegazioni visive) o quando l'utente chiede di mostrare, disegnare o animare qualcosa. La voce non legge la grafica: nella reply dì solo la sintesi.
+- web_search {query}: cerca su internet (Google). Usala per notizie, fatti recenti, prezzi, orari, risultati sportivi, uscite, o qualunque cosa che potresti non sapere o che può essere cambiata. Ti verranno dati i risultati e risponderai di nuovo. Non dire MAI che non hai accesso a internet.
+- read_url {url}: leggi il testo di una pagina web https.
 - call {name: nome del contatto in rubrica, oppure un numero}: telefonata normale. Usala SOLO quando l'utente chiede esplicitamente di chiamare qualcuno (non per WhatsApp o altre app: lì serve phone_task).
 - open_app {name: nome dell'app come compare sul telefono, es. "Spotify", "Maps", "WhatsApp"} · open_url {url: indirizzo https completo}
   Usale solo quando l'utente chiede SOLO di aprire qualcosa, senza fare altro dentro.
@@ -77,6 +80,7 @@ export function buildMessages(model, parts) {
   const blocks = [...(parts.blocks || [])].sort((a, b) => a.prio - b.prio);
   const rest = [];
   for (const b of blocks) { if (b.prio === 1) { if (take(b.text)) sections.push(b.text); } else rest.push(b); }
+  if (parts.web && take(parts.web)) sections.push(parts.web);
   if (parts.weather && take(parts.weather)) sections.push(parts.weather);
   if (parts.agenda && take(parts.agenda)) sections.push(parts.agenda);
   if (parts.summary && take(parts.summary)) sections.push('RIASSUNTO DELLA CONVERSAZIONE FINORA\n' + parts.summary);

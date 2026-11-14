@@ -92,7 +92,7 @@ export async function handleApi(db, env, deps, request) {
     if (path === '/api/actions' && method === 'POST') {
       // Modifiche fatte a mano dall'interfaccia: stesse azioni che usa il modello.
       const b = await body(request);
-      const actions = (Array.isArray(b.actions) ? b.actions : []).filter(a => a && (DIET_ACTIONS.has(a.type) || ['remember', 'forget', 'add_reminder', 'done_reminder'].includes(a.type) || ui.UI_ACTIONS.has(a.type)));
+      const actions = (Array.isArray(b.actions) ? b.actions : []).filter(a => a && a.type !== 'show' && (DIET_ACTIONS.has(a.type) || ['remember', 'forget', 'add_reminder', 'done_reminder'].includes(a.type) || ui.UI_ACTIONS.has(a.type)));
       const done = applyActions(db, actions, { today: todayOf(ms, tz), nowIso: nowIsoOf(ms, tz), ms, tz, hadPhoto: false });
       const nextDue = agenda.fireDue(db, ms, tz);
       if (nextDue) deps.schedule?.(nextDue);

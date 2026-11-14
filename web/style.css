@@ -100,3 +100,6 @@ details > summary { cursor: pointer; color: var(--muted); }
 .block summary { cursor: pointer; font-size: .85rem; }
 .chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .chip { font-size: .75rem; padding: 2px 8px; border-radius: 999px; border: 1px solid rgba(57,255,20,.22); }
+
+.caption:has(.visual) { max-height: 58%; }
+.caption .visual, .msg .visual { text-align: left; white-space: normal; margin-top: 10px; }

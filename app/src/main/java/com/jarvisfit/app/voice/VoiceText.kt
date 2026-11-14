@@ -55,9 +55,14 @@ object VoiceText {
         data class Ambiguous(val text: String, val aboutJarvis: Boolean) : Wake()
     }
 
-    private val wakeToken = Regex("\\b(jarvis|jarvi|giarvis|jervis|gervis|jarvys)\\b")
+    /**
+     * Il riconoscimento italiano scrive "Jarvis" in molti modi: detto a voce normale esce spesso
+     * "giarvis", "jarvi", "garvis"... Tutte queste valgono già con la sensibilità media; il contesto
+     * (nome all'inizio, alla fine o giudicato dal server) evita le false chiamate.
+     */
+    private val wakeToken = Regex("\\b(jarvis|jarvi|giarvis|jervis|gervis|jarvys|jarviss|jarbis|giarvi|garvis|charvis|jarvas|giarviz|jarviz|jarves|giarves|giarbis|jervi|giervis)\\b")
     /** Sensibilità alta: accetta anche come il riconoscimento vocale storpia spesso il nome. */
-    private val wakeTokenLoose = Regex("\\b(jarvis|jarvi|giarvis|jervis|gervis|jarvys|jarviss|jarbis|giarvi|garvis|charvis|jarvas|harvis|giorvis|jarvees|jarviz|giarviz)\\b")
+    private val wakeTokenLoose = Regex("\\b(jarvis|jarvi|giarvis|jervis|gervis|jarvys|jarviss|jarbis|giarvi|garvis|charvis|jarvas|giarviz|jarviz|jarves|giarves|giarbis|jervi|giervis|harvis|giorvis|jarvees|travis|davis|chavis|service|servis|ciarvis|sarvis|harvey|garbis|darvis|carvis)\\b")
 
     /** Parole che possono precedere il nome quando lo si chiama ("ehi Jarvis", "senti Jarvis"). */
     private val callWords = setOf(
@@ -73,7 +78,17 @@ object VoiceText {
     )
 
     /** Vero se nella frase (anche parziale) compare la parola di attivazione. */
-    fun containsWake(text: String): Boolean = wakeToken.containsMatchIn(normalize(text))
+    fun containsWake(text: String, sensitivity: Float = 0.5f): Boolean =
+        (if (sensitivity > 0.7f) wakeTokenLoose else wakeToken).containsMatchIn(normalize(text))
+
+    /**
+     * La frase finale ha perso il nome che i risultati parziali avevano sentito ("Jarvis accendi" →
+     * "accendi"): è comunque una chiamata, con quello che resta come comando.
+     */
+    fun commandAfterLostWake(finalText: String): String = normalize(finalText).let { t ->
+        val m = wakeTokenLoose.find(t)
+        if (m != null) t.substring(m.range.last + 1).trim() else t
+    }
 
     /**
      * Decide se una frase è una chiamata a Jarvis.

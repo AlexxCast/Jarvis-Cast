@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { handleChat, isAddressed } from '../src/brain.js';
+import { handleChat, isAddressed, cleanVisual } from '../src/brain.js';
 import { buildMessages, parseReply, CORE_PROMPT } from '../src/context.js';
 import { messagesTokens } from '../src/router.js';
 import { loadDiary, saveDiary, EMPTY_DIARY, mergeLegacy } from '../src/diet.js';
@@ -10,6 +10,7 @@ import * as jobs from '../src/jobs.js';
 import * as ui from '../src/ui.js';
 import * as mood from '../src/mood.js';
 import * as phone from '../src/phone.js';
+import * as web from '../src/web.js';
 import { handleApi } from '../src/api.js';
 import { localToMs, nowIso } from '../src/clock.js';
 import { makeDb, fakeFetch, deps, reply, T0 } from './helpers.js';
@@ -615,4 +616,53 @@ test('chiamate: "chiama Marcolino" diventa una telefonata vera, anche se il mode
   assert.equal(phone.calleeOf('telefona a Luca Rossi adesso'), 'Luca Rossi');
   assert.equal(phone.calleeOf('chiama Marco su WhatsApp'), '');
   assert.equal(phone.calleeOf('come si chiama il mio medico'), '');
+});
+
+test('internet: le domande su fatti recenti partono con una ricerca Google e le fonti finiscono nel contesto', async () => {
+  const db = makeDb();
+  let system = '', searched = '';
+  const fetchFn = async (url, init) => {
+    if (String(url).includes(':generateContent')) {
+      searched = JSON.parse(init.body).contents[0].parts[0].text;
+      return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: 'Ieri il Napoli ha vinto 2-1 contro la Roma.' }] }, groundingMetadata: { groundingChunks: [{ web: { uri: 'https://example.com/partita', title: 'Sport' } }] } }] }));
+    }
+    system = JSON.parse(init.body).messages[0].content;
+    return new Response(JSON.stringify({ choices: [{ message: { content: reply({ reply: 'Il Napoli ha vinto 2 a 1.' }) } }] }));
+  };
+  const out = await handleChat(db, ENV, deps(fetchFn), { text: 'chi ha vinto ieri tra Napoli e Roma?' });
+  assert.match(searched, /chi ha vinto ieri tra Napoli e Roma/);
+  assert.match(system, /RISULTATI DA INTERNET.*\n.*Napoli ha vinto 2-1[\s\S]*FONTI: Sport \(https:\/\/example.com\/partita\)/);
+  assert.equal(out.reply, 'Il Napoli ha vinto 2 a 1.');
+});
+
+test('internet: il modello può chiedere una ricerca, che viene fatta e poi risponde di nuovo con i risultati', async () => {
+  const db = makeDb();
+  let n = 0, second = '';
+  const fetchFn = async (url, init) => {
+    if (String(url).includes(':generateContent')) return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: 'La nuova versione è uscita il 3 novembre.' }] } }] }));
+    n++;
+    if (n === 1) return new Response(JSON.stringify({ choices: [{ message: { content: reply({ reply: 'Controllo.', actions: [{ type: 'web_search', query: 'ultima versione Android' }] }) } }] }));
+    second = JSON.parse(init.body).messages[0].content;
+    return new Response(JSON.stringify({ choices: [{ message: { content: reply({ reply: 'È uscita il 3 novembre.' }) } }] }));
+  };
+  const out = await handleChat(db, ENV, deps(fetchFn), { text: 'sai niente del telefono nuovo?' });
+  assert.equal(n, 2);
+  assert.match(second, /RISULTATI DA INTERNET \(ricerca per "ultima versione Android"/);
+  assert.equal(out.reply, 'È uscita il 3 novembre.');
+  assert.ok(!out.actions.includes('web_search'));
+  // Le calorie "di oggi" non sono una domanda per internet.
+  assert.ok(!web.WEB_WORDS.test('quante calorie ho mangiato oggi?'));
+});
+
+test('grafiche: "show" arriva all\'app e al telefono solo con dati puliti, e resta nella cronologia', async () => {
+  const db = makeDb();
+  const out = await handleChat(db, ENV, deps(fakeFetch(() => reply({ reply: 'Ecco le calorie della settimana.', actions: [{ type: 'show', kind: 'bars', title: 'Calorie', unit: 'kcal', items: [{ label: 'Lun', value: 1850 }, { label: 'Mar', value: '2100' }, { label: '', value: 5 }, { label: 'X', value: 'tanto' }], html: '<script>x</script>' }] }))), { text: 'mostrami le calorie della settimana' });
+  assert.deepEqual(out.visual, { kind: 'bars', title: 'Calorie', seconds: 12, unit: 'kcal', items: [{ label: 'Lun', value: 1850 }, { label: 'Mar', value: 2100 }] });
+  assert.deepEqual(out.device, [{ type: 'visual', data: out.visual }]);
+  const hist = db.get("SELECT meta FROM messages WHERE role = 'assistant' ORDER BY id DESC LIMIT 1");
+  assert.equal(JSON.parse(hist.meta).visual.kind, 'bars');
+  assert.equal(cleanVisual({ kind: 'svg', svg: '<div>no</div>' }), null);
+  assert.equal(cleanVisual({ kind: 'image', url: 'http://x' }), null);
+  assert.equal(cleanVisual({ kind: 'nope' }), null);
+  assert.equal(cleanVisual({ kind: 'svg', svg: '<svg viewBox="0 0 1 1"></svg>', seconds: 999 }).seconds, 60);
 });

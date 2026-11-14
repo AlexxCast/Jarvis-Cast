@@ -2,6 +2,7 @@
 
 import * as phone from './phone.js';
 import { WEATHER_WORDS, weatherContext } from './weather.js';
+import * as web from './web.js';
 import * as router from './router.js';
 import { CORE_PROMPT, buildMessages, parseReply } from './context.js';
 import { loadDiary, saveDiary, applyDietAction, dietBrief, dietContext, DIET_ACTIONS, DIET_KEYWORDS, DIET_RULES } from './diet.js';
@@ -39,9 +40,37 @@ export function addMessage(db, sessionId, role, text, at, meta = null) {
   db.run('INSERT INTO messages (session, role, text, at, meta) VALUES (?, ?, ?, ?, ?)', sessionId, role, text, at, meta ? JSON.stringify(meta) : null);
 }
 
+const VISUAL_KINDS = new Set(['bars', 'line', 'pie', 'list', 'text', 'svg', 'image']);
+/** Convalida una grafica chiesta dal modello: solo dati, niente HTML. Ritorna null se non è usabile. */
+export function cleanVisual(a) {
+  const kind = String(a.kind || '').toLowerCase();
+  if (!VISUAL_KINDS.has(kind)) return null;
+  const v = { kind, title: String(a.title || '').trim().slice(0, 80), seconds: Math.round(Math.min(60, Math.max(4, Number(a.seconds) || 12))) };
+  if (a.unit) v.unit = String(a.unit).slice(0, 12);
+  if (a.text) v.text = String(a.text).trim().slice(0, 400);
+  if (['bars', 'line', 'pie', 'list'].includes(kind)) {
+    v.items = (Array.isArray(a.items) ? a.items : []).slice(0, 14).map(i => ({
+      label: String(i?.label ?? '').trim().slice(0, 40),
+      value: kind === 'list' ? (Number.isFinite(Number(i?.value)) && i?.value !== '' && i?.value != null ? Number(i.value) : '') : Number(i?.value),
+    })).filter(i => i.label && (kind === 'list' || Number.isFinite(i.value)));
+    if (!v.items.length) return null;
+  }
+  if (kind === 'text' && !v.text) return null;
+  if (kind === 'svg') {
+    const svg = String(a.svg || '').trim();
+    if (!/^<svg[\s>]/i.test(svg) || svg.length > 20000) return null;
+    v.svg = svg;
+  }
+  if (kind === 'image') {
+    if (!/^https:\/\//i.test(String(a.url || ''))) return null;
+    v.url = String(a.url).slice(0, 500);
+  }
+  return v;
+}
+
 /** Frasi con cui il modello dichiara di aver salvato o cambiato qualcosa. */
 export const CLAIM_WORDS = /\b(ho|l'ho|li ho|le ho|te l'ho|gliel'ho)\s+(appena\s+|già\s+|subito\s+|anche\s+)?(registrat|aggiunt|aggiornat|salvat|segnat|impostat|annotat|memorizzat|eliminat|cancellat|inserit|creat|modificat|spostat|tolt|rimoss)|\b(promemoria|piano|diario|pasto|peso|allenamento|dispensa|ricetta)\s+(è stat[oa]\s+)?(impostat|aggiornat|registrat|salvat|creat|aggiunt)[oa]\b|^\W*(fatto|registrato|aggiornato|salvato|segnato|annotato)\b/i;
-const FAIL_LABELS = { add_meal: 'registrare il pasto (mancano gli alimenti)', update_meal: 'modificare il pasto (non l\'ho trovato)', delete_meal: 'eliminare il pasto (non l\'ho trovato)', add_weight: 'registrare il peso', add_activity: 'registrare l\'allenamento', add_reminder: 'creare il promemoria (data non valida)', remember: 'salvare il ricordo', call: 'avviare la chiamata (manca il nome)', update_profile: 'aggiornare il profilo', delete_activity: 'eliminare l\'attività (non l\'ho trovata)' };
+const FAIL_LABELS = { show: 'mostrare la grafica', web_search: 'cercare su internet', read_url: 'leggere la pagina', add_meal: 'registrare il pasto (mancano gli alimenti)', update_meal: 'modificare il pasto (non l\'ho trovato)', delete_meal: 'eliminare il pasto (non l\'ho trovato)', add_weight: 'registrare il peso', add_activity: 'registrare l\'allenamento', add_reminder: 'creare il promemoria (data non valida)', remember: 'salvare il ricordo', call: 'avviare la chiamata (manca il nome)', update_profile: 'aggiornare il profilo', delete_activity: 'eliminare l\'attività (non l\'ho trovata)' };
 const failLabel = (t) => FAIL_LABELS[t] || `completare l'operazione "${t}"`;
 const REPAIR_PROMPT = (failed) => `CONTROLLO AUTOMATICO: nella tua risposta ${failed.length ? `queste azioni non erano valide e NON sono state eseguite: ${failed.join(', ')}` : 'dichiari di aver fatto qualcosa ma il campo "actions" è vuoto o incompleto'}. Finora NON è stato salvato nulla. Rimanda SOLO il JSON completo, con in "actions" tutte le azioni corrette e complete (per un pasto: items con name, grams, kcal, protein, carbs, fat; per update/delete: l'id esatto preso dal contesto). Se davvero non c'è nulla da salvare, lascia "actions" vuoto e scrivi una reply che NON dica di aver salvato o fatto qualcosa.`;
 
@@ -79,6 +108,12 @@ export function applyActions(db, actions, ctx) {
         const name = String(a.name || '').trim().slice(0, 60);
         if (!name) continue;
         out.device.push({ type: 'open_app', name });
+      } else if (a.type === 'show') {
+        // Una grafica da mostrare: nell'app sotto la risposta e, col telefono in uso, sopra le altre app.
+        const v = cleanVisual(a);
+        if (!v) { out.failed.push(a.type); continue; }
+        out.visual = v;
+        out.device.push({ type: 'visual', data: v });
       } else if (a.type === 'call') {
         // La telefonata la fa il telefono, cercando il nome in rubrica.
         const name = String(a.name || a.number || '').trim().slice(0, 60);
@@ -148,6 +183,8 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
       memory.topicsIndex(db, mods.map(m => m.name).slice(0, 30))].filter(Boolean).join('\n').slice(0, 2500),
     agenda: agendaOn ? agenda.agendaContext(db, tz) : '',
     weather: WEATHER_WORDS.test(userText) ? await weatherContext(db, deps.fetchFn, userText) : '',
+    // Domande su fatti recenti: la ricerca parte subito, senza aspettare che il modello la chieda.
+    web: web.WEB_WORDS.test(userText) && !WEATHER_WORDS.test(userText) ? web.webBlock(userText, await web.search(env, deps.fetchFn, userText, today)) : '',
     summary: sess.summary,
     history,
     userText: `[${nowHuman(ms, tz)}${source === 'voice' ? ', a voce' : ''}] ${userText}`,
@@ -161,11 +198,29 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
   let topicHits = { modules: [], leaves: [] };
   const tier = router.classifyTier(userText, !!image);
   try {
-    const res = await router.chat(db, env, {
+    let res = await router.chat(db, env, {
       tier, needsVision: !!image, preferKey: sess.model, maxTokens: 2000,
       build: (model) => buildMessages(model, parts), fetchFn: deps.fetchFn, now: deps.now, tz,
     });
     let parsed = parseReply(res.text);
+    // Il modello chiede di cercare su internet o leggere una pagina: lo facciamo e gli ridiamo la parola.
+    const webAsk = parsed.actions.filter(a => a.type === 'web_search' || a.type === 'read_url').slice(0, 2);
+    if (webAsk.length) {
+      const found = [];
+      for (const a of webAsk) {
+        const q = a.type === 'read_url' ? String(a.url || '') : String(a.query || userText);
+        found.push(web.webBlock(q, a.type === 'read_url' ? await web.readUrl(deps.fetchFn, q) : await web.search(env, deps.fetchFn, q, today)));
+      }
+      parts.web = [parts.web, ...found].filter(Boolean).join('\n\n');
+      try {
+        res = await router.chat(db, env, {
+          tier, needsVision: !!image, preferKey: res.key, maxTokens: 2000,
+          build: (model) => buildMessages(model, parts), fetchFn: deps.fetchFn, now: deps.now, tz,
+        });
+        parsed = parseReply(res.text);
+      } catch { parsed = { ...parsed, reply: 'Ho cercato, ma non riesco a elaborare i risultati in questo momento, signore.', actions: [] }; }
+      parsed.actions = parsed.actions.filter(a => a.type !== 'web_search' && a.type !== 'read_url');
+    }
     let done = applyActions(db, parsed.actions, { today, nowIso, ms, tz, hadPhoto: !!image });
     // Dice di averlo fatto ma nessuna azione è andata a buon fine: una seconda richiesta per avere le azioni vere.
     const nothing = (d) => !d.applied.length && !d.device.length && !d.jobs.length && !d.code.length;
@@ -221,7 +276,7 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
         done.applied.push(c.type);
       } catch (e) { logEvent(db, nowIso, 'error', `${c.type}: ${e.message}`); }
     }
-    result = { reply: parsed.reply, expectReply: parsed.expectReply, card: parsed.card, photoRequest: done.photoRequest, model: res.key, switched: res.switched, actions: done.applied, device: done.device, tier, layoutChanged: !!done.ui };
+    result = { reply: parsed.reply, expectReply: parsed.expectReply, card: parsed.card, visual: done.visual || null, photoRequest: done.photoRequest, model: res.key, switched: res.switched, actions: done.applied, device: done.device, tier, layoutChanged: !!done.ui };
     sess.model = res.key;
   } catch (e) {
     logEvent(db, nowIso, 'error', `chat: ${e.message} ${(e.tried || []).join(' | ')}`);
@@ -229,7 +284,7 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
     result = { reply: e.tried ? e.message : 'Si è verificato un problema interno, signore. Riprovi tra poco.', expectReply: false, card: '', photoRequest: null, model: '', switched: false, actions: [], device: [], error: true };
   }
 
-  addMessage(db, sessionId, 'assistant', result.reply, nowIso, { model: result.model, card: result.card || undefined });
+  addMessage(db, sessionId, 'assistant', result.reply, nowIso, { model: result.model, card: result.card || undefined, visual: result.visual || undefined });
   // Cosa ha "acceso" questo scambio: la sfera illumina questi rami e foglie.
   const touched = new Set(recalled.active);
   if (dietOn) touched.add(SPORT_WORDS.test(userText) ? 'sport' : 'dieta');
