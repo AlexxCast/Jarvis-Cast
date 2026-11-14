@@ -18,7 +18,7 @@ import com.jarvisfit.app.voice.JarvisState
 import org.json.JSONObject
 
 /**
- * Jarvis sopra le altre app: una finestra trasparente in alto con la sfera animata (ascolta, pensa,
+ * Jarvis sopra le altre app: una finestra trasparente in alto con la rete di Jarvis in 2D (ascolta, pensa,
  * parla), la frase che sta dicendo e le grafiche che vuole mostrare. Non intercetta mai i tocchi,
  * quindi non blocca l'app che si sta usando. Serve il permesso "Mostra sopra altre app".
  */
@@ -73,7 +73,8 @@ object Overlay {
         return runCatching {
             wm.addView(web, lp)
             ready = false
-            web.loadUrl(Settings.serverUrl.trimEnd('/') + "/overlay.html")
+            // Il token va nel frammento (#): resta nella pagina, che lo usa solo per leggere la rete di Jarvis.
+            web.loadUrl(Settings.serverUrl.trimEnd('/') + "/overlay.html#t=" + Uri.encode(Settings.serverToken))
             view = web
             web
         }.getOrNull()
