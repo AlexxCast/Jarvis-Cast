@@ -97,7 +97,7 @@ function toAnthropic(model, messages, maxTokens) {
 /** Modelli che "pensano" prima di rispondere: il pensiero consuma max_tokens, quindi serve margine
  * (altrimenti la risposta arriva vuota) e, dove si può, si chiede un pensiero breve per restare veloci. */
 export const thinks = (m) => /(gpt-oss|deepseek-reasoner|deepseek-r1|thinking|qwq|gemini-(?!.*lite))/i.test(m.model);
-const TIMEOUT_MS = { fast: 22_000, smart: 45_000, vision: 45_000 };
+const TIMEOUT_MS = { fast: 14_000, smart: 30_000, vision: 35_000 };
 
 async function callProvider(fetchFn, env, m, messages, maxTokens, tier = 'smart', plain = false) {
   const p = PROVIDERS[m.provider];
@@ -167,7 +167,10 @@ export async function chat(db, env, { tier = 'fast', needsVision = false, prefer
   const attempted = new Set();
   for (let round = 0; round < 8; round++) {
     const ms = now();
-    const candidates = rank(db, env, { tier, needsVision, preferKey, ms }).filter(c => !attempted.has(c.key));
+    let candidates = rank(db, env, { tier, needsVision, preferKey, ms }).filter(c => !attempted.has(c.key));
+    if (!candidates.length && tier === 'smart' && !needsVision) {
+      candidates = rank(db, env, { tier: 'fast', needsVision, preferKey, ms }).filter(c => !attempted.has(c.key));
+    }
     if (!candidates.length) break;
     const c = candidates[0];
     attempted.add(c.key);

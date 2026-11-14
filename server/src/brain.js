@@ -16,7 +16,7 @@ import * as mood from './mood.js';
 import { today as todayOf, nowIso as nowIsoOf, nowHuman } from './clock.js';
 import { logEvent, kvSet, kvGet } from './db.js';
 
-const STICKY_TURNS = 3;
+const STICKY_TURNS = 5;
 // Richieste di cambiare cosa mostra l'app: solo allora il modello riceve le istruzioni per personalizzarla.
 const UI_WORDS = /(mostra|vedere|vedo|visualizz|schermat|riquadr|togli|nascond|in vista|personalizz|interfaccia|nell'app|sull'app|home|pagina|funzion|modific|riprogramm|riscriv|programm|pulsant|bottone|anteprima|approv|unisci|scarta)/i;
 // Richieste di usare il telefono: solo allora il modello riceve l'elenco delle app installate.
@@ -179,8 +179,8 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
 
   // Moduli attivi: richiamati dal testo oppure ancora "caldi" dai turni precedenti.
   const sticky = Object.entries(sess.modules).filter(([, ttl]) => ttl > 0).map(([k]) => k);
-  const lastAssistant = db.get("SELECT text FROM messages WHERE session = ? AND role = 'assistant' ORDER BY id DESC LIMIT 1", sessionId)?.text || '';
-  const probe = userText + ' ' + lastAssistant.slice(0, 300);
+  const recentMsgs = db.all('SELECT text FROM messages WHERE session = ? ORDER BY id DESC LIMIT 4', sessionId).map(r => r.text.slice(0, 250)).join(' ');
+  const probe = userText + ' ' + recentMsgs;
   const dietOn = !!image || DIET_KEYWORDS.test(probe) || sticky.includes('dieta') || !!diary.activeRecipeSession || !!diary.pendingPhotoRequest;
   const agendaOn = AGENDA_KEYWORDS.test(probe) || sticky.includes('agenda');
   const recalled = memory.recall(db, probe, { sticky });

@@ -138,9 +138,10 @@ docs/     guide
   Tutto viene dimensionato sulla finestra del modello.
 - **Modelli che "pensano"** (Gemini Flash non-lite, gpt-oss):
   - ricevono +1500 token e `reasoning_effort: low`, altrimenti restituivano risposte vuote;
-  - se il provider rifiuta il parametro, c'è un secondo tentativo senza.
-- **Timeout:** 22 secondi per il livello veloce, 45 per gli altri.
-- **Formato della risposta del modello:** JSON con `reply, expect_reply, card, topics, mood, actions`.
+  - se un provider rifiuta il parametro, c'è un secondo tentativo senza.
+- **Timeout e fallback:** 14 secondi per il livello veloce, 30 per `smart`, 35 per `vision`. Se i modelli `smart` sono esauriti, il router ripiega automaticamente su `fast` invece di fallire.
+- **Continuità del discorso:** `buildMessages` dà priorità al riassunto e agli ultimi 6 messaggi (3 scambi), i moduli attivi restano caldi per 5 turni e il modello interpreta eventuali storpiature vocali nel contesto degli ultimi scambi.
+- **Formato della risposta del modello:** JSON con `reply, expect_reply, card, topics, mood, actions`. Se `reply` termina con `?`, `expectReply` è forzato a `true` per mantenere il microfono aperto.
 
 ### Onestà sulle azioni (problema reale, risolto in PR #22)
 
@@ -186,6 +187,7 @@ Jarvis diceva "ho aggiornato il piano" o "chiamo Marcolino" senza farlo.
   - Si riconoscono anche le storpiature.
   - La sensibilità si sceglie in Impostazioni: Bassa, Media o Alta.
   - Dopo una domanda di Jarvis ascolta la risposta senza bisogno della parola chiave.
+  - **Reattività e recupero:** nessun blocco minimo di 15s sul `wakeIntent`; appena la frase si ferma (1,1s su wake, 1,4s su comando) chiude l'ascolto e risponde, recuperando i risultati parziali anche se `SpeechRecognizer` termina con timeout/errore.
 - **MicGuard:** Jarvis libera il microfono quando un'altra app registra (Gemini, messaggi vocali). Era il bug principale della vecchia app.
 - **Limite noto, lasciato così:** Jarvis non ascolta mentre c'è musica.
 - **Riconoscimento della voce del proprietario:**

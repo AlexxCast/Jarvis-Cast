@@ -32,6 +32,7 @@ test('parseReply: JSON puro, con blocco di codice, con testo attorno, o testo se
   const plain = parseReply('Buongiorno signore');
   assert.equal(plain.reply, 'Buongiorno signore');
   assert.equal(plain.parsed, false);
+  assert.equal(parseReply('{"reply":"Vuole altro, signore?","expect_reply":false}').expectReply, true);
 });
 
 test('pasto registrato: azione applicata al diario e messaggi salvati', async () => {

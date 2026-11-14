@@ -66,7 +66,8 @@ object VoiceText {
 
     /** Parole che possono precedere il nome quando lo si chiama ("ehi Jarvis", "senti Jarvis"). */
     private val callWords = setOf(
-        "ehi", "hey", "ei", "hei", "ciao", "ok", "okay", "senti", "ascolta", "scusa", "allora", "oh",
+        "ehi", "hey", "ei", "hei", "ciao", "ok", "okay", "senti", "ascolta", "scusa", "scusami",
+        "allora", "oh", "dimmi", "per", "favore", "cortesia", "ora", "adesso", "dico", "sentimi",
         "buongiorno", "buonasera", "buonanotte", "grazie", "e", "ma", "dai",
     )
 
