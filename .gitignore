@@ -13,3 +13,4 @@ captures/
 node_modules/
 .wrangler/
 .dev.vars
+__pycache__/

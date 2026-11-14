@@ -57,6 +57,7 @@ docs/     guide
 | `router.js` + `models.js` | scelta del modello, limiti, cambio di provider |
 | `memory.js` | moduli, argomenti, grafo della sfera, livelli |
 | `phone.js` | agente che usa il telefono, conferme in sospeso, elenco app |
+| `flows.js` | compiti sul telefono imparati e ripetuti senza modello, gatekeeper locale della chat |
 | `web.js` | ricerca internet (Gemini con Google Search, fallback Wikipedia) e lettura pagine |
 | `weather.js` | meteo vero con Open-Meteo |
 | `diet.js`, `nutrition.js` | diario alimentare e sportivo |
@@ -101,6 +102,15 @@ docs/     guide
    - verifica la firma con `python3 -I scripts/apk_cert.py Jarvis.apk`.
 7. **Se cambia la web app**, aumenta la versione della cache in `web/sw.js` (es. `jarvis-shell-v13` → `v14`). Così il telefono prende subito i file nuovi.
 8. **Mai nel repo:** keystore, chiavi API, token. Il file `local.properties`, le build e gli APK sono esclusi.
+
+### Sincronizzazione automatica (`scripts/git_sync.py`)
+
+- `python scripts/git_sync.py -m "messaggio"` fa tutto: fetch, controlli, commit, merge di `origin/main` nel branch, push e apertura della PR (con `gh`, altrimenti stampa il link).
+- **Su `main` fa solo pull fast-forward**, mai commit né push. Con modifiche su `main` si ferma; `--branch nome` le sposta su un branch nuovo.
+- **Prima del commit controlla le regole:** niente file o testi con credenziali, versione di `web/sw.js` aumentata se cambia `web/`, `versionCode`/`versionName` se cambia `app/`, `npm test` verde (se `npm` non c'è, i test li fa la CI).
+- Le novità di `main` entrano con un **merge, mai rebase**: così il push non va mai forzato. Un conflitto annulla l'unione senza perdere nulla.
+- `--watch 10` ripete ogni 10 minuti; `--auto-commit` salva da solo le modifiche; `--pull-only` solo aggiornamento.
+- È in Python perché gira uguale su Windows (PC di Alessio) e Linux (assistenti).
 
 ### Secrets del Worker (Cloudflare)
 
@@ -197,6 +207,12 @@ Jarvis diceva "ho aggiornato il piano" o "chiamo Marcolino" senza farlo.
   - se l'utente voleva fare qualcosa dentro un'app, un semplice `open_app` diventa un `phone_task`.
 - **Una conferma in sospeso** ("sì, invialo") resta valida 15 minuti.
 - **Telefonate:** l'azione `call {name}` cerca nei contatti (permessi READ_CONTACTS e CALL_PHONE).
+- **Flow appresi e gatekeeper locale (`server/src/flows.js`):**
+  - Quando un compito sul telefono termina con successo (`done`), la sequenza di mosse viene salvata in memoria procedurale (`phoneFlows`). Il testo preso dall'obiettivo diventa un parametro (`cerca {q} su Joytify`), così la volta dopo cambia solo quello.
+  - Un classificatore leggero (filtri booleani + punteggio logistico) decide se ripetere il flow leggendo gli elementi dello schermo (`screen.items`) **senza chiamare modelli esterni**. Tutte le parole fisse del flow devono essere nella richiesta; parole in più solo se il flow ha un parametro. Un flow parte solo dal primo passo.
+  - **Torna sempre al modello:** scelte creative ("musica che mi piace"), testi composti (il corpo di un messaggio), schermi imprevisti (il flow perde fiducia), compiti di lettura (l'ultima parola è del modello) e **qualunque pulsante irreversibile o campo sensibile** (invia, paga, elimina, chiama, password...): il controllo e le conferme restano quelli del modello.
+  - Un compito ripreso a metà non diventa un flow, per non rovinare quello buono. I flow si vedono e si cancellano con `GET/DELETE /api/flows`.
+  - In chat, il gatekeeper risponde da solo solo a richieste semplici e certe (aprire un'app installata, chiamare un contatto, un flow già appreso); domande, dieta, memoria, agenda, più richieste insieme vanno al modello.
 
 ### Internet, meteo, luoghi
 

@@ -6,6 +6,7 @@ import { loadDiary, saveDiary, mergeLegacy, patchProfile, DIET_ACTIONS } from '.
 import * as N from './nutrition.js';
 import * as memory from './memory.js';
 import * as phone from './phone.js';
+import * as flows from './flows.js';
 import * as places from './places.js';
 import * as agenda from './agenda.js';
 import * as ui from './ui.js';
@@ -77,6 +78,9 @@ export async function handleApi(db, env, deps, request) {
       return json({ count: apps.length });
     }
     if (path === '/api/phone/step' && method === 'POST') return json(await phone.step(db, env, deps, await body(request)));
+    if (path === '/api/flows' && method === 'GET') return json({ flows: flows.listFlows(db) });
+    const flowDel = /^\/api\/flows\/([^/]+)$/.exec(path);
+    if (flowDel && method === 'DELETE') return json({ flows: flows.deleteFlow(db, decodeURIComponent(flowDel[1])) });
     if (path === '/api/addressed' && method === 'POST') {
       const b = await body(request);
       try { return json({ addressed: await isAddressed(db, env, deps, b.text) }); } catch { return json({ addressed: false, error: true }); }
@@ -275,6 +279,7 @@ export async function handleApi(db, env, deps, request) {
         modules: db.all('SELECT * FROM modules'), reminders: db.all('SELECT * FROM reminders'), jobs: db.all('SELECT * FROM jobs'),
         messages: db.all('SELECT session, role, text, at FROM messages ORDER BY id'), sessions: db.all('SELECT id, summary FROM sessions'),
         places: places.listPlaces(db), topics: db.all('SELECT * FROM topics'), layout: ui.loadLayout(db),
+        flows: flows.listFlows(db),
       });
     }
     return bad('non trovato', 404);

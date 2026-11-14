@@ -2,6 +2,7 @@
 // il modello sceglie UNA mossa alla volta e il telefono la esegue. Il ciclo lo guida il telefono.
 
 import * as router from './router.js';
+import * as flows from './flows.js';
 import { logEvent, kvGet, kvSet } from './db.js';
 import { nowIso } from './clock.js';
 
@@ -51,6 +52,13 @@ export async function step(db, env, deps, b) {
   const n = Number(b.step) || 0;
   if (n >= MAX_STEPS) return { do: 'ask', say: 'Ci sto mettendo troppi passaggi: mi fermo qui, signore.' };
   const screen = b.screen || {};
+  // Compito già imparato: la mossa la decide il flow salvato, senza chiamare il modello.
+  const autoMove = flows.tryFlowStep(db, { goal, step: n, screen, nowMs: deps.now() });
+  if (autoMove) {
+    flows.recordTrace(db, { goal, step: n, screen, move: autoMove, nowMs: deps.now() });
+    if (autoMove.do === 'done') kvSet(db, 'phonePending', null);
+    return autoMove;
+  }
   const items = (Array.isArray(screen.items) ? screen.items : []).slice(0, 120)
     .map(i => `[${Number(i.n)}] ${String(i.kind || 'testo').slice(0, 12)}: ${String(i.text || '').replace(/\s+/g, ' ').slice(0, 120)}`).join('\n');
   const history = (Array.isArray(b.history) ? b.history : []).slice(-12).map(h => '- ' + String(h).slice(0, 160)).join('\n');
@@ -64,6 +72,7 @@ export async function step(db, env, deps, b) {
       build: () => [{ role: 'system', content: SYSTEM }, { role: 'user', content: user }],
     });
     const move = parseMove(res.text);
+    flows.recordTrace(db, { goal, step: n, screen, move, nowMs: deps.now() });
     // Se si ferma a chiedere, il compito resta in sospeso: alla risposta dell'utente ("sì, invia")
     // la chat lo riprende da dove era rimasto.
     if (move.do === 'ask') kvSet(db, 'phonePending', { goal, say: move.say, at: deps.now(), history: (b.history || []).slice(-8).map(h => String(h).slice(0, 120)) });

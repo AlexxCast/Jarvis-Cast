@@ -1,6 +1,7 @@
 // Il "cervello": mette insieme contesto, router dei modelli, memoria e azioni.
 
 import * as phone from './phone.js';
+import * as flows from './flows.js';
 import { WEATHER_WORDS, weatherContext } from './weather.js';
 import * as web from './web.js';
 import * as router from './router.js';
@@ -159,6 +160,19 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
   const nowIso = nowIsoOf(ms, tz);
   const userText = String(text || '').trim().slice(0, 4000) || (image ? 'Guarda questa foto.' : '');
   if (!userText) return { reply: 'Non ho sentito nulla, signore.', expectReply: true, card: '', photoRequest: null };
+
+  // Gatekeeper locale: per richieste semplici o flow già appresi evita sia contesto/ricerche sia chiamate LLM.
+  const localHit = flows.gatekeepChat(db, userText, { hasImage: !!image, hasPendingPhone: !!phone.pendingContext(db, ms) });
+  if (localHit) {
+    addMessage(db, sessionId, 'user', userText, nowIso, image ? { image: true } : null);
+    addMessage(db, sessionId, 'assistant', localHit.reply, nowIso, { model: 'local-gatekeeper' });
+    if (localHit.device.some(d => d.type === 'phone_task')) kvSet(db, 'phonePending', null);
+    return {
+      reply: localHit.reply, expectReply: false, card: '', visual: null, photoRequest: null,
+      model: 'local-gatekeeper', switched: false, actions: localHit.actions, device: localHit.device,
+      tier: 'local', layoutChanged: false, touched: [], touchedLeaves: [],
+    };
+  }
 
   const sess = session(db, sessionId);
   const diary = loadDiary(db);
