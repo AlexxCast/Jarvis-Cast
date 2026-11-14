@@ -85,6 +85,8 @@ class JarvisBridge(
         put("speakReplies", Settings.speakReplies)
         put("sensitivity", Settings.sensitivity)
         put("micGuard", Settings.micGuard)
+        put("overlay", Settings.overlay)
+        put("overlayAllowed", com.jarvisfit.app.device.Overlay.allowed(activity))
         put("voiceEnrolled", com.jarvisfit.app.voice.VoiceId.enrolled)
         put("voiceLock", Settings.voiceLock)
         put("voiceStrictness", Settings.voiceStrictness)
@@ -176,6 +178,12 @@ class JarvisBridge(
     private fun onVoiceEnroll(msg: String, done: Boolean) {
         JarvisState.voiceEnroll.value = "${if (done) "done" else "step"}|$msg|${System.nanoTime()}"
     }
+
+    @JavascriptInterface
+    fun setOverlay(on: Boolean) { Settings.overlay = on }
+
+    @JavascriptInterface
+    fun openOverlaySettings() = activity.runOnUiThread { com.jarvisfit.app.device.Overlay.openSettings(activity) }
 
     @JavascriptInterface
     fun setVoiceLock(on: Boolean) { Settings.voiceLock = on && com.jarvisfit.app.voice.VoiceId.enrolled }

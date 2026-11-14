@@ -2,6 +2,12 @@
 // (dove window.JarvisNative dà accesso a microfono, voce, contapassi e ai dati della vecchia app).
 
 import { createOrb } from './orb.js';
+import { renderVisual, VISUAL_CSS } from './visual.js';
+
+document.head.append(Object.assign(document.createElement('style'), { textContent: VISUAL_CSS }));
+// Ogni grafica si costruisce una volta sola: ridisegnare la pagina non fa ripartire l'animazione.
+const visuals = new WeakMap();
+const visualOf = (m) => { if (!m?.visual) return null; if (!visuals.has(m)) visuals.set(m, renderVisual(m.visual)); return visuals.get(m); };
 
 const native = window.JarvisNative || null;
 const nativeCall = (name, ...args) => { try { return native && typeof native[name] === 'function' ? native[name](...args) : null; } catch { return null; } };
@@ -280,7 +286,7 @@ async function send(text) {
     const out = await api('POST', '/chat', { text, image });
     // Prima la mappa aggiornata (possono essere nati rami nuovi), poi si accendono.
     loadGraph(false).then(() => orb.highlight(out.touched || [], out.touchedLeaves || []));
-    store.messages.push({ role: 'assistant', text: out.reply, card: out.card, model: out.model });
+    store.messages.push({ role: 'assistant', text: out.reply, card: out.card, model: out.model, visual: out.visual || null });
     if (out.photoRequest) toast('Jarvis chiede una foto: ' + out.photoRequest);
     if ((nativeJson('getConfig') || {}).speakReplies) nativeCall('speak', out.reply);
     markSpeaking(out.reply);
@@ -374,12 +380,14 @@ function viewChat() {
   const caption = store.sending
     ? h('div', { class: 'caption pending' }, lastUser ? h('span', { class: 'you' }, lastUser.text) : null, 'Sto pensando…')
     : h('div', { class: 'caption', 'aria-live': 'polite' }, lastReply ? lastReply.text : (native ? 'Dica "Jarvis" oppure scriva qui sotto.' : 'Scriva a Jarvis qui sotto.'),
-      lastReply?.card ? h('span', { class: 'cardline' }, lastReply.card) : null);
+      lastReply?.card ? h('span', { class: 'cardline' }, lastReply.card) : null,
+      visualOf(lastReply));
   const list = h('div', { class: 'chat' },
     store.messages.length ? null : h('p', { class: 'empty' }, 'Scriva o parli a Jarvis: pasti, allenamenti, promemoria, cose da ricordare, compiti da svolgere.'),
     store.messages.map(m => h('div', { class: 'msg ' + (m.role === 'user' ? 'user' : 'assistant') },
       (m.image ? '📷 ' : '') + m.text,
       m.card ? h('span', { class: 'cardline' }, m.card) : null,
+      visualOf(m),
       m.model ? h('span', { class: 'meta' }, m.model.split(':').pop()) : null)),
     store.sending ? h('div', { class: 'msg assistant pending' }, 'Sto pensando…') : null);
   const ta = h('textarea', { rows: 1, placeholder: 'Scrivi a Jarvis…', 'aria-label': 'Messaggio', onkeydown: (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); const v = ta.value; ta.value = ''; send(v); } } });
@@ -685,6 +693,12 @@ function viewImpostazioni() {
           ? 'Jarvis può usare il telefono al posto suo (tocca, scrive, legge). Si ferma prima di inviare, pagare o eliminare cose non richieste.'
           : 'Per far usare il telefono a Jarvis ("scrivi a Marco che arrivo") attivi "Jarvis: usa il telefono" in Accessibilità.'),
         nativeCall('phoneControlStatus') === true ? null : h('button', { class: 'btn', onclick: () => nativeCall('openPhoneControlSettings') }, 'Apri Accessibilità')),
+      typeof native.openOverlaySettings === 'function' ? h('div', {},
+        cfg.overlayAllowed
+          ? toggle('Mostra Jarvis sopra le altre app (sfera, frasi e grafiche) quando lo chiamo', 'overlay', 'setOverlay')
+          : h('div', { class: 'row wrap' },
+            h('p', { class: 'grow' }, 'Per vedere Jarvis e le sue grafiche sopra le altre app, senza che si apra la sua app, attivi "Mostra sopra altre app".'),
+            h('button', { class: 'btn', onclick: () => { nativeCall('openOverlaySettings'); setTimeout(render, 3000); } }, 'Attiva'))) : null,
       typeof native.enrollVoice === 'function' ? h('div', {},
         h('div', { class: 'small' }, 'Riconoscimento della sua voce'),
         h('p', { class: 'muted' }, cfg.voiceEnrolled

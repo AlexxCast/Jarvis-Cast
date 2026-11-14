@@ -113,6 +113,16 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        com.jarvisfit.app.device.Overlay.appVisible = true
+    }
+
+    override fun onPause() {
+        com.jarvisfit.app.device.Overlay.appVisible = false
+        super.onPause()
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (intent.getBooleanExtra(EXTRA_TAKE_PHOTO, false)) photoRequested.value = true

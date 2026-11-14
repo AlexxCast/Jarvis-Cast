@@ -72,6 +72,11 @@ object Settings {
         get() = prefs.getFloat("voice_strictness", 0.5f)
         set(v) = prefs.edit().putFloat("voice_strictness", v.coerceIn(0f, 1f)).apply()
 
+    /** Mostra Jarvis (sfera, frasi, grafiche) sopra le altre app quando lo si chiama. */
+    var overlay: Boolean
+        get() = prefs.getBoolean("overlay", true)
+        set(v) = prefs.edit().putBoolean("overlay", v).apply()
+
     // Contapassi: il sensore restituisce passi totali dall'ultimo riavvio
     var stepBaseDate: String
         get() = prefs.getString("step_base_date", "") ?: ""

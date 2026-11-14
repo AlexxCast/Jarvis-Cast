@@ -33,6 +33,7 @@ import com.jarvisfit.app.data.Store
 import com.jarvisfit.app.device.AppLauncher
 import com.jarvisfit.app.device.Places
 import com.jarvisfit.app.device.PhoneAgent
+import com.jarvisfit.app.device.Overlay
 import com.jarvisfit.app.net.Cloud
 import com.jarvisfit.app.ui.MainActivity
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -119,6 +120,8 @@ class JarvisService : LifecycleService(), SensorEventListener {
         guard = MicGuard(this, main) { onRecordingChanged() }.also { it.start() }
         ticker.postDelayed(inboxPoll, 20_000)
         Places.register(this)
+        // La sfera sopra le altre app segue lo stato dell'ascolto.
+        lifecycleScope.launch { JarvisState.status.collect { Overlay.onStatus(this@JarvisService, it) } }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -326,7 +329,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
                         JarvisState.partial.value = text
                         // Sentito "Jarvis": segnala che sta ascoltando, ma aspetta la frase COMPLETA
                         // (prima il comando veniva tagliato a metà sul risultato parziale).
-                        if (!wakeHeard && VoiceText.containsWake(text)) {
+                        if (!wakeHeard && VoiceText.containsWake(text, Settings.sensitivity)) {
                             wakeHeard = true
                             JarvisState.status.value = JarvisState.Status.LISTENING
                             updateNotification("Ti ascolto…")
@@ -335,7 +338,15 @@ class JarvisService : LifecycleService(), SensorEventListener {
                     override fun onResults(results: Bundle?) {
                         sessionActive = false
                         if (busy || yielded || Speaker.isSpeaking()) return
-                        val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
+                        val all = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
+                        // Il primo risultato può non contenere il nome mentre un'alternativa sì ("Jarvis" detto piano).
+                        val text = all.firstOrNull { VoiceText.containsWake(it, Settings.sensitivity) } ?: all.firstOrNull().orEmpty()
+                        if (wakeHeard && VoiceText.wake(text, Settings.sensitivity) == VoiceText.Wake.None) {
+                            // I parziali avevano sentito "Jarvis" ma la frase finale l'ha perso: vale come chiamata.
+                            wakeHeard = false
+                            onWakeWordDetected(VoiceText.commandAfterLostWake(text))
+                            return
+                        }
                         handleHeard(text)
                     }
                     override fun onError(error: Int) {
@@ -348,8 +359,9 @@ class JarvisService : LifecycleService(), SensorEventListener {
                             return
                         }
                         when (error) {
+                            // Silenzio: riparte subito, così il nome detto in quel momento non va perso.
                             SpeechRecognizer.ERROR_NO_MATCH,
-                            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> restartWakeWordDelayed(300)
+                            SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> restartWakeWordDelayed(60)
                             else -> {
                                 runCatching { recognizer?.destroy() }
                                 recognizer = null
@@ -359,16 +371,28 @@ class JarvisService : LifecycleService(), SensorEventListener {
                     }
                 })
 
-                val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, "it-IT")
-                    putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                }
-                beginSession(rec, intent)
+                beginSession(rec, wakeIntent())
             } catch (e: Exception) {
                 sessionActive = false
                 restartWakeWordDelayed(1000)
             }
+        }
+    }
+
+    /**
+     * Ascolto in attesa del nome: sessioni lunghe (meno riavvii in cui il nome va perso), più
+     * alternative tra cui cercare "Jarvis" e, da Android 13, il riconoscitore spinto a capire proprio quel nome.
+     */
+    private fun wakeIntent() = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+        putExtra(RecognizerIntent.EXTRA_LANGUAGE, "it-IT")
+        putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
+        putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
+        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 15_000L)
+        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1_500L)
+        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1_200L)
+        if (Build.VERSION.SDK_INT >= 33) {
+            putStringArrayListExtra(RecognizerIntent.EXTRA_BIASING_STRINGS, arrayListOf("Jarvis", "Ehi Jarvis", "Ciao Jarvis", "Ok Jarvis"))
         }
     }
 
@@ -478,7 +502,9 @@ class JarvisService : LifecycleService(), SensorEventListener {
         }
 
         // 2. Apri l'app sul telefono
-        if (openApp) {
+        // Con la finestra sopra le altre app Jarvis non interrompe ciò che si sta facendo: niente app in primo piano.
+        val locked = getSystemService(android.app.KeyguardManager::class.java)?.isKeyguardLocked == true
+        if (openApp && (!Overlay.enabled(this) || locked)) {
             val openIntent = Intent(this, MainActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             }
@@ -654,6 +680,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
                 if (!allowed && (type == "phone_task" || type == "call")) continue
                 when (type) {
                     "call" -> callWho = value // parte dopo che Jarvis ha finito di parlare
+                    "visual" -> Overlay.showVisual(this@JarvisService, value)
                     "open_app" -> AppLauncher.open(this@JarvisService, value)
                     "open_url" -> AppLauncher.openUrl(this@JarvisService, value)
                     "phone_task" -> PhoneAgent.start(this@JarvisService, value)
@@ -689,6 +716,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
             }
 
             JarvisState.status.value = JarvisState.Status.SPEAKING
+            Overlay.caption(this@JarvisService, reply.text)
             updateNotification(reply.text.take(80))
             lastSpokenText = reply.text
             lastSpokenTime = System.currentTimeMillis()

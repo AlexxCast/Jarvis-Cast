@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Jarvis</title>
+  <style>
+    html, body { margin: 0; background: transparent; overflow: hidden; font: 16px/1.4 system-ui, -apple-system, Roboto, sans-serif; color: #e5f6e5; }
+    #wrap { display: flex; flex-direction: column; align-items: flex-end; gap: 10px; padding: 10px 12px; }
+    #orbbox { display: flex; align-items: center; gap: 10px; background: rgba(5,15,5,.78); border: 1px solid #1f3a1f; border-radius: 40px; padding: 6px 14px 6px 6px;
+      box-shadow: 0 0 18px rgba(57,255,20,.25); transition: opacity .3s, transform .3s; }
+    #orbbox.hide { opacity: 0; transform: translateY(-10px) scale(.9); }
+    #orb { width: 64px; height: 64px; }
+    #say { max-width: 64vw; font-size: .92rem; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+    #card { width: 100%; transition: opacity .35s; }
+    #card.gone { opacity: 0; }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <div id="orbbox" class="hide"><canvas id="orb" width="128" height="128"></canvas><div id="say"></div></div>
+    <div id="card"></div>
+  </div>
+  <script type="module" src="/overlay.js"></script>
+</body>
+</html>

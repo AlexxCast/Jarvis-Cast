@@ -125,8 +125,8 @@ class VoiceTextTest {
     fun sensitivityChangesHowEasilyJarvisAnswers() {
         assertTrue(VoiceText.wake("che ore sono jarvis", 0.2f) is VoiceText.Wake.None)
         assertTrue(VoiceText.wake("jarvis che ore sono", 0.2f) is VoiceText.Wake.Direct)
-        assertTrue(VoiceText.wake("ehi jarbis accendi la luce", 0.5f) is VoiceText.Wake.None)
-        assertTrue(VoiceText.wake("ehi jarbis accendi la luce", 0.9f) is VoiceText.Wake.Direct)
+        assertTrue(VoiceText.wake("ehi davis accendi la luce", 0.5f) is VoiceText.Wake.None)
+        assertTrue(VoiceText.wake("ehi davis accendi la luce", 0.9f) is VoiceText.Wake.Direct)
         assertTrue(VoiceText.wake("allora jarvis mi dici il meteo di oggi", 0.9f) is VoiceText.Wake.Direct)
         assertTrue(VoiceText.wake("ieri ho visto il film Marvel dove c'è Jarvis", 0.9f) is VoiceText.Wake.Ambiguous)
     }
@@ -171,5 +171,16 @@ class VoiceTextTest {
         val w = VoiceText.wake("Jarvis che film danno stasera al cinema")
         assertTrue(w is VoiceText.Wake.Ambiguous)
         assertEquals("Jarvis che film danno stasera al cinema", (w as VoiceText.Wake.Ambiguous).text)
+    }
+
+    @Test
+    fun `nomi storpiati comuni valgono gia con la sensibilita media`() {
+        for (heard in listOf("giarvis accendi la luce", "garvis che ore sono", "jarbis", "ehi giarvi", "jarviz quante calorie")) {
+            assertTrue("'$heard' dovrebbe chiamare Jarvis", VoiceText.wake(heard, 0.5f) is VoiceText.Wake.Direct)
+        }
+        assertTrue(VoiceText.wake("davis apri whatsapp", 0.5f) == VoiceText.Wake.None)
+        assertTrue(VoiceText.wake("davis apri whatsapp", 0.85f) is VoiceText.Wake.Direct)
+        assertEquals("che ore sono", VoiceText.commandAfterLostWake("giarvis che ore sono"))
+        assertEquals("che ore sono", VoiceText.commandAfterLostWake("che ore sono"))
     }
 }
