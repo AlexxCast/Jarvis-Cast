@@ -1,5 +1,5 @@
 // Prima la rete (così ogni aggiornamento pubblicato arriva subito), la copia locale solo se si è offline.
-const CACHE = 'jarvis-shell-v12';
+const CACHE = 'jarvis-shell-v13';
 const SHELL = ['/', '/style.css', '/app.js', '/orb.js', '/visual.js', '/logo.png', '/manifest.webmanifest'];
 
 self.addEventListener('install', (e) => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL)).then(() => self.skipWaiting())); });
