@@ -201,11 +201,17 @@ export async function handleApi(db, env, deps, request) {
       let active = [];
       try { active = Object.entries(JSON.parse(last?.modules || '{}')).filter(([, ttl]) => ttl > 0).map(([k]) => k); } catch { /* vuoto */ }
       return json({
-        departments: g.branches.filter(b => b.kind === 'module').map(b => ({
-          id: b.id, label: b.label, description: b.description || '', entries: b.entries || 0, level: b.level, ring: b.ring,
-          uses: Math.round((use[b.id]?.score || 0) * 10) / 10,
-          topics: db.all('SELECT name, label, parent, uses FROM topics WHERE module = ? ORDER BY uses DESC LIMIT 40', b.id),
-        })).sort((a, b) => a.level - b.level),
+        departments: g.branches.filter(b => b.kind === 'module').map(b => {
+          const tRows = db.all('SELECT name, label, parent, uses FROM topics WHERE module = ? ORDER BY uses DESC LIMIT 40', b.id);
+          const mRows = tRows.length ? [] : db.all('SELECT id, text, uses FROM memories WHERE module = ? ORDER BY uses DESC, id DESC LIMIT 15', b.id)
+            .map(r => ({ name: 'm-' + r.id, label: String(r.text || '').slice(0, 55), parent: '', uses: r.uses || 1 }));
+          return {
+            id: b.id, label: b.label, description: b.description || '', entries: b.entries || 0, level: b.level, ring: b.ring,
+            uses: Math.round((use[b.id]?.score || 0) * 10) / 10,
+            topics: [...tRows, ...mRows],
+          };
+        }).sort((a, b) => a.level - b.level),
+        automations: (g.branches.find(b => b.id === 'automazioni')?.children || []).map(c => ({ id: c.id, label: c.label })),
         core: g.branches.filter(b => b.kind === 'core').map(b => ({ id: b.id, label: b.label, count: (b.children || []).length, level: b.level, ring: b.ring })),
         summaries: db.all("SELECT id, summary, updated FROM sessions WHERE summary != '' ORDER BY updated DESC LIMIT 20"),
         active,

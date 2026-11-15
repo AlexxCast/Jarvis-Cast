@@ -98,9 +98,9 @@ Se l'utente ora conferma o precisa, rimetti phone_task con l'obiettivo completo 
 }
 
 /** L'utente chiede di fare qualcosa sul telefono? (verbo di azione + app o oggetto) */
-export const DOING_WORDS = /\b(apri|manda|mandami|invia|scrivi|metti|cerca|leggi|leggimi|chiama|avvia|fai partire|riproduci|ascolta|imposta|attiva|disattiva|controlla|guarda|rispondi)\b/i;
-/** Il modello promette esplicitamente un'azione sul telefono (escludendo risposte generiche come "subito" o "faccio"). */
-export const PROMISE_WORDS = /\b(apro|mando|invio|scrivo|metto|cerco\s+su|avvio|riproduco|chiamo|imposto|attivo|eseguo)\b/i;
+export const DOING_WORDS = /\b(apri|manda|mandami|invia|scrivi|metti|cerca|leggi|leggimi|chiama|avvia|fai partire|riproduci|ascolta|voglio ascoltare|fammi sentire|imposta|attiva|disattiva|controlla|guarda|rispondi)\b/i;
+/** Il modello promette esplicitamente un'azione sul telefono. */
+export const PROMISE_WORDS = /\b(apro|mando|invio|scrivo|metto|cerco|avvio|riproduco|chiamo|imposto|attivo|eseguo|faccio|procedo|subito|certamente|provvedo)\b/i;
 /** Cose da fare DENTRO un'app: aprirla soltanto non basta. */
 export const INSIDE_WORDS = /\b(manda|mandami|invia|scrivi|metti|cerca|leggi|leggimi|chiama|riproduci|imposta|rispondi|fai partire|avvia la|avvia il)\b/i;
 /** Richieste interne a Jarvis (grafo, dieta, memoria, agenda, meteo) che NON devono MAI far partire il controllo del telefono. */

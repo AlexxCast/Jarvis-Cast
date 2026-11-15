@@ -266,7 +266,7 @@ function syncSteps() {
 }
 
 // L'app Android chiama questa funzione dopo uno scambio vocale, per aggiornare lo schermo.
-window.jarvisRefresh = guard(async () => { await Promise.all([refresh(), loadHistory(), loadGraph(true)]); render(); scrollChat(); });
+window.jarvisRefresh = guard(async () => { store.mind = null; store.memory = null; await Promise.all([refresh(), loadHistory(), loadGraph(true)]); render(); scrollChat(); });
 document.addEventListener('visibilitychange', () => { if (!document.hidden && store.token && !store.sending) window.jarvisRefresh(); });
 
 // ------------------------------------------------------------------ chat
@@ -284,8 +284,13 @@ async function send(text) {
   orb.highlight(guessTopics(text));
   try {
     const out = await api('POST', '/chat', { text, image });
-    // Prima la mappa aggiornata (possono essere nati rami nuovi), poi si accendono.
+    store.mind = null; store.memory = null;
+    // Prima la mappa aggiornata (possono essere nati rami e nodi nuovi), poi si accendono.
     loadGraph(false).then(() => orb.highlight(out.touched || [], out.touchedLeaves || []));
+    if ((out.device || []).some(d => d.type === 'phone_task')) {
+      setTimeout(() => loadGraph(true), 2500);
+      setTimeout(() => loadGraph(true), 6000);
+    }
     store.messages.push({ role: 'assistant', text: out.reply, card: out.card, model: out.model, visual: out.visual || null });
     if (out.photoRequest) toast('Jarvis chiede una foto: ' + out.photoRequest);
     if ((nativeJson('getConfig') || {}).speakReplies) nativeCall('speak', out.reply);
@@ -592,6 +597,11 @@ function viewMente() {
         h('div', { class: 'block' }, h('b', {}, 'Compiti'), h('span', { class: 'muted small' }, 'Lavori lunghi a passi, ognuno con un contesto pulito.')))),
     h('div', { class: 'card' }, h('h2', {}, 'Nel contesto adesso'),
       m.active.length ? h('div', { class: 'chips' }, m.active.map(a => chip(a, 'ok'))) : h('p', { class: 'muted small' }, 'Solo il nucleo: nessun dipartimento aperto.')),
+    h('div', { class: 'card' }, h('h2', {}, 'Automazioni sul telefono'),
+      h('p', { class: 'muted small' }, 'Percorsi autonomi generati in automatico quando chiedi a Jarvis di usare un\'app (nodi verdi/viola sulla sfera).'),
+      (m.automations && m.automations.length)
+        ? h('div', { class: 'chips' }, m.automations.map(a => chip(a.label, 'ok')))
+        : h('p', { class: 'muted small' }, 'Nessuna automazione attiva.')),
     h('div', { class: 'card' }, h('h2', {}, 'Dipartimenti'),
       h('p', { class: 'muted small' }, 'Dal più interno (personale, leggero, usato spesso) al più esterno (pesante, accessorio, raro).'),
       m.departments.length ? h('div', { class: 'blocks' }, m.departments.map(d => h('div', { class: 'block' },

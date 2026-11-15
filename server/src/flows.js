@@ -8,6 +8,7 @@ import { keywords, slug } from './memory.js';
 import { calleeOf, INSIDE_WORDS, INTERNAL_JARVIS_WORDS } from './phone.js';
 
 const FLOWS_KEY = 'phoneFlows';
+const AUTO_GOALS_KEY = 'autoGoals';
 const TRACE_KEY = 'phoneTrace';
 const ACTIVE_KEY = 'phoneActiveFlow';
 const PREFIX_KEY = 'phonePrefixFlow';
@@ -104,16 +105,45 @@ export function listFlows(db) {
   return kvGet(db, FLOWS_KEY, []);
 }
 
+export function listAutoGoals(db) {
+  return kvGet(db, AUTO_GOALS_KEY, []);
+}
+
+/**
+ * Registra subito un obiettivo autonomo nel ramo Automazioni del grafo non appena viene avviato,
+ * senza aspettare che l'utente dica "aggiungi" o che tutti i passi siano terminati.
+ */
+export function registerAutoGoal(db, goal, nowMs = Date.now()) {
+  const clean = String(goal || '').replace(/\s*\(app:[^)]+\)\s*$/i, '').trim().slice(0, 160);
+  if (!clean) return null;
+  const toks = contentTokens(clean);
+  const app = MUSIC_TASK_RE.test(clean) ? preferredMusicApp(db, clean) : '';
+  const id = slug(`${app || 'auto'}-${(toks.length ? toks : [clean]).slice(0, 5).join('-')}`) || `flow-${nowMs}`;
+  const list = listAutoGoals(db).filter(g => g.id !== id && norm(g.label) !== norm(clean));
+  const entry = { id, app, label: clean, updatedAt: nowMs };
+  kvSet(db, AUTO_GOALS_KEY, [entry, ...list].slice(0, 30));
+  kvSet(db, 'lastTouched', { at: String(nowMs), touched: ['automazioni'], leaves: ['f:' + id] });
+  return entry;
+}
+
 export function deleteFlow(db, id) {
   const flows = listFlows(db).filter(f => f.id !== id);
   kvSet(db, FLOWS_KEY, flows);
+  kvSet(db, AUTO_GOALS_KEY, listAutoGoals(db).filter(g => g.id !== id));
   return flows;
 }
 
-/** Registra una mossa (del modello o automatica) del compito in corso; a "done" salva il flow. */
+/** Registra una mossa (del modello o automatica) del compito in corso; a "done" (o "ask" dopo >=2 passi) salva il flow. */
 export function recordTrace(db, { goal, step, screen, move, nowMs }) {
-  if (!goal || !move || move.do === 'ask' || move.do === 'wait') return;
+  if (!goal || !move || move.do === 'wait') return;
   let trace = kvGet(db, TRACE_KEY, null);
+  if (step === 0) registerAutoGoal(db, goal, nowMs);
+  if (move.do === 'ask') {
+    if (trace && trace.goal === goal && !trace.partial && trace.steps.length >= 2) {
+      saveFlowFromTrace(db, { ...trace, steps: [...trace.steps, { do: 'done' }] }, nowMs);
+    }
+    return;
+  }
   if (step === 0 || !trace || trace.goal !== goal) {
     // Un compito ripreso a metà non ha l'inizio: non diventa un flow (rovinerebbe quello buono).
     trace = { goal, app: '', steps: [], params: [], partial: step > 0, at: nowMs };

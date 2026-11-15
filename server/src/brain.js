@@ -83,9 +83,9 @@ export function appsPrompt(db) {
   return 'APP INSTALLATE SUL TELEFONO (usa sempre questi nomi esatti; un nome detto uguale o quasi a una di queste app è quella app; se l\'utente storpia un nome o il riconoscimento vocale lo sbaglia, scegli l\'app installata più simile per suono o per contesto, es. per la musica l\'app di musica che c\'è in questo elenco): ' + apps.join(', ').slice(0, 3500);
 }
 
-/** Applica le azioni restituite dal modello. Ritorna { photoRequest, jobs, applied }. */
+/** Applica le azioni restituite dal modello. Ritorna { photoRequest, jobs, applied, rememberedIds }. */
 export function applyActions(db, actions, ctx) {
-  const out = { photoRequest: null, jobs: [], applied: [], device: [], code: [], failed: [] };
+  const out = { photoRequest: null, jobs: [], applied: [], device: [], code: [], failed: [], rememberedIds: [] };
   let diary = null;
   // phone_task apre l'app da solo: un open_app in più la riaprirebbe a metà lavoro.
   if (actions.some(a => a?.type === 'phone_task')) actions = actions.filter(a => a?.type !== 'open_app');
@@ -98,7 +98,11 @@ export function applyActions(db, actions, ctx) {
         if (photo) out.photoRequest = photo;
         // Un'azione che non cambia nulla (pasto senza alimenti, id inesistente) non è "fatta".
         if (!photo && a.type !== 'clear_recipe_session' && JSON.stringify(diary) === before) { out.failed.push(a.type); continue; }
-      } else if (a.type === 'remember') { if (!memory.remember(db, a, ctx.nowIso)) { out.failed.push(a.type); continue; } }
+      } else if (a.type === 'remember') {
+        const memId = memory.remember(db, a, ctx.nowIso);
+        if (!memId) { out.failed.push(a.type); continue; }
+        out.rememberedIds.push(memId);
+      }
       else if (a.type === 'forget') memory.forget(db, a.id);
       else if (a.type === 'clean_graph') agents.GraphAgent.cleanBranch(db, a.branch || 'all', a.max_nodes);
       else if (a.type === 'add_reminder') { if (!agenda.addReminder(db, a, ctx.ms, ctx.tz)) { out.failed.push(a.type); continue; } }
@@ -244,13 +248,17 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
       } catch { parsed = { ...parsed, reply: 'Ho cercato, ma non riesco a elaborare i risultati in questo momento, signore.', actions: [] }; }
       parsed.actions = parsed.actions.filter(a => a.type !== 'web_search' && a.type !== 'read_url');
     }
+    if (!parsed.actions.some(a => a && a.type === 'remember')) {
+      const explicitMem = agents.MemoryAgent.extractExplicit(userText);
+      if (explicitMem) parsed.actions.push({ type: 'remember', module: explicitMem.module, text: explicitMem.text });
+    }
     let done = applyActions(db, parsed.actions, { today, nowIso, ms, tz, hadPhoto: !!image });
     if (cleanCmd && !done.applied.includes('clean_graph')) done.applied.push('clean_graph');
     // Dice di averlo fatto ma nessuna azione è andata a buon fine: una seconda richiesta per avere le azioni vere.
-    const nothing = (d) => !d.applied.length && !d.device.length && !d.jobs.length && !d.code.length;
+    const nothing = (d, t = []) => !d.applied.length && !d.device.length && !d.jobs.length && !d.code.length && !(t && t.length);
     // Le richieste da eseguire sul telefono (chiamate, app) hanno la loro rete di sicurezza più sotto.
     const deviceAsk = !!phone.calleeOf(userText) || (phone.DOING_WORDS.test(userText) && phone.isPhoneTarget(db, userText));
-    if (nothing(done) && (done.failed.length || parsed.truncated || (CLAIM_WORDS.test(parsed.reply) && !deviceAsk))) {
+    if (nothing(done, parsed.topics) && (done.failed.length || parsed.truncated || (CLAIM_WORDS.test(parsed.reply) && !deviceAsk))) {
       logEvent(db, nowIso, 'error', `azione dichiarata ma non eseguita (${done.failed.join(', ') || 'nessuna azione'}): ${parsed.reply.slice(0, 120)}`);
       let fixed = null;
       try {
@@ -261,7 +269,10 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
         fixed = parseReply(again.text);
       } catch { /* resta la risposta onesta qui sotto */ }
       const redo = fixed?.parsed ? applyActions(db, fixed.actions, { today, nowIso, ms, tz, hadPhoto: !!image }) : null;
-      if (redo && (!nothing(redo) || !CLAIM_WORDS.test(fixed.reply))) { parsed = fixed; done = redo; }
+      if (redo && (!nothing(redo, fixed.topics) || !CLAIM_WORDS.test(fixed.reply))) {
+        parsed = { ...fixed, topics: fixed.topics?.length ? fixed.topics : parsed.topics };
+        done = redo;
+      }
       else {
         parsed = { ...parsed, reply: 'Mi scusi signore, non sono riuscito a salvarlo davvero. Me lo può ripetere con i dettagli?', expectReply: true, card: '', actions: [] };
         mood.feel(db, 'frustrazione', 0.3, ms);
@@ -272,7 +283,11 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
       logEvent(db, nowIso, 'error', `azioni non riuscite: ${done.failed.join(', ')}`);
     }
     remembered = parsed.actions.filter(a => a && a.type === 'remember').map(a => memory.slug(a.module) || 'generale');
-    topicHits = cleanCmd ? { modules: cleanCmd.branch !== 'all' ? [cleanCmd.branch] : [], leaves: [] } : memory.touchTopics(db, parsed.topics, nowIso);
+    const fallbackTopics = (!cleanCmd && (!parsed.topics || !parsed.topics.length) && !remembered.length && !recalled.active.length && !dietOn && !agendaOn)
+      ? agents.GraphAgent.inferFallbackTopics(db, userText)
+      : [];
+    const mergedTopics = cleanCmd ? [] : [...(parsed.topics || []), ...fallbackTopics].slice(0, 4);
+    topicHits = cleanCmd ? { modules: cleanCmd.branch !== 'all' ? [cleanCmd.branch] : [], leaves: [] } : memory.touchTopics(db, mergedTopics, nowIso);
     if (parsed.mood) mood.feel(db, parsed.mood.emozione, parsed.mood.intensita, ms);
     // Ha promesso di farlo ma non ha messo l'azione: la aggiungiamo noi, così non resta una promessa a vuoto.
     const goal = userText.replace(/^\W*(ehi|ciao|ok)?\W*jarvis\W*/i, '').slice(0, 1000);
@@ -289,9 +304,16 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
       done.device = [{ type: 'phone_task', goal: `${goal} (app: ${done.device[0].name})` }];
       done.applied.push('phone_task');
     }
+    const autoLeaves = [];
     if (done.device.some(d => d.type === 'phone_task')) {
       kvSet(db, 'phonePending', null);
       agents.FlowAgent.prune(db);
+      for (const d of done.device) {
+        if (d.type === 'phone_task' && d.goal) {
+          const reg = flows.registerAutoGoal(db, d.goal, ms);
+          if (reg) autoLeaves.push('f:' + reg.id);
+        }
+      }
     }
     for (const j of done.jobs) deps.startJob?.(j);
     for (const c of done.code) {
@@ -303,7 +325,7 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
         done.applied.push(c.type);
       } catch (e) { logEvent(db, nowIso, 'error', `${c.type}: ${e.message}`); }
     }
-    result = { reply: parsed.reply, expectReply: parsed.expectReply, card: parsed.card, visual: done.visual || null, photoRequest: done.photoRequest, model: res.key, switched: res.switched, actions: done.applied, device: done.device, tier, layoutChanged: !!done.ui };
+    result = { reply: parsed.reply, expectReply: parsed.expectReply, card: parsed.card, visual: done.visual || null, photoRequest: done.photoRequest, model: res.key, switched: res.switched, actions: done.applied, device: done.device, tier, layoutChanged: !!done.ui, rememberedIds: done.rememberedIds, autoLeaves };
     sess.model = res.key;
   } catch (e) {
     logEvent(db, nowIso, 'error', `chat: ${e.message} ${(e.tried || []).join(' | ')}`);
@@ -321,7 +343,7 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
   if ((result.actions || []).includes('start_job')) touched.add('compiti');
   if ((result.device || []).some(d => d.type === 'phone_task')) touched.add('automazioni');
   result.touched = [...touched];
-  result.touchedLeaves = [...topicHits.leaves, ...recalled.entries.map(m => 'm:' + m.id)];
+  result.touchedLeaves = [...new Set([...topicHits.leaves, ...(result.rememberedIds || []).map(id => 'm:' + id), ...(result.autoLeaves || []), ...recalled.entries.map(m => 'm:' + m.id)])];
   kvSet(db, 'lastTouched', { at: nowIso + '#' + ms, touched: result.touched, leaves: result.touchedLeaves });
   memory.markUsed(db, recalled.entries.map(m => m.id), nowIso);
   memory.noteUse(db, result.touched, ms);

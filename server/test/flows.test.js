@@ -190,4 +190,17 @@ test('grafo e multi-agente locale: i flow appresi creano il ramo autonomo e gli 
   const cmd = agents.GraphAgent.detectCleanCommand('il grafo della dieta è troppo grande riducilo a 3 nodi');
   assert.deepEqual(cmd, { branch: 'dieta', maxNodes: 3 });
   agents.GraphAgent.cleanBranch(db, cmd.branch, cmd.maxNodes);
+
+  // Anche se il modello non compila "topics" o non emette phone_task ma promette di cercare,
+  // l'automazione viene aggiunta in automatico al ramo Automazioni e i nuovi nodi vengono generati nel grafo.
+  const noTopicsModel = fakeFetch(() => JSON.stringify({ reply: 'Certamente signore, cerco subito Vasco Rossi su Joytify.' }));
+  const chatRes = await handleChat(db, ENV, deps(noTopicsModel), { text: 'Jarvis cerca Vasco Rossi su Joytify' });
+  assert.equal(chatRes.device[0]?.type, 'phone_task');
+  assert.ok(chatRes.touched.includes('automazioni'));
+  assert.ok(chatRes.touched.includes('intrattenimento'));
+  const gAfter = memory.graph(db);
+  const autoAfter = gAfter.branches.find(b => b.id === 'automazioni');
+  assert.ok(autoAfter.children.some(c => /vasco rossi/i.test(c.label)));
+  const intrAfter = gAfter.branches.find(b => b.id === 'intrattenimento');
+  assert.ok(intrAfter && intrAfter.children.some(c => /joytify/i.test(c.label)));
 });

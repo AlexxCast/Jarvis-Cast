@@ -94,6 +94,7 @@ object PhoneAgent {
             }
             finalSay = "Ci sto mettendo troppi passaggi, mi fermo qui."
         } finally {
+            com.jarvisfit.app.voice.JarvisState.exchanges.value = com.jarvisfit.app.voice.JarvisState.exchanges.value + 1
             if (finalSay.isNotBlank()) {
                 notify(ctx, finalSay, ongoing = false)
                 // Dopo una domanda ascolta subito la risposta, senza dover ridire "Jarvis".

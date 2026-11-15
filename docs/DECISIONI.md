@@ -247,12 +247,17 @@ Jarvis diceva "ho aggiornato il piano" o "chiamo Marcolino" senza farlo.
 - **Sostituito il riconoscimento biometrico della voce con una password vocale/PIN:** in Impostazioni l'utente imposta una password o PIN (`Settings.phonePassword`).
 - **Richiesta solo a telefono spento o bloccato:** quando lo schermo è già acceso e sbloccato (`!wakeFromScreenOff && !VoiceId.isScreenOffOrLocked`), Jarvis esegue subito le azioni sul telefono (`phone_task`, `call`, `open_app`) senza chiedere autorizzazione. Solo se il comando è partito a schermo spento o telefono bloccato Jarvis chiede di pronunciare la password prima di procedere (oppure l'accetta direttamente se inclusa nella frase iniziale).
 
+### Generazione automatica di automazioni e nodi nel grafo della mente (15/11/2026)
+
+- **Automazioni registrate subito (`flows.registerAutoGoal`):** appena parte un `phone_task` (dalla chat, dal gatekeeper o al passo 0 di `phone.step`), oppure quando una sequenza si ferma su `ask` dopo almeno 2 passi, il nodo autonomo (`f:<id>`) viene inserito e acceso in automatico nel ramo `Automazioni` del grafo e nella sezione `Altro → Mente`, senza che l'utente debba dire "aggiungi".
+- **Generazione automatica dei nodi (`GraphAgent.inferFallbackTopics`):** se il modello risponde senza compilare `"topics"`, `GraphAgent` estrae comunque in locale app e argomenti (intrattenimento, lavoro, studio, tecnologia, salute, viaggi) e aggiorna subito la sfera 3D/2D e la vista `Mente`.
+
 ---
 
 ## 5. Stato attuale (15/11/2026)
 
-- **Pubblicato:** tutto fino alla versione 2.15 (`jarvis-shell-v17`).
-- **APK:** l'ultimo è il 2.15 (`versionCode = 17`).
+- **Pubblicato:** tutto fino alla versione 2.16 (`jarvis-shell-v18`).
+- **APK:** l'ultimo è il 2.16 (`versionCode = 18`).
 - **Mai verificato da noi sul telefono vero:**
   - l'Accessibilità sbloccata;
   - l'affidabilità della parola chiave;

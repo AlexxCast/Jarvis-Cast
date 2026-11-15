@@ -227,8 +227,24 @@ export function graph(db, { perModule = 24 } = {}) {
   const jobs = db.all("SELECT id, title, status FROM jobs ORDER BY created DESC LIMIT 24");
   if (jobs.length) branches.push({ id: 'compiti', label: 'Compiti', kind: 'core', children: jobs.map(j => ({ id: 'j:' + j.id, label: j.title, status: j.status })) });
   const flows = kvGet(db, 'phoneFlows', []);
-  const autoChildren = flows.length
-    ? flows.slice(0, perModule).map(f => ({ id: 'f:' + f.id, label: f.sampleGoal || f.app || f.id, kind: 'flow', auto: true }))
+  const autoGoals = kvGet(db, 'autoGoals', []);
+  const seenAuto = new Set();
+  const combinedAuto = [];
+  for (const f of flows) {
+    const key = topicKey(f.sampleGoal || f.id);
+    seenAuto.add(f.id);
+    if (key) seenAuto.add(key);
+    combinedAuto.push({ id: 'f:' + f.id, label: f.sampleGoal || f.app || f.id, kind: 'flow', auto: true });
+  }
+  for (const g of autoGoals) {
+    const key = topicKey(g.label || g.id);
+    if (seenAuto.has(g.id) || (key && seenAuto.has(key))) continue;
+    seenAuto.add(g.id);
+    if (key) seenAuto.add(key);
+    combinedAuto.push({ id: 'f:' + g.id, label: g.label || g.app || g.id, kind: 'flow', auto: true });
+  }
+  const autoChildren = combinedAuto.length
+    ? combinedAuto.slice(0, perModule)
     : [{ id: 'f:joytify-ricerca-musica', label: 'Joytify: apri e cerca musica', kind: 'flow', auto: true }];
   branches.push({
     id: 'automazioni', label: 'Automazioni', kind: 'flow', auto: true, entries: autoChildren.length,

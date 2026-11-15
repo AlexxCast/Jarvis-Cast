@@ -7,6 +7,7 @@
 
 import { kvGet, kvSet } from './db.js';
 import * as memory from './memory.js';
+import * as flows from './flows.js';
 import * as ui from './ui.js';
 
 function norm(s) {
@@ -14,23 +15,53 @@ function norm(s) {
 }
 
 const CLEAN_GRAPH_RE = /(?:(ridu[cz]\w*|sistem\w*|pulisc\w*|snellisc\w*|riordin\w*|sfoltisc\w*|compatt\w*|tropp[io]\s+grand\w*|tropp[io]\s+nod\w*)[\s\S]{0,40}\b(grafo|nod[io]|mappa|ram[oi]|dieta|sport|agenda|memoria)\b|\b(grafo|nod[io]|mappa|ram[oi])\b[\s\S]{0,40}\b(ridu[cz]\w*|sistem\w*|pulisc\w*|snellisc\w*|riordin\w*|sfoltisc\w*|compatt\w*|tropp[io]\s+grand\w*|tropp[io]\s+nod\w*))/i;
+const TRIVIAL_RE = /^(?:(?:ehi|ciao|ok|bene|grazie|perfetto|salve|buongiorno|buonasera|buonanotte|jarvis|signore|si|sì|no|va bene|a posto|tutto bene|come stai|come va)\W*)+$/i;
+const TOPIC_SKIP = new Set(['cosa', 'come', 'perche', 'quando', 'dove', 'quale', 'quali', 'quanti', 'quante', 'dimmi', 'spiegami', 'parlami', 'aggiungi', 'crea', ' metti', 'fai', 'puoi', 'vorrei', 'voglio', 'nodo', 'nodi', 'grafo', 'mappa', 'ramo', 'rami', 'favore', 'grazie', 'signore']);
 
 /** Agente 1: cura della struttura, pulizia e ridimensionamento dei rami del grafo della mente. */
 export const GraphAgent = {
-  /** Riconosce app installate citate nel messaggio per accenderle o collegarle nel grafo. */
+  /** Riconosce app installate o note citate nel messaggio per accenderle o collegarle nel grafo. */
   inferAppTopics(db, userText) {
+    if (!userText) return [];
     const apps = kvGet(db, 'apps', []);
-    if (!apps.length || !userText) return [];
+    const known = [...new Set([...apps, 'Joytify', 'Spotify', 'WhatsApp', 'Telegram', 'Instagram', 'YouTube', 'Maps', 'Gmail'])];
     const tNorm = norm(userText);
     const out = [];
-    for (const app of apps) {
+    if (/\b(joy\s*t\w*|joy\s*f\w*)\b/i.test(userText)) {
+      const joy = apps.find(a => /joy/i.test(a)) || 'Joytify';
+      out.push({ area: 'intrattenimento', topic: joy, parent: 'musica' });
+    }
+    for (const app of known) {
       const aNorm = norm(app);
-      if (aNorm.length >= 3 && tNorm.includes(aNorm)) {
-        const isMusic = /(joytify|spotify|music|youtube music|soundcloud|deezer)/i.test(app);
+      if (aNorm.length >= 3 && tNorm.includes(aNorm) && !out.some(o => norm(o.topic) === aNorm)) {
+        const isMusic = /(joytify|spotify|music|youtube|soundcloud|deezer)/i.test(app);
         out.push({ area: isMusic ? 'intrattenimento' : 'telefono', topic: app, parent: isMusic ? 'musica' : '' });
       }
     }
     return out.slice(0, 2);
+  },
+
+  /**
+   * Se il modello LLM ha dimenticato di valorizzare "topics" su una frase sostanziosa,
+   * estrae in locale l'area e l'argomento così il grafo genera sempre nuovi nodi in automatico.
+   */
+  inferFallbackTopics(db, userText) {
+    const s = String(userText || '').replace(/^\W*(ehi|ciao|ok)?\W*jarvis\W*/i, '').trim();
+    if (!s || s.length < 6 || TRIVIAL_RE.test(s) || CLEAN_GRAPH_RE.test(s)) return [];
+    const appHits = this.inferAppTopics(db, s);
+    if (appHits.length) return appHits;
+    const kws = memory.keywords(s).filter(w => !TOPIC_SKIP.has(w) && w.length >= 3);
+    if (kws.length < 2) return [];
+    let area = 'generale';
+    if (/\b(musica|canzon\w*|playlist|brano|album|artist\w*|rock|pop|jazz|rap|film|serie|gioch\w*|videogioc\w*)\b/i.test(s)) area = 'intrattenimento';
+    else if (/\b(lavor\w*|ufficio|riunion\w*|collegh\w*|client\w*|azienda|stipendio|fattur\w*|carriera|progett\w*)\b/i.test(s)) area = 'lavoro';
+    else if (/\b(studi\w*|esam\w*|universit\w*|scuola|lezion\w*|corso|libro|tesi|storia|scienza|fisica|matematica|filosofia)\b/i.test(s)) area = 'studio';
+    else if (/\b(programm\w*|codice|javascript|python|software|server|database|algoritm\w*|intelligenza\s+artificiale)\b/i.test(s)) area = 'tecnologia';
+    else if (/\b(auto|macchina|moto|tagliando|gomme|treno|volo|viaggi\w*|vacanz\w*|hotel)\b/i.test(s)) area = 'viaggi';
+    else if (/\b(salute|medic\w*|dottor\w*|farmac\w*|dolor\w*|sonno|allerg\w*|intolleran\w*)\b/i.test(s)) area = 'salute';
+    if (area === 'generale') return [];
+    const topic = kws.slice(0, 3).join(' ');
+    return topic ? [{ area, topic, parent: '' }] : [];
   },
 
   /** Rileva richieste dell'utente di ridurre, pulire o riordinare il grafo (o un ramo specifico come dieta). */
@@ -148,6 +179,10 @@ export function onLocalHit(db, userText, localHit, nowIso, ms) {
       touched.add('automazioni');
       const f = FlowAgent.touchedForGoal(db, d.goal);
       if (f) leaves.push(f.leaf);
+      else {
+        const reg = flows.registerAutoGoal(db, d.goal, ms);
+        if (reg) leaves.push('f:' + reg.id);
+      }
     } else if (d.type === 'open_app' && d.name) {
       const hits = memory.touchTopics(db, [{ area: 'telefono', topic: d.name }], nowIso);
       for (const m of hits.modules) touched.add(m);
