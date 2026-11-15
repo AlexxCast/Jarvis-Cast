@@ -227,12 +227,13 @@ export function graph(db, { perModule = 24 } = {}) {
   const jobs = db.all("SELECT id, title, status FROM jobs ORDER BY created DESC LIMIT 24");
   if (jobs.length) branches.push({ id: 'compiti', label: 'Compiti', kind: 'core', children: jobs.map(j => ({ id: 'j:' + j.id, label: j.title, status: j.status })) });
   const flows = kvGet(db, 'phoneFlows', []);
-  if (flows.length) {
-    branches.push({
-      id: 'automazioni', label: 'Automazioni', kind: 'flow', auto: true, entries: flows.length,
-      children: flows.slice(0, perModule).map(f => ({ id: 'f:' + f.id, label: f.sampleGoal || f.app || f.id, kind: 'flow', auto: true })),
-    });
-  }
+  const autoChildren = flows.length
+    ? flows.slice(0, perModule).map(f => ({ id: 'f:' + f.id, label: f.sampleGoal || f.app || f.id, kind: 'flow', auto: true }))
+    : [{ id: 'f:joytify-ricerca-musica', label: 'Joytify: apri e cerca musica', kind: 'flow', auto: true }];
+  branches.push({
+    id: 'automazioni', label: 'Automazioni', kind: 'flow', auto: true, entries: autoChildren.length,
+    children: autoChildren,
+  });
   for (const m of listModules(db)) {
     const topics = db.all('SELECT name, label, parent FROM topics WHERE module = ? ORDER BY uses DESC, last_used DESC LIMIT ?', m.name, perModule)
       .map(t => ({ id: `t:${m.name}/${t.name}`, label: t.label, kind: 'topic', ...(t.parent ? { parent: `t:${m.name}/${t.parent}` } : {}) }));

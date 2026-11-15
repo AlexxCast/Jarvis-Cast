@@ -124,8 +124,9 @@ export function applyActions(db, actions, ctx) {
         out.device.push({ type: 'call', name });
       } else if (a.type === 'phone_task') {
         // Il telefono esegue l'obiettivo da solo, chiedendo al server una mossa alla volta.
+        // Ignora phone_task generati per errore quando la richiesta riguarda funzioni interne di Jarvis (grafo, dieta, memoria).
         const goal = String(a.goal || '').trim().slice(0, 1000);
-        if (!goal) continue;
+        if (!goal || (phone.INTERNAL_JARVIS_WORDS.test(goal) && !phone.isPhoneTarget(db, goal))) continue;
         out.device.push({ type: 'phone_task', goal });
       } else if (a.type === 'save_place') {
         // Le coordinate le conosce solo il telefono: salva lui la posizione attuale con questo nome.
@@ -248,7 +249,7 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
     // Dice di averlo fatto ma nessuna azione è andata a buon fine: una seconda richiesta per avere le azioni vere.
     const nothing = (d) => !d.applied.length && !d.device.length && !d.jobs.length && !d.code.length;
     // Le richieste da eseguire sul telefono (chiamate, app) hanno la loro rete di sicurezza più sotto.
-    const deviceAsk = !!phone.calleeOf(userText) || (phone.DOING_WORDS.test(userText) && DEVICE_WORDS.test(userText));
+    const deviceAsk = !!phone.calleeOf(userText) || (phone.DOING_WORDS.test(userText) && phone.isPhoneTarget(db, userText));
     if (nothing(done) && (done.failed.length || parsed.truncated || (CLAIM_WORDS.test(parsed.reply) && !deviceAsk))) {
       logEvent(db, nowIso, 'error', `azione dichiarata ma non eseguita (${done.failed.join(', ') || 'nessuna azione'}): ${parsed.reply.slice(0, 120)}`);
       let fixed = null;
@@ -280,7 +281,7 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
       // "Chiamo Marcolino" senza l'azione: la telefonata parte lo stesso.
       done.device.push({ type: 'call', name: callee });
       done.applied.push('call');
-    } else if (!done.device.length && phone.DOING_WORDS.test(userText) && DEVICE_WORDS.test(userText) && phone.PROMISE_WORDS.test(parsed.reply)) {
+    } else if (!done.device.length && phone.DOING_WORDS.test(userText) && phone.isPhoneTarget(db, userText) && phone.PROMISE_WORDS.test(parsed.reply)) {
       done.device.push({ type: 'phone_task', goal });
       done.applied.push('phone_task');
     } else if (done.device.length && done.device.every(d => d.type === 'open_app') && phone.INSIDE_WORDS.test(userText)) {
@@ -318,6 +319,7 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
   for (const r of remembered) touched.add(r);
   for (const m of topicHits.modules) touched.add(m);
   if ((result.actions || []).includes('start_job')) touched.add('compiti');
+  if ((result.device || []).some(d => d.type === 'phone_task')) touched.add('automazioni');
   result.touched = [...touched];
   result.touchedLeaves = [...topicHits.leaves, ...recalled.entries.map(m => 'm:' + m.id)];
   kvSet(db, 'lastTouched', { at: nowIso + '#' + ms, touched: result.touched, leaves: result.touchedLeaves });

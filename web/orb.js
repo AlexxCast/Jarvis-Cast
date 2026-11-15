@@ -210,8 +210,10 @@ export function createOrb() {
     }
 
     const compact = hgt < 170;
-    // Stato dei nodi autonomi (senza modello LLM): verde smeraldo quando è calmo, viola acceso quando è agitato.
-    const targetAgit = Math.min(1, Math.max(0, (tension - 0.18) * 1.6) + (mode === 'thinking' ? 0.65 : mode === 'listening' ? 0.25 : 0));
+    // Stato dei nodi autonomi (senza modello LLM): verde smeraldo quando è calmo, viola acceso quando è agitato o attivo.
+    const autoBranch = branches.find(b => b.auto);
+    const autoHeat = autoBranch ? Math.max(autoBranch.hub.heat || 0, ...autoBranch.leaves.map(l => l.heat || 0)) : 0;
+    const targetAgit = Math.min(1, Math.max(0, (tension - 0.18) * 1.6) + (mode === 'thinking' ? 0.65 : mode === 'listening' ? 0.35 : 0) + autoHeat * 0.75);
     agitation += (targetAgit - agitation) * ease;
     const autoRgb = mix(AUTO_CALM, AUTO_AGITATED, agitation);
 
@@ -361,8 +363,8 @@ export function createOrb() {
           ctx.fillText(text, l.sx + (right ? 9 : -9), l.sy);
         }
       }
-      const h = b.hub, r = (4 + h.d * 2.8 + h.heat * 2) * bScale * (focused === b ? 1.3 : 1);
-      ring(h, r, h.heat, ((0.5 + h.d * 0.5) * cur.glow + h.heat * 0.4) * b.fade, true, b.rgb, !!b.auto);
+      const h = b.hub, r = (4 + h.d * 2.8 + h.heat * 2) * bScale * (focused === b ? 1.3 : b.auto ? 1.22 : 1);
+      ring(h, r, h.heat, ((0.5 + h.d * 0.5) * cur.glow + h.heat * 0.4 + (b.auto ? 0.25 : 0)) * b.fade, true, b.rgb, !!b.auto);
       ctx.fillStyle = color(h.heat, (0.6 + h.heat * 0.4) * b.fade, b.rgb);
       ctx.beginPath(); ctx.arc(h.sx, h.sy, r * 0.4, 0, Math.PI * 2); ctx.fill();
       if (!compact && b.fade > 0.3 && (focused === b || (!focused && (h.d > (branches.length > 12 ? 0.7 : 0.35) || h.heat > 0.2 || b.auto)))) {

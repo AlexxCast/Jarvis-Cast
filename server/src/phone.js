@@ -23,7 +23,11 @@ Mosse:
 COME MUOVERTI BENE:
 - Le icone senza testo compaiono come "(icona: nome tecnico)", es. "(icona: send)" è il tasto invia, "(icona: search)" la ricerca. "[cursore qui]" indica il campo dove si sta scrivendo.
 - Se l'app giusta non è aperta, la prima mossa è open_app. Per trovare una chat, un contatto o un brano usa la ricerca dell'app (tocca la lente, poi type nel campo).
-- Dopo type, per inviare tocca il tasto invia: scrivere non basta.
+- Quando l'apertura dell'app e il tocco sulla ricerca sono già stati fatti in automatico, ti trovi direttamente sul campo di ricerca o davanti ai risultati sullo schermo:
+  1) se il campo di ricerca è aperto e la richiesta dell'utente è vaga ("musica che mi piace", "qualcosa di rilassante") o contiene un nome storpiato dal microfono, usa type con il titolo/artista/genere corretto più adatto;
+  2) se sullo schermo vedi già l'elenco dei risultati (brani, playlist, video, contatti), leggi i testi degli elementi [n] e tocca (tap) il risultato migliore che corrisponde all'intenzione dell'utente;
+  3) una volta avviato il brano o completata la scelta, chiudi subito con done.
+- Dopo type, se serve inviare o avviare la ricerca tocca il tasto invia/cerca o il primo risultato pertinente.
 - Guarda MOSSE GIÀ FATTE: se una mossa ha dato ERRORE o lo schermo non è cambiato, prova un'altra strada invece di ripeterla.
 - Quando l'obiettivo è raggiunto usa subito done, con una frase breve.
 REGOLE DI SICUREZZA, da rispettare sempre:
@@ -67,8 +71,9 @@ export async function step(db, env, deps, b) {
   const apps = opened ? [] : kvGet(db, 'apps', []);
   const user = `${apps.length ? 'APP INSTALLATE (per open_app usa uno di questi nomi): ' + apps.join(', ').slice(0, 2500) + '\n\n' : ''}OBIETTIVO: ${goal}\n\nMOSSE GIÀ FATTE (${n}):\n${history || '- nessuna'}\n\nSCHERMO ATTUALE (app: ${String(screen.app || '?').slice(0, 80)}):\n${items || '(vuoto)'}`;
   try {
+    const stepTier = opened && n >= 1 ? 'fast' : 'smart';
     const res = await router.chat(db, env, {
-      tier: 'smart', maxTokens: 300, fetchFn: deps.fetchFn, now: deps.now, tz: deps.tz,
+      tier: stepTier, maxTokens: 300, fetchFn: deps.fetchFn, now: deps.now, tz: deps.tz,
       build: () => [{ role: 'system', content: SYSTEM }, { role: 'user', content: user }],
     });
     const move = parseMove(res.text);
@@ -94,10 +99,26 @@ Se l'utente ora conferma o precisa, rimetti phone_task con l'obiettivo completo 
 
 /** L'utente chiede di fare qualcosa sul telefono? (verbo di azione + app o oggetto) */
 export const DOING_WORDS = /\b(apri|manda|mandami|invia|scrivi|metti|cerca|leggi|leggimi|chiama|avvia|fai partire|riproduci|ascolta|imposta|attiva|disattiva|controlla|guarda|rispondi)\b/i;
-/** Il modello dice di farlo ("apro", "mando", "ci penso io")? */
-export const PROMISE_WORDS = /\b(apro|faccio|mando|invio|scrivo|metto|cerco|avvio|leggo|chiamo|imposto|attivo|procedo|ci penso|me ne occupo|eseguo|subito|provvedo|lo faccio|rispondo)\b/i;
+/** Il modello promette esplicitamente un'azione sul telefono (escludendo risposte generiche come "subito" o "faccio"). */
+export const PROMISE_WORDS = /\b(apro|mando|invio|scrivo|metto|cerco\s+su|avvio|riproduco|chiamo|imposto|attivo|eseguo)\b/i;
 /** Cose da fare DENTRO un'app: aprirla soltanto non basta. */
 export const INSIDE_WORDS = /\b(manda|mandami|invia|scrivi|metti|cerca|leggi|leggimi|chiama|riproduci|imposta|rispondi|fai partire|avvia la|avvia il)\b/i;
+/** Richieste interne a Jarvis (grafo, dieta, memoria, agenda, meteo) che NON devono MAI far partire il controllo del telefono. */
+export const INTERNAL_JARVIS_WORDS = /\b(grafo|nod[io]|mappa|sfera|dieta|calori\w*|kcal|macro|proteine|carboidrati|grassi|pasto|pasti|pranzo|cena|colazion\w*|spuntin\w*|peso|pesata|allenament\w*|dispensa|ricett\w*|promemoria|agenda|ricord\w*|memoria|riquadr\w*|widget|codice|anteprima|meteo|tempo\s+fa)\b/i;
+const EXPLICIT_PHONE_TARGETS = /\b(whatsapp|telegram|instagram|spotify|joytify|joy\s*t\w*|joy\s*f\w*|youtube|tiktok|maps|waze|gmail|mail|messaggi|messaggio|sms|playlist|canzon\w*|musica|brano|sveglia|impostazioni|rubrica)\b/i;
+
+/** Vero solo se il messaggio nomina davvero un'app o una funzione del telefono (e non il grafo/dieta/memoria di Jarvis). */
+export function isPhoneTarget(db, text) {
+  const s = String(text || '');
+  if (!s || INTERNAL_JARVIS_WORDS.test(s)) return false;
+  if (EXPLICIT_PHONE_TARGETS.test(s)) return true;
+  const low = s.toLowerCase();
+  for (const app of kvGet(db, 'apps', [])) {
+    const a = String(app || '').trim().toLowerCase();
+    if (a.length >= 3 && low.includes(a)) return true;
+  }
+  return false;
+}
 
 /** "chiama Marcolino" -> "Marcolino". Vuoto se non è una telefonata normale (es. "chiama su WhatsApp", "come si chiama"). */
 export function calleeOf(text) {

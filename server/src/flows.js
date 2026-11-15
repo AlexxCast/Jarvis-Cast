@@ -5,12 +5,14 @@
 
 import { kvGet, kvSet } from './db.js';
 import { keywords, slug } from './memory.js';
-import { calleeOf, INSIDE_WORDS } from './phone.js';
+import { calleeOf, INSIDE_WORDS, INTERNAL_JARVIS_WORDS } from './phone.js';
 
 const FLOWS_KEY = 'phoneFlows';
 const TRACE_KEY = 'phoneTrace';
 const ACTIVE_KEY = 'phoneActiveFlow';
+const PREFIX_KEY = 'phonePrefixFlow';
 const MAX_FLOWS = 60;
+const MUSIC_TASK_RE = /\b(cerca|metti|riproduci|ascolta|fai\s+partire|avvia)\b[\s\S]*\b(music\w*|canzon\w*|bran[oi]|playlist|joytify|joy\s*t\w*|joy\s*f\w*|spotify|youtube\s+music)\b/i;
 /** Soglie di fiducia: sotto, decide il modello. */
 export const PHONE_THRESHOLD = 0.65;
 export const CHAT_THRESHOLD = 0.72;
@@ -183,19 +185,93 @@ function bestFlow(flows, goal) {
   return { flow: best, score };
 }
 
+/** App musicale preferita dell'utente (es. Joytify), risolta anche se scritta male ("joy-faly", "joy tifi") o sottintesa ("cerca una musica"). */
+export function preferredMusicApp(db, goal = '') {
+  const g = norm(goal);
+  const apps = kvGet(db, 'apps', []);
+  if (/\b(joytify|joy\s*t\w*|joy\s*f\w*)\b/i.test(goal)) {
+    return apps.find(a => /joy/i.test(a)) || 'Joytify';
+  }
+  for (const a of apps) {
+    if (norm(a).length >= 3 && g.includes(norm(a))) return a;
+  }
+  for (const pref of ['joytify', 'spotify', 'youtube music', 'deezer', 'soundcloud']) {
+    const hit = apps.find(a => norm(a).includes(pref));
+    if (hit) return hit;
+  }
+  return 'Joytify';
+}
+
+/**
+ * Prefisso automatico per la ricerca musicale (es. su Joytify):
+ * - Passo 0: apre in automatico l'app musicale nota (es. Joytify) senza disturbare il modello;
+ * - Passo 1: legge gli elementi dello schermo e tocca in automatico l'icona/barra di ricerca;
+ * - Passo 2+: cede il controllo al modello IA, che legge i testi della pagina (o corregge richieste vaghe/scritte male)
+ *   e sceglie il brano o la playlist migliore.
+ */
+function tryMusicPrefixStep(db, { goal, step, screen, nowMs }) {
+  if (!goal || !MUSIC_TASK_RE.test(goal)) return null;
+  const hasInstalledApps = kvGet(db, 'apps', []).length > 0;
+  const isFuzzyOrGeneric = CREATIVE_WORDS.test(goal) || !/\b(joytify|spotify)\b/i.test(goal);
+  if (!hasInstalledApps && !isFuzzyOrGeneric) return null;
+
+  const appName = preferredMusicApp(db, goal);
+  const appNorm = norm(appName).replace(/\s+/g, '');
+  const onApp = norm(screen?.app).replace(/\s+/g, '').includes(appNorm);
+
+  if (step === 0) {
+    kvSet(db, 'lastTouched', { at: String(nowMs), touched: ['automazioni'], leaves: ['f:joytify-ricerca-musica'] });
+    if (!onApp) {
+      kvSet(db, PREFIX_KEY, { goal, app: appName, stage: 'tap_search', at: nowMs });
+      return { do: 'open_app', text: appName, say: `Apro ${appName}.`, auto: true };
+    }
+    kvSet(db, PREFIX_KEY, { goal, app: appName, stage: 'tap_search', at: nowMs });
+  }
+
+  const pref = kvGet(db, PREFIX_KEY, null);
+  if (!pref || pref.goal !== goal || step > 1) {
+    kvSet(db, PREFIX_KEY, null);
+    return null;
+  }
+
+  // Sullo schermo dell'app: cerca il pulsante/icona della lente di ricerca e lo tocca in automatico.
+  const items = Array.isArray(screen?.items) ? screen.items : [];
+  const alreadyFocusedField = items.some(i => /\[cursore qui\]/i.test(String(i.text || '')) || (norm(i.kind) === 'campo' && /\b(cerca|search|brani|canzoni|artisti)\b/i.test(stripIcon(i.text))));
+  if (alreadyFocusedField) {
+    // Il campo di ricerca è già pronto: ora tocca all'IA scrivere/scegliere il risultato migliore.
+    kvSet(db, PREFIX_KEY, null);
+    return null;
+  }
+  const searchBtn = items.find(i => iconOf(i.text).includes('search') || /\b(cerca|search|trova)\b/i.test(stripIcon(i.text)));
+  kvSet(db, PREFIX_KEY, null);
+  if (searchBtn && !IRREVERSIBLE.test(stripIcon(searchBtn.text) + ' ' + iconOf(searchBtn.text))) {
+    return { do: 'tap', n: Number(searchBtn.n), say: '', auto: true };
+  }
+  return null;
+}
+
 /** Prova a decidere la mossa con un flow appreso (zero chiamate al modello). Null = decide il modello. */
 export function tryFlowStep(db, { goal, step, screen, nowMs }) {
-  if (!goal || CREATIVE_WORDS.test(goal)) return null;
+  if (!goal) return null;
   const flows = listFlows(db);
   const stop = () => { kvSet(db, ACTIVE_KEY, null); return null; };
   let active = kvGet(db, ACTIVE_KEY, null);
-  if (step === 0) {
-    const { flow, score } = bestFlow(flows, goal);
-    if (!flow || score < PHONE_THRESHOLD) return stop();
-    active = { flowId: flow.id, goal, idx: 0, at: nowMs };
-  } else if (!active || active.goal !== goal) {
-    // Un flow parte solo dal primo passo: se a metà è passato al modello, il modello finisce il lavoro.
-    return null;
+  if (!CREATIVE_WORDS.test(goal)) {
+    if (step === 0) {
+      const { flow, score } = bestFlow(flows, goal);
+      if (flow && score >= PHONE_THRESHOLD) {
+        active = { flowId: flow.id, goal, idx: 0, at: nowMs };
+      } else {
+        stop();
+        return tryMusicPrefixStep(db, { goal, step, screen, nowMs });
+      }
+    } else if (!active || active.goal !== goal) {
+      // Se era attivo il prefisso automatico (apertura app -> tocco ricerca), esegue il tocco ricerca e poi passa al modello.
+      return tryMusicPrefixStep(db, { goal, step, screen, nowMs });
+    }
+  } else {
+    stop();
+    return tryMusicPrefixStep(db, { goal, step, screen, nowMs });
   }
   const flow = flows.find(f => f.id === active.flowId);
   if (!flow) return stop();
@@ -258,7 +334,7 @@ export function tryFlowStep(db, { goal, step, screen, nowMs }) {
 export function gatekeepChat(db, userText, { hasImage = false, hasPendingPhone = false } = {}) {
   const text = String(userText || '').trim();
   if (!text || hasImage || hasPendingPhone) return null;
-  if (text.length > 140 || COMPLEX_CHAT.test(text) || CREATIVE_WORDS.test(text)) return null;
+  if (text.length > 140 || COMPLEX_CHAT.test(text) || CREATIVE_WORDS.test(text) || INTERNAL_JARVIS_WORDS.test(text)) return null;
   const goal = text.replace(/^\W*(ehi|ciao|ok)?\W*jarvis\W*/i, '').replace(/[.!]+$/, '').trim();
   if (!goal || MULTI_INTENT.test(goal)) return null;
   const local = (reply, device) => ({ reply, device: [device], actions: [device.type], local: true });

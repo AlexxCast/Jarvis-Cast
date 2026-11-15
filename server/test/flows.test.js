@@ -144,9 +144,10 @@ test('api /api/flows: elenca ed elimina i flow appresi', async () => {
   assert.equal(del.flows.length, 0);
 });
 
-test('grafo e multi-agente locale: i flow appresi creano il ramo autonomo e gli agenti locali ordinano memoria e grafo', () => {
+test('grafo e multi-agente locale: i flow appresi creano il ramo autonomo e gli agenti locali ordinano memoria e grafo', async () => {
   const db = makeDb();
-  assert.equal(memory.graph(db).branches.some(b => b.id === 'automazioni'), false);
+  // Il ramo automazioni è sempre visibile nel grafo (con il prefisso musicale predefinito finché non ci sono altri flow).
+  assert.equal(memory.graph(db).branches.some(b => b.id === 'automazioni'), true);
   const saved = flows.saveFlowFromTrace(db, { goal: 'apri spotify', app: 'Spotify', params: [], steps: [{ do: 'open_app', app: 'Spotify' }, { do: 'done' }] }, 1000);
   const g = memory.graph(db);
   const autoBranch = g.branches.find(b => b.id === 'automazioni');
@@ -155,6 +156,18 @@ test('grafo e multi-agente locale: i flow appresi creano il ramo autonomo e gli 
   assert.equal(autoBranch.kind, 'flow');
   assert.equal(autoBranch.children[0].id, 'f:' + saved.id);
   assert.equal(autoBranch.children[0].auto, true);
+
+  // Prefisso automatico per ricerca musica vaga ("cerca una musica che mi piace"):
+  // Passo 0 apre Joytify in automatico, Passo 1 tocca la ricerca in automatico, Passo 2 passa al modello IA per scegliere!
+  const llm = fakeFetch(() => JSON.stringify({ do: 'type', n: 5, text: 'Queen Bohemian Rhapsody', say: 'Cerco Queen.' }));
+  const d = deps(llm);
+  const goal = 'cerca una musica che mi piace';
+  assert.deepEqual(await phone.step(db, ENV, d, { goal, step: 0, screen: HOME }), { do: 'open_app', text: 'Joytify', say: 'Apro Joytify.', auto: true });
+  assert.deepEqual(await phone.step(db, ENV, d, { goal, step: 1, screen: APP }), { do: 'tap', n: 2, say: '', auto: true });
+  assert.equal(llm.calls.length, 0, 'apertura app e tocco ricerca senza chiamare il modello');
+  const step2 = await phone.step(db, ENV, d, { goal, step: 2, screen: SEARCH });
+  assert.equal(step2.auto, undefined, 'sul campo di ricerca interviene il modello IA');
+  assert.equal(llm.calls.length, 1);
 
   // MemoryAgent estrae ricordi espliciti ("ricordati che...") senza LLM
   const extracted = agents.MemoryAgent.extractExplicit(db, 'Ricordati che sono allergico alle arachidi', 2000);

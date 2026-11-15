@@ -213,12 +213,15 @@ Jarvis diceva "ho aggiornato il piano" o "chiamo Marcolino" senza farlo.
   - Non agisce con il telefono bloccato.
 - **Se Android blocca l'Accessibilità** come "Impostazione con restrizioni" (APK installato a mano): Info app › ⋮ › Consenti impostazioni con restrizioni.
 - **Il telefono invia l'elenco delle app installate**, così Jarvis apre l'app giusta anche se il nome viene capito male.
-- **Il server aggiunge l'azione sul telefono quando serve:**
-  - se la risposta promette un'azione senza farla, aggiunge un `phone_task`;
+- **Il server aggiunge l'azione sul telefono solo quando la richiesta riguarda davvero un'app/funzione del telefono (`phone.isPhoneTarget`):**
+  - mai su richieste interne a Jarvis (grafo, dieta, memoria, agenda, meteo) né su semplici formule di cortesia ("subito", "faccio");
+  - se la risposta promette esplicitamente un'azione su un'app (`apro`, `mando`, `invio`, `avvio`, `riproduco`) senza metterla, aggiunge un `phone_task`;
   - se l'utente voleva fare qualcosa dentro un'app, un semplice `open_app` diventa un `phone_task`.
 - **Una conferma in sospeso** ("sì, invialo") resta valida 15 minuti.
 - **Telefonate:** l'azione `call {name}` cerca nei contatti (permessi READ_CONTACTS e CALL_PHONE).
-- **Flow appresi e gatekeeper locale (`server/src/flows.js`):**
+- **Flow appresi, prefisso automatico musicale e gatekeeper locale (`server/src/flows.js`):**
+  - Il ramo `Automazioni` (`auto: true`, verde quando è calmo, viola quando è attivo/agitato) è sempre visibile nel grafo, partendo dal flow musicale predefinito (`Joytify: apri e cerca musica`) e arricchendosi con i flow appresi (`phoneFlows`).
+  - Per le ricerche musicali ("cerca una musica...", anche vaghe o con il nome dell'app storpiato come "joy-faly"), i primi passi meccanici (aprire `Joytify` e toccare la lente `Cerca` leggendo gli elementi dello schermo) partono sempre in automatico a costo zero; arrivato al campo di ricerca o davanti all'elenco dei risultati sulla pagina, subentra il modello IA veloce (`fast`) che legge i testi sullo schermo, corregge eventuali storpiature/richieste vaghe e seleziona il risultato migliore.
   - Quando un compito sul telefono termina con successo (`done`), la sequenza di mosse viene salvata in memoria procedurale (`phoneFlows`). Il testo preso dall'obiettivo diventa un parametro (`cerca {q} su Joytify`), così la volta dopo cambia solo quello.
   - Un classificatore leggero (filtri booleani + punteggio logistico) decide se ripetere il flow leggendo gli elementi dello schermo (`screen.items`) **senza chiamare modelli esterni**. Tutte le parole fisse del flow devono essere nella richiesta; parole in più solo se il flow ha un parametro. Un flow parte solo dal primo passo.
   - **Torna sempre al modello:** scelte creative ("musica che mi piace"), testi composti (il corpo di un messaggio), schermi imprevisti (il flow perde fiducia), compiti di lettura (l'ultima parola è del modello) e **qualunque pulsante irreversibile o campo sensibile** (invia, paga, elimina, chiama, password...): il controllo e le conferme restano quelli del modello.
