@@ -10,6 +10,10 @@ ADESSO: ${nowHuman}. Risolvi le date relative ("ieri", "stamattina", "domani all
 Ti occupi di tutto: alimentazione e allenamento, promemoria e agenda, progetti, studio, lavoro, vita quotidiana.
 Non inventare dati che non hai: se un'informazione manca nel contesto, chiedila o dillo.
 
+CONTINUITÀ DEL DISCORSO E VOCE
+- Quando il messaggio contiene "[..., a voce]", proviene dal microfono e può avere parole storpiate o omofone: interpretalo sempre nel contesto degli ultimi scambi, dell'argomento attivo e delle app/memorie dell'utente, senza cambiare tema per una parola trascritta male.
+- Mantieni il filo del discorso: domande brevi, pronomi o correzioni ("e domani?", "quello prima", "aggiungi anche...", "no, intendevo...") si riferiscono sempre a ciò di cui stavate parlando negli ultimi turni.
+
 MEMORIA A MODULI
 - Quando l'utente ti dice qualcosa che servirà in futuro (preferenze, persone, scadenze, decisioni, dati di un progetto o di un'attività) salvalo con l'azione remember.
 - Scegli un modulo esistente se è adatto, altrimenti creane uno nuovo con un nome breve (es. "lavoro", "auto", "viaggio-giappone"). I fatti stabili sulla persona vanno in "generale".
@@ -64,12 +68,13 @@ export function buildMessages(model, parts) {
   take(parts.core); sections.push(parts.core);
   used += estimateTokens(parts.userText) + (parts.image ? 800 : 0);
   if (take(parts.brief)) sections.push(parts.brief);
+  if (parts.summary && take(parts.summary)) sections.push('RIASSUNTO DELLA CONVERSAZIONE FINORA\n' + parts.summary);
 
-  // Ultimi scambi: prima i 4 più recenti (indispensabili), il resto dopo se c'è spazio.
+  // Ultimi scambi: prima i 6 più recenti (indispensabili), il resto dopo se c'è spazio.
   const hist = parts.history || [];
   const kept = [];
   let idx = hist.length - 1;
-  for (; idx >= Math.max(0, hist.length - 4); idx--) { if (!take(hist[idx].text)) break; kept.unshift(hist[idx]); }
+  for (; idx >= Math.max(0, hist.length - 6); idx--) { if (!take(hist[idx].text)) break; kept.unshift(hist[idx]); }
 
   if (parts.memories?.length) {
     const lines = [];
@@ -83,7 +88,6 @@ export function buildMessages(model, parts) {
   if (parts.web && take(parts.web)) sections.push(parts.web);
   if (parts.weather && take(parts.weather)) sections.push(parts.weather);
   if (parts.agenda && take(parts.agenda)) sections.push(parts.agenda);
-  if (parts.summary && take(parts.summary)) sections.push('RIASSUNTO DELLA CONVERSAZIONE FINORA\n' + parts.summary);
   if (parts.moduleIndex && take(parts.moduleIndex)) sections.push(parts.moduleIndex);
   for (; idx >= Math.max(0, hist.length - 14); idx--) { if (!take(hist[idx].text)) break; kept.unshift(hist[idx]); }
   for (const b of rest) if (take(b.text)) sections.push(b.text);
@@ -151,7 +155,7 @@ export function parseReply(raw) {
   }
   return {
     reply: obj.reply.trim() || 'Fatto.',
-    expectReply: obj.expect_reply === true,
+    expectReply: obj.expect_reply === true || /\?\s*$/.test(obj.reply.trim()),
     card: typeof obj.card === 'string' ? obj.card.trim() : '',
     actions: Array.isArray(obj.actions) ? obj.actions.filter(a => a && typeof a.type === 'string') : [],
     mood: obj.mood && typeof obj.mood === 'object' && typeof obj.mood.emozione === 'string' ? { emozione: obj.mood.emozione.slice(0, 30), intensita: Number(obj.mood.intensita) || 0.4 } : null,

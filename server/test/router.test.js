@@ -141,3 +141,17 @@ test('modelli che pensano: più margine di token e pensiero breve; se il provide
   assert.equal(bodies[1].reasoning_effort, undefined);
   assert.ok(!router.thinks({ model: "gemini-flash-lite-latest" }) && !router.thinks({ model: 'llama-3.3-70b-versatile' }) && router.thinks({ model: "openai/gpt-oss-120b" }));
 });
+
+test('fallback smart → fast: se i modelli smart sono esauriti usa un modello fast invece di fallire', async () => {
+  const db = makeDb();
+  kvSet(db, 'models', [
+    { provider: 'gemini', model: 'only-smart', tiers: ['smart'], ctx: 100000, rpm: 10, free: true, prio: 10 },
+    { provider: 'groq', model: 'only-fast', tiers: ['fast'], ctx: 100000, rpm: 30, free: true, prio: 20 },
+  ]);
+  const f = fakeFetch((url) => /generativelanguage/.test(url)
+    ? { status: 429, json: { error: { message: 'quota' } } }
+    : 'risposta da fast');
+  const res = await run(db, f, { tier: 'smart' });
+  assert.equal(res.key, 'groq:only-fast');
+  assert.equal(res.text, 'risposta da fast');
+});

@@ -103,6 +103,14 @@ class JarvisService : LifecycleService(), SensorEventListener {
     private var yielded = false         // in pausa perché il microfono serve a un'altra app
     private var freeChecks = 0
     private var wakeHeard = false       // "Jarvis" comparso nei risultati parziali della sessione
+    private var lastWakePartial = ""
+    private var lastCommandPartial = ""
+    private val wakeStopRunnable = Runnable {
+        if (sessionActive && wakeHeard) runCatching { recognizer?.stopListening() }
+    }
+    private val commandStopRunnable = Runnable {
+        if (sessionActive) runCatching { recognizer?.stopListening() }
+    }
 
     // ---------------------------------------------------------------- lifecycle
 
@@ -314,6 +322,8 @@ class JarvisService : LifecycleService(), SensorEventListener {
 
             try {
                 wakeHeard = false
+                lastWakePartial = ""
+                main.removeCallbacks(wakeStopRunnable)
                 val rec = recognizer ?: SpeechRecognizer.createSpeechRecognizer(this).also { recognizer = it }
                 rec.setRecognitionListener(object : RecognitionListener {
                     override fun onReadyForSpeech(params: Bundle?) {}
@@ -327,15 +337,20 @@ class JarvisService : LifecycleService(), SensorEventListener {
                         val text = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
                         if (text.isBlank()) return
                         JarvisState.partial.value = text
-                        // Sentito "Jarvis": segnala che sta ascoltando, ma aspetta la frase COMPLETA
-                        // (prima il comando veniva tagliato a metà sul risultato parziale).
-                        if (!wakeHeard && VoiceText.containsWake(text, Settings.sensitivity)) {
-                            wakeHeard = true
-                            JarvisState.status.value = JarvisState.Status.LISTENING
-                            updateNotification("Ti ascolto…")
+                        // Sentito "Jarvis": aspetta una breve pausa e chiude subito la sessione senza aspettare 15s.
+                        if (wakeHeard || VoiceText.containsWake(text, Settings.sensitivity)) {
+                            lastWakePartial = text
+                            if (!wakeHeard) {
+                                wakeHeard = true
+                                JarvisState.status.value = JarvisState.Status.LISTENING
+                                updateNotification("Ti ascolto…")
+                            }
+                            main.removeCallbacks(wakeStopRunnable)
+                            main.postDelayed(wakeStopRunnable, 1100L)
                         }
                     }
                     override fun onResults(results: Bundle?) {
+                        main.removeCallbacks(wakeStopRunnable)
                         sessionActive = false
                         if (busy || yielded || Speaker.isSpeaking()) return
                         val all = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
@@ -344,20 +359,27 @@ class JarvisService : LifecycleService(), SensorEventListener {
                         if (wakeHeard && VoiceText.wake(text, Settings.sensitivity) == VoiceText.Wake.None) {
                             // I parziali avevano sentito "Jarvis" ma la frase finale l'ha perso: vale come chiamata.
                             wakeHeard = false
-                            onWakeWordDetected(VoiceText.commandAfterLostWake(text))
+                            val recovered = text.ifBlank { lastWakePartial }
+                            lastWakePartial = ""
+                            onWakeWordDetected(VoiceText.commandAfterLostWake(recovered))
                             return
                         }
+                        lastWakePartial = ""
                         handleHeard(text)
                     }
                     override fun onError(error: Int) {
+                        main.removeCallbacks(wakeStopRunnable)
                         sessionActive = false
                         if (busy || yielded) return
                         if (wakeHeard) {
-                            // Ha chiamato Jarvis ma la frase non è arrivata intera: chiedi di ripetere il comando.
+                            // Ha chiamato Jarvis ma la sessione si è chiusa con errore: recupera l'eventuale comando dai parziali.
                             wakeHeard = false
-                            onWakeWordDetected("")
+                            val cmd = VoiceText.commandAfterLostWake(lastWakePartial)
+                            lastWakePartial = ""
+                            onWakeWordDetected(cmd)
                             return
                         }
+                        lastWakePartial = ""
                         when (error) {
                             // Silenzio: riparte subito, così il nome detto in quel momento non va perso.
                             SpeechRecognizer.ERROR_NO_MATCH,
@@ -380,17 +402,16 @@ class JarvisService : LifecycleService(), SensorEventListener {
     }
 
     /**
-     * Ascolto in attesa del nome: sessioni lunghe (meno riavvii in cui il nome va perso), più
-     * alternative tra cui cercare "Jarvis" e, da Android 13, il riconoscitore spinto a capire proprio quel nome.
+     * Ascolto in attesa del nome: più alternative tra cui cercare "Jarvis" e, da Android 13,
+     * il riconoscitore spinto a capire proprio quel nome. Senza durata minima forzata così risponde subito.
      */
     private fun wakeIntent() = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
         putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
         putExtra(RecognizerIntent.EXTRA_LANGUAGE, "it-IT")
         putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
         putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
-        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 15_000L)
-        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1_500L)
-        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1_200L)
+        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1_100L)
+        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 800L)
         if (Build.VERSION.SDK_INT >= 33) {
             putStringArrayListExtra(RecognizerIntent.EXTRA_BIASING_STRINGS, arrayListOf("Jarvis", "Ehi Jarvis", "Ciao Jarvis", "Ok Jarvis"))
         }
@@ -543,6 +564,8 @@ class JarvisService : LifecycleService(), SensorEventListener {
         if (yielded) return
         if (!micFreeOrYield { listenForCommand() }) return
         busy = true
+        lastCommandPartial = ""
+        main.removeCallbacks(commandStopRunnable)
         JarvisState.status.value = JarvisState.Status.LISTENING
         JarvisState.partial.value = ""
         updateNotification(if (inConversationMode) "Conversazione aperta (ti ascolto)…" else "Ti ascolto…")
@@ -559,32 +582,47 @@ class JarvisService : LifecycleService(), SensorEventListener {
                 if (Speaker.isSpeaking()) return
                 val text = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
                 if (text.isNotBlank() && !isSelfSpeechEcho(text)) {
+                    lastCommandPartial = text
                     JarvisState.partial.value = text
+                    main.removeCallbacks(commandStopRunnable)
+                    main.postDelayed(commandStopRunnable, 1400L)
                 }
             }
             override fun onResults(results: Bundle?) {
+                main.removeCallbacks(commandStopRunnable)
                 sessionActive = false
                 if (yielded) return
                 if (Speaker.isSpeaking()) {
+                    lastCommandPartial = ""
                     handleSilence()
                     return
                 }
                 val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
-                if (text.isNotBlank()) {
-                    if (isSelfSpeechEcho(text)) {
-                        android.util.Log.w("JarvisService", "Rilevata eco della voce di Jarvis, messaggio scartato: '$text'")
+                val chosen = if (text.isNotBlank()) text else if (lastCommandPartial.length >= 2 && !isSelfSpeechEcho(lastCommandPartial)) lastCommandPartial else ""
+                lastCommandPartial = ""
+                if (chosen.isNotBlank()) {
+                    if (isSelfSpeechEcho(chosen)) {
+                        android.util.Log.w("JarvisService", "Rilevata eco della voce di Jarvis, messaggio scartato: '$chosen'")
                         handleSilence()
                         return
                     }
                     lastConversationActivityTime = System.currentTimeMillis()
-                    process(text)
+                    process(chosen)
                 } else {
                     handleSilence()
                 }
             }
             override fun onError(error: Int) {
+                main.removeCallbacks(commandStopRunnable)
                 sessionActive = false
                 if (yielded) return
+                val recovered = lastCommandPartial
+                lastCommandPartial = ""
+                if (recovered.length >= 2 && !isSelfSpeechEcho(recovered)) {
+                    lastConversationActivityTime = System.currentTimeMillis()
+                    process(recovered)
+                    return
+                }
                 when (error) {
                     SpeechRecognizer.ERROR_NO_MATCH,
                     SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> handleSilence()
@@ -600,8 +638,8 @@ class JarvisService : LifecycleService(), SensorEventListener {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, "it-IT")
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2500L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1_400L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1_100L)
         }
         beginSession(rec, intent)
     }

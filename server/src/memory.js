@@ -205,6 +205,13 @@ export function graph(db, { perModule = 24 } = {}) {
   ];
   const jobs = db.all("SELECT id, title, status FROM jobs ORDER BY created DESC LIMIT 24");
   if (jobs.length) branches.push({ id: 'compiti', label: 'Compiti', kind: 'core', children: jobs.map(j => ({ id: 'j:' + j.id, label: j.title, status: j.status })) });
+  const flows = kvGet(db, 'phoneFlows', []);
+  if (flows.length) {
+    branches.push({
+      id: 'automazioni', label: 'Automazioni', kind: 'flow', auto: true, entries: flows.length,
+      children: flows.slice(0, perModule).map(f => ({ id: 'f:' + f.id, label: f.sampleGoal || f.app || f.id, kind: 'flow', auto: true })),
+    });
+  }
   for (const m of listModules(db)) {
     const topics = db.all('SELECT name, label, parent FROM topics WHERE module = ? ORDER BY uses DESC, last_used DESC LIMIT ?', m.name, perModule)
       .map(t => ({ id: `t:${m.name}/${t.name}`, label: t.label, kind: 'topic', ...(t.parent ? { parent: `t:${m.name}/${t.parent}` } : {}) }));
@@ -228,6 +235,7 @@ const HALF_LIFE_DAYS = 10;
 
 /** Quanto è "personale" un ramo: 1 definisce chi è l'utente, 0 è puro contorno. */
 export function personalOf(branch) {
+  if (branch.id === 'automazioni' || branch.kind === 'flow') return 0.85;
   if (branch.id === 'dieta' || branch.id === 'sport') return 0.7;
   if (branch.id === 'agenda') return 0.55;
   if (branch.id === 'compiti') return 0.2;

@@ -68,7 +68,8 @@ function layoutBranches(list, old) {
       const llon = lon + (Math.cos(a) * dist) / Math.max(0.35, Math.cos(llat));
       const before = prev?.leaves.find(l => l.id === c.id);
       const pos = { ...onSphere(llat, llon, r), lat: llat, lon: llon, rad: r };
-      return { id: c.id, label: String(c.label || ''), ...pos, path: surfaceTrace(hub, pos, r), heat: before ? before.heat : 0 };
+      const isAuto = !!(c.auto || c.kind === 'flow' || b.auto || b.kind === 'flow');
+      return { id: c.id, label: String(c.label || ''), ...pos, path: surfaceTrace(hub, pos, r), heat: before ? before.heat : 0, auto: isAuto };
     });
     const count = new Map();
     for (const c of subs) {
@@ -84,9 +85,10 @@ function layoutBranches(list, old) {
       const llon = host.lon + (Math.cos(a) * dist) / Math.max(0.35, Math.cos(llat));
       const before = prev?.leaves.find(l => l.id === c.id);
       const pos = { ...onSphere(llat, llon, r), lat: llat, lon: llon, rad: r };
-      leaves.push({ id: c.id, label: String(c.label || ''), ...pos, parent: host.id, path: surfaceTrace(host, pos, r), heat: before ? before.heat : 0, sub: true });
+      const isAuto = !!(c.auto || c.kind === 'flow' || host.auto);
+      leaves.push({ id: c.id, label: String(c.label || ''), ...pos, parent: host.id, path: surfaceTrace(host, pos, r), heat: before ? before.heat : 0, sub: true, auto: isAuto });
     }
-    return { id: b.id, label: String(b.label || b.id), kind: b.kind || 'module', ring: b.ring ?? 1, zone: i, dir: hub, hub, spoke, leaves, fade: prev?.fade ?? 0 };
+    return { id: b.id, label: String(b.label || b.id), kind: b.kind || 'module', auto: !!(b.auto || b.kind === 'flow'), ring: b.ring ?? 1, zone: i, dir: hub, hub, spoke, leaves, fade: prev?.fade ?? 0 };
   });
 }
 
@@ -111,7 +113,9 @@ export function createOrb() {
   // Umore: colora la rete e gli impulsi (non lo sfondo). Un cambio parte da Jarvis e si propaga verso
   // l'esterno come un'onda; le emozioni secondarie colorano alcune zone e una parte degli impulsi.
   const BASE = [60, 205, 80];
-  let tintFrom = BASE, tintTo = BASE, tintA = 0, wave = 9, parts = [];
+  // Colore distintivo per i nodi dei percorsi autonomi (flow): verde smeraldo se calmo, viola acceso se agitato.
+  const AUTO_CALM = [0, 255, 155], AUTO_AGITATED = [190, 65, 255];
+  let tintFrom = BASE, tintTo = BASE, tintA = 0, wave = 9, parts = [], tension = 0.15, agitation = 0;
   let fit = 1, rings = 3, maxRad = 1;                // la sfera si allontana quando i gusci crescono
   let angle = 0.4, tilt = 0.35, last = 0, spawn = 0, raf = 0, w = 0, hgt = 0, spinRing = 0;
 
@@ -206,6 +210,11 @@ export function createOrb() {
     }
 
     const compact = hgt < 170;
+    // Stato dei nodi autonomi (senza modello LLM): verde smeraldo quando è calmo, viola acceso quando è agitato.
+    const targetAgit = Math.min(1, Math.max(0, (tension - 0.18) * 1.6) + (mode === 'thinking' ? 0.65 : mode === 'listening' ? 0.25 : 0));
+    agitation += (targetAgit - agitation) * ease;
+    const autoRgb = mix(AUTO_CALM, AUTO_AGITATED, agitation);
+
     // Più gusci = sfera più grande: la camera si allontana piano per farla stare tutta.
     fit += (1 / Math.max(1, ...branches.map(b => b.hub.rad * 1.08), 1) - fit) * camEase;
     const R = Math.min(w, hgt) * 0.36 * cur.zoom * fit;
@@ -271,14 +280,15 @@ export function createOrb() {
     const order = [...branches].sort((a, b) => a.hub.d - b.hub.d);
     for (const b of order) {
       const hot = b.hub.heat;
-      b.rgb = zoneOf(b, tintAt(b.hub.rad));
+      b.rgb = b.auto ? autoRgb : zoneOf(b, tintAt(b.hub.rad));
       for (const l of b.leaves) {
+        const lRgb = (b.auto || l.auto) ? autoRgb : b.rgb;
         const lh = Math.max(l.heat, hot * 0.35);
         const depth = (b.hub.d + l.d) / 2;
-        trace(l.path, color(lh, ((0.12 + depth * 0.4) * cur.glow + lh * 0.5) * b.fade, b.rgb), 1 + lh * 1.3 + depth * 0.6);
+        trace(l.path, color(lh, ((0.12 + depth * 0.4) * cur.glow + lh * 0.5) * b.fade, lRgb), 1 + lh * 1.3 + depth * 0.6);
       }
       // La pista dal centro cambia colore man mano che l'onda la percorre.
-      const inner = tintAt(b.hub.rad * 0.4);
+      const inner = b.auto ? autoRgb : tintAt(b.hub.rad * 0.4);
       trace(b.spoke.slice(0, 2), color(hot, ((0.15 + b.hub.d * 0.4) * cur.glow + hot * 0.5) * b.fade, inner), 1.3 + hot * 1.5 + b.hub.d * 0.7);
       trace(b.spoke.slice(1), color(hot, ((0.15 + b.hub.d * 0.4) * cur.glow + hot * 0.5) * b.fade, b.rgb), 1.3 + hot * 1.5 + b.hub.d * 0.7);
     }
@@ -302,27 +312,47 @@ export function createOrb() {
     trails = nextTrails;
 
     // Nodi: foglie (cerchietti come nel disegno) e nodi dei rami, dal fondo verso il davanti.
+    // Ridimensionamento dinamico:
+    // 1) viewScale: scala in base alla dimensione della vista e quando la sfera si rimpicciolisce per la chat (compact)
+    // 2) densityScale: riduce tutti i nodi quando il grafo diventa molto denso
+    // 3) shellScale: i nodi dei gusci più interni (rad minore) sono più piccoli per non affollare il nucleo
+    const viewScale = Math.max(0.48, Math.min(1.1, Math.min(w, hgt) / 340)) * (compact ? 0.78 : 1);
+    const totalNodes = branches.reduce((n, b) => n + 1 + b.leaves.length, 0);
+    const densityScale = Math.max(0.45, 1 / Math.sqrt(1 + Math.max(0, totalNodes - 10) * 0.04));
+    const scale = Math.min(1.5, Math.sqrt(cur.zoom)) * viewScale * densityScale;
+
     ctx.textBaseline = 'middle';
-    const ring = (p, r, heat, alpha, fill, rgb = BASE) => {
-      ctx.lineWidth = 1.5;
+    const ring = (p, r, heat, alpha, fill, rgb = BASE, isAuto = false) => {
+      ctx.lineWidth = isAuto ? 1.8 : 1.5;
       ctx.strokeStyle = color(heat, alpha, rgb);
       const dark = rgb.map(v => Math.round(v * (0.12 + heat * 0.45)));
       ctx.fillStyle = `rgba(${dark.join(',')},${Math.min(1, alpha + 0.2)})`;
       ctx.beginPath(); ctx.arc(p.sx, p.sy, r, 0, Math.PI * 2); if (fill) ctx.fill(); ctx.stroke();
-      if (heat > 0.2) {
-        ctx.fillStyle = color(0, heat * 0.16 * alpha, rgb);
+      if (isAuto) {
+        // Anello esterno per far staccare visivamente i percorsi autonomi (verde calmo / viola agitato)
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = color(0.4, Math.min(0.85, alpha * 0.75), rgb);
+        ctx.beginPath(); ctx.arc(p.sx, p.sy, r * 1.55, 0, Math.PI * 2); ctx.stroke();
+      }
+      if (heat > 0.2 || isAuto) {
+        ctx.fillStyle = color(0, (heat * 0.16 + (isAuto ? 0.12 : 0)) * alpha, rgb);
         ctx.beginPath(); ctx.arc(p.sx, p.sy, r * 2.8, 0, Math.PI * 2); ctx.fill();
       }
     };
-    const scale = Math.min(1.5, Math.sqrt(cur.zoom));
     for (const b of order) {
+      const shellScale = Math.max(0.52, Math.min(1.08, 0.42 + b.hub.rad * 0.58));
+      const bScale = scale * shellScale;
       for (const l of b.leaves) {
-        ring(l, (2.6 + l.d * 2 + l.heat * 1.8) * scale, l.heat, ((0.35 + l.d * 0.6) * cur.glow + l.heat * 0.4) * b.fade, true, b.rgb);
+        const isAuto = !!(b.auto || l.auto);
+        const lRgb = isAuto ? autoRgb : b.rgb;
+        ring(l, (2.6 + l.d * 2 + l.heat * 1.8) * bScale, l.heat, ((0.35 + l.d * 0.6) * cur.glow + l.heat * 0.4) * b.fade, true, lRgb, isAuto);
         if (!compact && b.fade > 0.5 && (focused === b ? cur.zoom > 1.6 : (l.heat > 0.3 && l.d > 0.4))) {
           const right = l.sx >= cx;
           ctx.font = '12px system-ui, sans-serif';
           ctx.textAlign = right ? 'left' : 'right';
-          ctx.fillStyle = `rgba(200,255,190,${0.55 + l.heat * 0.45})`;
+          ctx.fillStyle = isAuto
+            ? `rgba(${autoRgb.map(Math.round).join(',')},${0.65 + l.heat * 0.35})`
+            : `rgba(200,255,190,${0.55 + l.heat * 0.45})`;
           // Il testo resta dentro lo schermo: si accorcia finché ci sta.
           const room = (right ? w - l.sx : l.sx) - 14;
           let text = clip(l.label, 38);
@@ -330,14 +360,16 @@ export function createOrb() {
           ctx.fillText(text, l.sx + (right ? 9 : -9), l.sy);
         }
       }
-      const h = b.hub, r = (4 + h.d * 2.8 + h.heat * 2) * scale * (focused === b ? 1.3 : 1);
-      ring(h, r, h.heat, ((0.5 + h.d * 0.5) * cur.glow + h.heat * 0.4) * b.fade, true, b.rgb);
+      const h = b.hub, r = (4 + h.d * 2.8 + h.heat * 2) * bScale * (focused === b ? 1.3 : 1);
+      ring(h, r, h.heat, ((0.5 + h.d * 0.5) * cur.glow + h.heat * 0.4) * b.fade, true, b.rgb, !!b.auto);
       ctx.fillStyle = color(h.heat, (0.6 + h.heat * 0.4) * b.fade, b.rgb);
       ctx.beginPath(); ctx.arc(h.sx, h.sy, r * 0.4, 0, Math.PI * 2); ctx.fill();
-      if (!compact && b.fade > 0.3 && (focused === b || (!focused && (h.d > (branches.length > 12 ? 0.7 : 0.35) || h.heat > 0.2)))) {
+      if (!compact && b.fade > 0.3 && (focused === b || (!focused && (h.d > (branches.length > 12 ? 0.7 : 0.35) || h.heat > 0.2 || b.auto)))) {
         ctx.font = focused === b ? '600 14px system-ui, sans-serif' : '600 11px system-ui, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillStyle = `rgba(190,255,180,${focused === b ? 0.95 : Math.min(1, (0.3 + h.d * 0.5 + h.heat * 0.5) * cur.glow) * b.fade})`;
+        ctx.fillStyle = b.auto
+          ? `rgba(${autoRgb.map(Math.round).join(',')},${focused === b ? 0.98 : Math.min(1, (0.45 + h.d * 0.5 + h.heat * 0.4) * cur.glow) * b.fade})`
+          : `rgba(190,255,180,${focused === b ? 0.95 : Math.min(1, (0.3 + h.d * 0.5 + h.heat * 0.5) * cur.glow) * b.fade})`;
         ctx.fillText(clip(b.label.toUpperCase(), 22), h.sx, h.sy - r - 9);
       }
     }
@@ -407,8 +439,8 @@ export function createOrb() {
   return {
     el, setState,
     /** Sfumatura dell'umore: colore [r,g,b] e intensità 0..1 (resta sempre una velatura, il verde domina). */
-    /** rgb = colore complessivo dell'umore, amount 0..1, list = [{rgb, w}] emozioni ordinate per peso. */
-    setTint(rgb, amount, list = []) {
+    /** rgb = colore complessivo dell'umore, amount 0..1, list = [{rgb, w}] emozioni ordinate per peso, tens = tensione 0..1. */
+    setTint(rgb, amount, list = [], tens = 0.15) {
       const next = rgb.map(v => Math.round(v));
       if (next.some((v, i) => Math.abs(v - tintTo[i]) > 6)) {
         tintFrom = mix(tintFrom, tintTo, Math.max(0, Math.min(1, wave / (maxRad + 0.3)))); // da dove era arrivata l'onda
@@ -416,6 +448,7 @@ export function createOrb() {
       }
       tintA = Math.max(0, Math.min(1, amount));
       parts = list.filter(p => p && p.rgb && p.w > 0);
+      tension = Number.isFinite(tens) ? tens : 0.15;
     },
     /** I rami da disegnare: [{ id, label, kind, children: [{ id, label }] }] (da /api/graph). Quelli vuoti non si vedono. */
     setGraph(list) {

@@ -1,6 +1,8 @@
 // Il "cervello": mette insieme contesto, router dei modelli, memoria e azioni.
 
 import * as phone from './phone.js';
+import * as flows from './flows.js';
+import * as agents from './agents.js';
 import { WEATHER_WORDS, weatherContext } from './weather.js';
 import * as web from './web.js';
 import * as router from './router.js';
@@ -15,7 +17,7 @@ import * as mood from './mood.js';
 import { today as todayOf, nowIso as nowIsoOf, nowHuman } from './clock.js';
 import { logEvent, kvSet, kvGet } from './db.js';
 
-const STICKY_TURNS = 3;
+const STICKY_TURNS = 5;
 // Richieste di cambiare cosa mostra l'app: solo allora il modello riceve le istruzioni per personalizzarla.
 const UI_WORDS = /(mostra|vedere|vedo|visualizz|schermat|riquadr|togli|nascond|in vista|personalizz|interfaccia|nell'app|sull'app|home|pagina|funzion|modific|riprogramm|riscriv|programm|pulsant|bottone|anteprima|approv|unisci|scarta)/i;
 // Richieste di usare il telefono: solo allora il modello riceve l'elenco delle app installate.
@@ -160,13 +162,27 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
   const userText = String(text || '').trim().slice(0, 4000) || (image ? 'Guarda questa foto.' : '');
   if (!userText) return { reply: 'Non ho sentito nulla, signore.', expectReply: true, card: '', photoRequest: null };
 
+  // Gatekeeper locale: per richieste semplici o flow già appresi evita sia contesto/ricerche sia chiamate LLM.
+  const localHit = flows.gatekeepChat(db, userText, { hasImage: !!image, hasPendingPhone: !!phone.pendingContext(db, ms) });
+  if (localHit) {
+    addMessage(db, sessionId, 'user', userText, nowIso, image ? { image: true } : null);
+    addMessage(db, sessionId, 'assistant', localHit.reply, nowIso, { model: 'local-gatekeeper' });
+    if (localHit.device.some(d => d.type === 'phone_task')) kvSet(db, 'phonePending', null);
+    const { touched, touchedLeaves } = agents.onLocalHit(db, userText, localHit, nowIso, ms);
+    return {
+      reply: localHit.reply, expectReply: false, card: '', visual: null, photoRequest: null,
+      model: 'local-gatekeeper', switched: false, actions: localHit.actions, device: localHit.device,
+      tier: 'local', layoutChanged: false, touched, touchedLeaves,
+    };
+  }
+
   const sess = session(db, sessionId);
   const diary = loadDiary(db);
 
   // Moduli attivi: richiamati dal testo oppure ancora "caldi" dai turni precedenti.
   const sticky = Object.entries(sess.modules).filter(([, ttl]) => ttl > 0).map(([k]) => k);
-  const lastAssistant = db.get("SELECT text FROM messages WHERE session = ? AND role = 'assistant' ORDER BY id DESC LIMIT 1", sessionId)?.text || '';
-  const probe = userText + ' ' + lastAssistant.slice(0, 300);
+  const recentMsgs = db.all('SELECT text FROM messages WHERE session = ? ORDER BY id DESC LIMIT 4', sessionId).map(r => r.text.slice(0, 250)).join(' ');
+  const probe = userText + ' ' + recentMsgs;
   const dietOn = !!image || DIET_KEYWORDS.test(probe) || sticky.includes('dieta') || !!diary.activeRecipeSession || !!diary.pendingPhotoRequest;
   const agendaOn = AGENDA_KEYWORDS.test(probe) || sticky.includes('agenda');
   const recalled = memory.recall(db, probe, { sticky });
@@ -265,7 +281,10 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
       done.device = [{ type: 'phone_task', goal: `${goal} (app: ${done.device[0].name})` }];
       done.applied.push('phone_task');
     }
-    if (done.device.some(d => d.type === 'phone_task')) kvSet(db, 'phonePending', null);
+    if (done.device.some(d => d.type === 'phone_task')) {
+      kvSet(db, 'phonePending', null);
+      agents.FlowAgent.prune(db);
+    }
     for (const j of done.jobs) deps.startJob?.(j);
     for (const c of done.code) {
       try {
