@@ -43,7 +43,7 @@ function applyMood(m) {
   const strength = Math.min(1, Math.max(...Object.keys(MOOD_RGB).map(k => Math.abs((m[k] || 0) - MOOD_BASE[k]))) * 2.5 + 0.15);
   // Il colore va sulla rete e sugli impulsi della sfera, non sullo sfondo.
   const parts = Object.keys(w).sort((a, b) => w[b] - w[a]).map(k => ({ rgb: MOOD_RGB[k], w: w[k] / sum }));
-  orb.setTint(rgb, strength, parts);
+  orb.setTint(rgb, strength, parts, m.tensione || 0);
 }
 
 // I rami della sfera sono i moduli di memoria di Jarvis (più dieta, agenda e compiti).

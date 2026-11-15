@@ -173,7 +173,7 @@ export async function handleApi(db, env, deps, request) {
         agenda: db.get('SELECT COUNT(*) AS n FROM reminders WHERE done = 0').n, compiti: db.get('SELECT COUNT(*) AS n FROM jobs').n };
       for (const b of g.branches) if (b.kind === 'module') sizes[b.id] = (b.entries || 0) + db.get('SELECT COUNT(*) AS n FROM topics WHERE module = ?', b.id).n;
       memory.addLevels(db, g.branches, sizes, ms);
-      return json({ ...g, last: kvGet(db, 'lastTouched', null) });
+      return json({ ...g, last: kvGet(db, 'lastTouched', null), mood: mood.current(db, ms) });
     }
     if (path === '/api/mind' && method === 'GET') {
       // Come Jarvis archivia e usa i contesti: dipartimenti, argomenti, riassunti, compiti.

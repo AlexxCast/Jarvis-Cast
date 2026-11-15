@@ -2,6 +2,7 @@
 
 import * as phone from './phone.js';
 import * as flows from './flows.js';
+import * as agents from './agents.js';
 import { WEATHER_WORDS, weatherContext } from './weather.js';
 import * as web from './web.js';
 import * as router from './router.js';
@@ -167,10 +168,11 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
     addMessage(db, sessionId, 'user', userText, nowIso, image ? { image: true } : null);
     addMessage(db, sessionId, 'assistant', localHit.reply, nowIso, { model: 'local-gatekeeper' });
     if (localHit.device.some(d => d.type === 'phone_task')) kvSet(db, 'phonePending', null);
+    const { touched, touchedLeaves } = agents.onLocalHit(db, userText, localHit, nowIso, ms);
     return {
       reply: localHit.reply, expectReply: false, card: '', visual: null, photoRequest: null,
       model: 'local-gatekeeper', switched: false, actions: localHit.actions, device: localHit.device,
-      tier: 'local', layoutChanged: false, touched: [], touchedLeaves: [],
+      tier: 'local', layoutChanged: false, touched, touchedLeaves,
     };
   }
 
@@ -279,7 +281,10 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
       done.device = [{ type: 'phone_task', goal: `${goal} (app: ${done.device[0].name})` }];
       done.applied.push('phone_task');
     }
-    if (done.device.some(d => d.type === 'phone_task')) kvSet(db, 'phonePending', null);
+    if (done.device.some(d => d.type === 'phone_task')) {
+      kvSet(db, 'phonePending', null);
+      agents.FlowAgent.prune(db);
+    }
     for (const j of done.jobs) deps.startJob?.(j);
     for (const c of done.code) {
       try {

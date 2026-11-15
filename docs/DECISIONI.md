@@ -178,6 +178,13 @@ Jarvis diceva "ho aggiornato il piano" o "chiamo Marcolino" senza farlo.
   - mostra la vera rete di Jarvis appiattita in 2D (`web/net2d.js`, `web/overlay.js`), la frase che sta dicendo e le grafiche;
   - non intercetta mai i tocchi;
   - il token passa nel frammento `#t=` dell'indirizzo, che non viene mai inviato in rete.
+- **Grafo 2D in ascolto in background (`web/net2d.js`, `web/overlay.js`):**
+  - Anello centrale cavo prominente per Jarvis, raggi dritti verso i nodi dei rami principali e archi orbitali concentrici (`arcTrace`) per le foglie, fedele allo schizzo disegnato a mano.
+- **Sfera 3D e nodi autonomi (`web/orb.js`, `server/src/memory.js`):**
+  - Ridimensionamento dinamico dei nodi: i nodi sui gusci più interni (`shellScale`), i grafi molto densi (`densityScale`) e la sfera rimpicciolita quando si apre la chat (`viewScale` / `compact`) riducono proporzionalmente il raggio di rami e foglie per non affollare il centro.
+  - Quando Jarvis impara un percorso autonomo (`phoneFlows`) che non richiede modelli LLM esterni, compare automaticamente il ramo/nodo nel grafo con flag `auto: true` (`kind: 'flow'`), colorato di **verde smeraldo acceso** (`[0, 255, 155]`) quando Jarvis è calmo e **viola vivido** (`[190, 65, 255]`) quando è agitato o sotto sforzo (`tensione` / `thinking`), con doppio anello per staccarsi visivamente dagli altri nodi.
+- **Sistema multi-agente locale (`server/src/agents.js`):**
+  - Quattro micro-agenti specializzati deterministici a costo zero che affiancano i modelli LLM: `GraphAgent` (ordinamento gusci, creazione/accensione nodi, pulizia duplicati), `MemoryAgent` (classificazione per ramo e cattura immediata dei "ricordati che..."), `FlowAgent` (ciclo di vita e potatura dei flow autonomi che falliscono), `UiAgent` (apertura sezioni e comandi diretti dell'app).
 - **Grafiche:** l'azione `show` supporta i tipi `bars, line, pie, list, text, svg, image` (`web/visual.js`).
 
 ### Voce

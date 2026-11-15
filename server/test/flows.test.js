@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as phone from '../src/phone.js';
 import * as flows from '../src/flows.js';
+import * as memory from '../src/memory.js';
+import * as agents from '../src/agents.js';
 import { handleChat } from '../src/brain.js';
 import { handleApi } from '../src/api.js';
 import { kvSet } from '../src/db.js';
@@ -140,4 +142,27 @@ test('api /api/flows: elenca ed elimina i flow appresi', async () => {
   assert.deepEqual(got.flows.map(f => f.id), [saved.id]);
   const del = await (await handleApi(db, ENV, d, new Request(`http://x/api/flows/${saved.id}`, { method: 'DELETE' }))).json();
   assert.equal(del.flows.length, 0);
+});
+
+test('grafo e multi-agente locale: i flow appresi creano il ramo autonomo e gli agenti locali ordinano memoria e grafo', () => {
+  const db = makeDb();
+  assert.equal(memory.graph(db).branches.some(b => b.id === 'automazioni'), false);
+  const saved = flows.saveFlowFromTrace(db, { goal: 'apri spotify', app: 'Spotify', params: [], steps: [{ do: 'open_app', app: 'Spotify' }, { do: 'done' }] }, 1000);
+  const g = memory.graph(db);
+  const autoBranch = g.branches.find(b => b.id === 'automazioni');
+  assert.ok(autoBranch);
+  assert.equal(autoBranch.auto, true);
+  assert.equal(autoBranch.kind, 'flow');
+  assert.equal(autoBranch.children[0].id, 'f:' + saved.id);
+  assert.equal(autoBranch.children[0].auto, true);
+
+  // MemoryAgent estrae ricordi espliciti ("ricordati che...") senza LLM
+  const extracted = agents.MemoryAgent.extractExplicit(db, 'Ricordati che sono allergico alle arachidi', 2000);
+  assert.equal(extracted.length, 1);
+  assert.equal(extracted[0].branch, 'salute');
+
+  // FlowAgent pota i flow che falliscono troppo
+  kvSet(db, 'phoneFlows', [{ ...saved, fails: 4, uses: 1 }]);
+  assert.equal(agents.FlowAgent.prune(db), 1);
+  assert.equal(flows.listFlows(db).length, 0);
 });

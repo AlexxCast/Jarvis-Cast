@@ -173,6 +173,7 @@ export function saveFlowFromTrace(db, trace, nowMs) {
     updatedAt: nowMs,
   };
   kvSet(db, FLOWS_KEY, [record, ...flows.filter(f => f.id !== id)].slice(0, MAX_FLOWS));
+  kvSet(db, 'lastTouched', { at: String(nowMs), touched: ['automazioni'], leaves: ['f:' + id] });
   return record;
 }
 
