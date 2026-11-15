@@ -341,7 +341,8 @@ export function createOrb() {
     };
     for (const b of order) {
       const shellScale = Math.max(0.52, Math.min(1.08, 0.42 + b.hub.rad * 0.58));
-      const bScale = scale * shellScale;
+      const leafCrowd = Math.max(0.55, 1 / Math.sqrt(1 + Math.max(0, b.leaves.length - 4) * 0.14));
+      const bScale = scale * shellScale * leafCrowd;
       for (const l of b.leaves) {
         const isAuto = !!(b.auto || l.auto);
         const lRgb = isAuto ? autoRgb : b.rgb;

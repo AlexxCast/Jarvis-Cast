@@ -13,7 +13,9 @@ function norm(s) {
   return String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
-/** Agente 1: cura della struttura e dell'ordine del grafo della mente. */
+const CLEAN_GRAPH_RE = /(?:(ridu[cz]\w*|sistem\w*|pulisc\w*|snellisc\w*|riordin\w*|sfoltisc\w*|compatt\w*|tropp[io]\s+grand\w*|tropp[io]\s+nod\w*)[\s\S]{0,40}\b(grafo|nod[io]|mappa|ram[oi]|dieta|sport|agenda|memoria)\b|\b(grafo|nod[io]|mappa|ram[oi])\b[\s\S]{0,40}\b(ridu[cz]\w*|sistem\w*|pulisc\w*|snellisc\w*|riordin\w*|sfoltisc\w*|compatt\w*|tropp[io]\s+grand\w*|tropp[io]\s+nod\w*))/i;
+
+/** Agente 1: cura della struttura, pulizia e ridimensionamento dei rami del grafo della mente. */
 export const GraphAgent = {
   /** Riconosce app installate citate nel messaggio per accenderle o collegarle nel grafo. */
   inferAppTopics(db, userText) {
@@ -31,6 +33,52 @@ export const GraphAgent = {
     return out.slice(0, 2);
   },
 
+  /** Rileva richieste dell'utente di ridurre, pulire o riordinare il grafo (o un ramo specifico come dieta). */
+  detectCleanCommand(userText) {
+    const t = String(userText || '').trim();
+    if (!CLEAN_GRAPH_RE.test(t)) return null;
+    let branch = 'all';
+    if (/\b(dieta|alimentazion\w*|pasti|cibo|calorie)\b/i.test(t)) branch = 'dieta';
+    else if (/\b(sport|allenament\w*|palestra|corsa)\b/i.test(t)) branch = 'sport';
+    else if (/\b(agenda|promemoria)\b/i.test(t)) branch = 'agenda';
+    else if (/\b(automazion\w*|flow)\b/i.test(t)) branch = 'automazioni';
+    const numMatch = /\b(\d{1,2})\s*nod[io]\b/i.exec(t);
+    const maxNodes = numMatch ? Math.max(2, Math.min(12, Number(numMatch[1]))) : 4;
+    return { branch, maxNodes };
+  },
+
+  /** Riduce e riordina i nodi di un ramo (o di tutto il grafo), salvando il tetto di nodi desiderato. */
+  cleanBranch(db, branch = 'all', maxNodes = 4) {
+    const cap = Math.max(2, Math.min(12, Number(maxNodes) || 4));
+    memory.tidyTopics(db);
+    const limits = kvGet(db, 'graphLimits', {});
+    const targets = branch && branch !== 'all'
+      ? [memory.slug(branch)]
+      : ['dieta', 'sport', ...db.all('SELECT DISTINCT module FROM topics').map(r => r.module)];
+
+    let removed = 0;
+    for (const mod of new Set(targets)) {
+      if (!mod) continue;
+      limits[mod] = cap;
+      const keepTopics = mod === 'dieta' ? Math.max(1, Math.min(2, cap - 3)) : cap;
+      const extra = db.all('SELECT name FROM topics WHERE module = ? ORDER BY uses DESC, last_used DESC LIMIT -1 OFFSET ?', mod, keepTopics);
+      for (const row of extra) {
+        db.run('DELETE FROM topics WHERE module = ? AND name = ?', mod, row.name);
+        removed++;
+      }
+      if (mod === 'dieta') {
+        const extraMem = db.all("SELECT id FROM memories WHERE module = 'dieta' ORDER BY uses DESC, id DESC LIMIT -1 OFFSET 2");
+        for (const row of extraMem) {
+          db.run('DELETE FROM memories WHERE id = ?', row.id);
+          removed++;
+        }
+      }
+    }
+    kvSet(db, 'graphLimits', limits);
+    db.run('DELETE FROM modules WHERE name NOT IN (SELECT DISTINCT module FROM memories) AND name NOT IN (SELECT DISTINCT module FROM topics)');
+    return { branch: branch || 'all', maxNodes: cap, removed };
+  },
+
   /** Mantiene pulita la topologia del grafo e restituisce i nodi autonomi attivi. */
   maintain(db) {
     memory.tidyTopics(db);
@@ -40,28 +88,38 @@ export const GraphAgent = {
 
 /** Agente 2: intercettazione locale di ricordi espliciti ("ricordati che...", "sono allergico a..."). */
 export const MemoryAgent = {
-  extractExplicit(userText) {
+  extractExplicit(dbOrText, maybeText, maybeNow) {
+    const hasDb = dbOrText && typeof dbOrText.run === 'function';
+    const userText = hasDb ? maybeText : dbOrText;
     const t = String(userText || '').trim();
     const m = /^(?:jarvis\s+)?(?:ricordati|ricorda|segna(?:ti)?|memorizza)\s+che\s+(.{6,240})$/i.exec(t);
-    if (!m) return null;
+    if (!m) return hasDb ? [] : null;
     const fact = m[1].trim().replace(/[.!]+$/, '') + '.';
     let mod = 'generale';
-    if (/\b(lavor\w*|ufficio|collegh\w*|riunion\w*|progett\w*|client\w*)\b/i.test(fact)) mod = 'lavoro';
+    if (/\b(allerg\w*|intolleran\w*|medic\w*|salute| Sintom\w*|dolor\w*|farmac\w*)\b/i.test(fact)) mod = 'salute';
+    else if (/\b(lavor\w*|ufficio|collegh\w*|riunion\w*|progett\w*|client\w*)\b/i.test(fact)) mod = 'lavoro';
     else if (/\b(auto|macchina|panda|tagliando|gomme|assicurazion\w*)\b/i.test(fact)) mod = 'auto';
     else if (/\b(viaggi\w*|volo|hotel|vacanz\w*)\b/i.test(fact)) mod = 'viaggi';
     else if (/\b(musica|canzon\w*|playlist|ascolt\w*)\b/i.test(fact)) mod = 'intrattenimento';
+    if (hasDb) {
+      const nowIso = typeof maybeNow === 'string' ? maybeNow : new Date(Number(maybeNow) || Date.now()).toISOString();
+      const id = memory.remember(dbOrText, { module: mod, text: fact }, nowIso);
+      return id ? [{ id, branch: mod, text: fact }] : [];
+    }
     return { module: mod, text: fact };
   },
 };
 
 /** Agente 3: gestione dei percorsi autonomi (flow) e illuminazione dei relativi nodi sulla sfera. */
 export const FlowAgent = {
-  /** Rimuove o declassa flow che hanno fallito troppe volte senza riuscire. */
+  /** Rimuove o declassa flow che hanno fallito troppe volte senza riuscire. Ritorna quanti ne ha rimossi. */
   prune(db) {
     const flows = kvGet(db, 'phoneFlows', []);
-    if (!flows.length) return;
+    if (!flows.length) return 0;
     const kept = flows.filter(f => !((f.fails || 0) >= 4 && (f.uses || 0) <= 1));
-    if (kept.length !== flows.length) kvSet(db, 'phoneFlows', kept);
+    const removed = flows.length - kept.length;
+    if (removed > 0) kvSet(db, 'phoneFlows', kept);
+    return removed;
   },
 
   /** Trova il nodo autonomo corrispondente a un obiettivo per accenderlo sulla sfera. */

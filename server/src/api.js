@@ -152,12 +152,22 @@ export async function handleApi(db, env, deps, request) {
       return json({ ok: true, state: statePayload(db, ms, tz, env) });
     }
     if (path === '/api/graph' && method === 'GET') {
-      // Foglie della dieta: gli ultimi pasti e allenamenti registrati.
+      // Foglie della dieta: per non affollare la sfera con decine di vecchi pasti,
+      // mostra solo l'ultimo pasto per fascia (colazione, pranzo, cena, spuntino) entro il tetto del ramo.
       memory.tidyTopics(db);
+      const limits = kvGet(db, 'graphLimits', {});
       const g = memory.graph(db), d = loadDiary(db);
-      const meals = (d.meals || []).slice(-16).reverse().map(m => ({ id: 'meal:' + m.id, label: `${m.date.slice(5)} ${m.meal}: ${m.description || (m.items || []).map(i => i.name).filter(Boolean).slice(0, 3).join(', ')}` }));
+      const dietCap = Math.max(2, Math.min(10, Number(limits.dieta) || 5));
+      const bySlot = new Map();
+      for (const m of [...(d.meals || [])].reverse()) {
+        const slot = String(m.meal || 'pasto').toLowerCase();
+        if (bySlot.has(slot)) continue;
+        const desc = m.description || (m.items || []).map(i => i.name).filter(Boolean).slice(0, 3).join(', ');
+        bySlot.set(slot, { id: 'meal:' + m.id, label: `${m.date.slice(5)} ${slot}: ${desc}` });
+        if (bySlot.size >= 4) break;
+      }
       const dieta = g.branches.find(b => b.id === 'dieta');
-      dieta.children = [...dieta.children, ...meals];
+      dieta.children = [...dieta.children.slice(0, Math.max(1, dietCap - bySlot.size)), ...bySlot.values()].slice(0, dietCap);
       // Sport: un nodo per ogni tipo di attività (corsa, palestra...), con quante volte e l'ultima data.
       const kinds = new Map();
       for (const a of d.activities || []) {
@@ -167,8 +177,12 @@ export async function handleApi(db, env, deps, request) {
         kinds.set(name, { n: k.n + 1, last: a.date > k.last ? a.date : k.last });
       }
       const sport = g.branches.find(b => b.id === 'sport');
-      sport.children = [...sport.children, ...[...kinds].sort((a, b) => b[1].n - a[1].n).slice(0, 16)
-        .map(([name, k]) => ({ id: 'sport:' + name, label: `${name} · ${k.n === 1 ? "una volta" : k.n + " volte"}, ultima ${k.last.slice(5)}` }))];
+      const sportCap = Math.max(2, Math.min(12, Number(limits.sport) || 8));
+      sport.children = [...sport.children, ...[...kinds].sort((a, b) => b[1].n - a[1].n).slice(0, sportCap)
+        .map(([name, k]) => ({ id: 'sport:' + name, label: `${name} · ${k.n === 1 ? "una volta" : k.n + " volte"}, ultima ${k.last.slice(5)}` }))].slice(0, sportCap);
+      for (const b of g.branches) {
+        if (b.id !== 'dieta' && b.id !== 'sport' && limits[b.id]) b.children = (b.children || []).slice(0, Math.max(2, Number(limits[b.id]) || 6));
+      }
       const sizes = { dieta: (d.meals || []).length, sport: (d.activities || []).length + (d.weights || []).length,
         agenda: db.get('SELECT COUNT(*) AS n FROM reminders WHERE done = 0').n, compiti: db.get('SELECT COUNT(*) AS n FROM jobs').n };
       for (const b of g.branches) if (b.kind === 'module') sizes[b.id] = (b.entries || 0) + db.get('SELECT COUNT(*) AS n FROM topics WHERE module = ?', b.id).n;

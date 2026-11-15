@@ -165,4 +165,16 @@ test('grafo e multi-agente locale: i flow appresi creano il ramo autonomo e gli 
   kvSet(db, 'phoneFlows', [{ ...saved, fails: 4, uses: 1 }]);
   assert.equal(agents.FlowAgent.prune(db), 1);
   assert.equal(flows.listFlows(db).length, 0);
+
+  // GraphAgent: scarta nodi generici/meta nella dieta e riduce il ramo quando l'utente lo chiede
+  memory.touchTopics(db, [
+    { area: 'dieta', topic: 'colazione' },
+    { area: 'dieta', topic: 'gestione nodi' },
+    { area: 'dieta', topic: 'intolleranza lattosio' },
+  ], '2026-11-15T10:00');
+  const dietBranch = memory.graph(db).branches.find(b => b.id === 'dieta');
+  assert.deepEqual(dietBranch.children.map(c => c.label), ['intolleranza lattosio']);
+  const cmd = agents.GraphAgent.detectCleanCommand('il grafo della dieta è troppo grande riducilo a 3 nodi');
+  assert.deepEqual(cmd, { branch: 'dieta', maxNodes: 3 });
+  agents.GraphAgent.cleanBranch(db, cmd.branch, cmd.maxNodes);
 });

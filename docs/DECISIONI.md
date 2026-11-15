@@ -178,10 +178,12 @@ Jarvis diceva "ho aggiornato il piano" o "chiamo Marcolino" senza farlo.
   - mostra la vera rete di Jarvis appiattita in 2D (`web/net2d.js`, `web/overlay.js`), la frase che sta dicendo e le grafiche;
   - non intercetta mai i tocchi;
   - il token passa nel frammento `#t=` dell'indirizzo, che non viene mai inviato in rete.
-- **Grafo 2D in ascolto in background (`web/net2d.js`, `web/overlay.js`):**
-  - Anello centrale cavo prominente per Jarvis, raggi dritti verso i nodi dei rami principali e archi orbitali concentrici (`arcTrace`) per le foglie, fedele allo schizzo disegnato a mano.
-- **Sfera 3D e nodi autonomi (`web/orb.js`, `server/src/memory.js`):**
-  - Ridimensionamento dinamico dei nodi: i nodi sui gusci più interni (`shellScale`), i grafi molto densi (`densityScale`) e la sfera rimpicciolita quando si apre la chat (`viewScale` / `compact`) riducono proporzionalmente il raggio di rami e foglie per non affollare il centro.
+- **Grafo 2D in ascolto in background (`web/net2d.js`, `web/overlay.js`, `web/overlay.html`):**
+  - Barra compatta (`56x56px` per il grafo, pillola snella fino a `260px` che si chiude a cerchio quando non c'è testo).
+  - Modalità `sketch: true`: anello centrale cavo prominente da cui partono raggi dritti di lunghezza sfalsata verso fino a 6 rami principali; da ciascun ramo partono solo 1-2 ampi archi orbitali concentrici o tratti angolati che terminano in un singolo cerchietto cavo (niente file di cerchietti sovrapposti).
+- **Sfera 3D, pulizia del ramo Dieta e nodi autonomi (`web/orb.js`, `server/src/memory.js`, `server/src/api.js`):**
+  - Il ramo `dieta` mostra solo l'ultimo pasto per fascia (`colazione`, `pranzo`, `cena`, `spuntino`, entro `graphLimits.dieta` predefinito a 5 nodi) e `tidyTopics` scarta automaticamente etichette generiche/meta (`pranzo`, `cena`, `spuntino`, `calorie`, `gestione nodi`, `modulo dieta`); l'azione `clean_graph` e `GraphAgent.detectCleanCommand` riducono davvero i nodi quando l'utente chiede di snellire o sistemare un ramo.
+  - Ridimensionamento dinamico dei nodi: i nodi sui gusci più interni (`shellScale`), i rami affollati (`leafCrowd`), i grafi molto densi (`densityScale`) e la sfera rimpicciolita quando si apre la chat (`viewScale` / `compact`) riducono proporzionalmente il raggio di rami e foglie per non affollare il centro.
   - Quando Jarvis impara un percorso autonomo (`phoneFlows`) che non richiede modelli LLM esterni, compare automaticamente il ramo/nodo nel grafo con flag `auto: true` (`kind: 'flow'`), colorato di **verde smeraldo acceso** (`[0, 255, 155]`) quando Jarvis è calmo e **viola vivido** (`[190, 65, 255]`) quando è agitato o sotto sforzo (`tensione` / `thinking`), con doppio anello per staccarsi visivamente dagli altri nodi.
 - **Sistema multi-agente locale (`server/src/agents.js`):**
   - Quattro micro-agenti specializzati deterministici a costo zero che affiancano i modelli LLM: `GraphAgent` (ordinamento gusci, creazione/accensione nodi, pulizia duplicati), `MemoryAgent` (classificazione per ramo e cattura immediata dei "ricordati che..."), `FlowAgent` (ciclo di vita e potatura dei flow autonomi che falliscono), `UiAgent` (apertura sezioni e comandi diretti dell'app).

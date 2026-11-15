@@ -100,6 +100,7 @@ export function applyActions(db, actions, ctx) {
         if (!photo && a.type !== 'clear_recipe_session' && JSON.stringify(diary) === before) { out.failed.push(a.type); continue; }
       } else if (a.type === 'remember') { if (!memory.remember(db, a, ctx.nowIso)) { out.failed.push(a.type); continue; } }
       else if (a.type === 'forget') memory.forget(db, a.id);
+      else if (a.type === 'clean_graph') agents.GraphAgent.cleanBranch(db, a.branch || 'all', a.max_nodes);
       else if (a.type === 'add_reminder') { if (!agenda.addReminder(db, a, ctx.ms, ctx.tz)) { out.failed.push(a.type); continue; } }
       else if (a.type === 'done_reminder') agenda.doneReminder(db, a.id);
       else if (coder.CODE_ACTIONS.has(a.type)) out.code.push({ type: a.type, id: String(a.id || ''), request: String(a.request || '').trim().slice(0, 2000) });
@@ -161,6 +162,11 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
   const nowIso = nowIsoOf(ms, tz);
   const userText = String(text || '').trim().slice(0, 4000) || (image ? 'Guarda questa foto.' : '');
   if (!userText) return { reply: 'Non ho sentito nulla, signore.', expectReply: true, card: '', photoRequest: null };
+
+  // Se l'utente chiede di ridurre, sistemare o pulire il grafo (es. "il grafo della dieta è troppo grande, riducilo"),
+  // l'agente locale GraphAgent lo compatta subito, così l'operazione avviene davvero anche se il modello non emette clean_graph.
+  const cleanCmd = agents.GraphAgent.detectCleanCommand(userText);
+  if (cleanCmd) agents.GraphAgent.cleanBranch(db, cleanCmd.branch, cleanCmd.maxNodes);
 
   // Gatekeeper locale: per richieste semplici o flow già appresi evita sia contesto/ricerche sia chiamate LLM.
   const localHit = flows.gatekeepChat(db, userText, { hasImage: !!image, hasPendingPhone: !!phone.pendingContext(db, ms) });
@@ -238,6 +244,7 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
       parsed.actions = parsed.actions.filter(a => a.type !== 'web_search' && a.type !== 'read_url');
     }
     let done = applyActions(db, parsed.actions, { today, nowIso, ms, tz, hadPhoto: !!image });
+    if (cleanCmd && !done.applied.includes('clean_graph')) done.applied.push('clean_graph');
     // Dice di averlo fatto ma nessuna azione è andata a buon fine: una seconda richiesta per avere le azioni vere.
     const nothing = (d) => !d.applied.length && !d.device.length && !d.jobs.length && !d.code.length;
     // Le richieste da eseguire sul telefono (chiamate, app) hanno la loro rete di sicurezza più sotto.
@@ -264,7 +271,7 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
       logEvent(db, nowIso, 'error', `azioni non riuscite: ${done.failed.join(', ')}`);
     }
     remembered = parsed.actions.filter(a => a && a.type === 'remember').map(a => memory.slug(a.module) || 'generale');
-    topicHits = memory.touchTopics(db, parsed.topics, nowIso);
+    topicHits = cleanCmd ? { modules: cleanCmd.branch !== 'all' ? [cleanCmd.branch] : [], leaves: [] } : memory.touchTopics(db, parsed.topics, nowIso);
     if (parsed.mood) mood.feel(db, parsed.mood.emozione, parsed.mood.intensita, ms);
     // Ha promesso di farlo ma non ha messo l'azione: la aggiungiamo noi, così non resta una promessa a vuoto.
     const goal = userText.replace(/^\W*(ehi|ciao|ok)?\W*jarvis\W*/i, '').slice(0, 1000);

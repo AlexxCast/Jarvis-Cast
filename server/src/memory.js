@@ -98,8 +98,21 @@ function findTopic(db, mod, label) {
   return null;
 }
 
+const META_NOISE = /\b(gestione\s+nodi|gestione\s+promemori\w*|gestione\s+graf\w*|nodi\s+del|grafo\s+dell|modulo\s+dieta|riepilogo\s+pasti|ridu[cz]ione\s+nodi|sistem\w+\s+nodi|pulizia\s+nodi)\b/i;
+const DIET_NOISE = /^(dieta|pasto|pasti|colazione|pranzo|cena|spuntino|spuntini|spuntino\s+pomeridiano|spuntino\s+mattutino|snack|calorie|kcal|alimentazione|cibo|nutrizione|riepilogo|menu)$/i;
+
+/** Vero se l'etichetta è un termine generico o meta-comando che non deve diventare un nodo nel grafo. */
+export function isNoiseTopic(mod, label) {
+  const s = String(label || '').trim();
+  if (!s) return true;
+  if (META_NOISE.test(s)) return true;
+  if (mod === 'dieta' && DIET_NOISE.test(s)) return true;
+  return false;
+}
+
 function upsertTopic(db, mod, label, nowIso) {
   label = appLabel(db, label);
+  if (isNoiseTopic(mod, label)) return null;
   const existing = findTopic(db, mod, label);
   if (existing) { db.run('UPDATE topics SET uses = uses + 1, last_used = ? WHERE module = ? AND name = ?', nowIso, mod, existing); return existing; }
   const name = slug(label);
@@ -130,13 +143,21 @@ export function touchTopics(db, topics, nowIso) {
   return out;
 }
 
-/** Riunisce i doppioni già salvati: tiene il nodo più usato, somma gli usi, sposta i figli. */
+/** Riunisce i doppioni già salvati e rimuove i nodi ridondanti/meta: tiene il nodo più usato, somma gli usi, sposta i figli. */
 export function tidyTopics(db) {
   let merged = 0;
+  // Rimuove eventuali meta-ricordi ridondanti salvati per errore nel modulo dieta.
+  db.run("DELETE FROM memories WHERE module = 'dieta' AND (lower(text) LIKE 'il modulo dieta%' OR lower(text) LIKE 'gestione nodi%')");
   for (const { module: mod } of db.all('SELECT DISTINCT module FROM topics')) {
     const list = db.all('SELECT name, label, uses FROM topics WHERE module = ? ORDER BY uses DESC, last_used DESC', mod);
     const kept = [];
     for (const t of list) {
+      if (isNoiseTopic(mod, t.label)) {
+        db.run("UPDATE topics SET parent = '' WHERE module = ? AND parent = ?", mod, t.name);
+        db.run('DELETE FROM topics WHERE module = ? AND name = ?', mod, t.name);
+        merged++;
+        continue;
+      }
       // Prima riporta i nomi storpiati di app al nome vero, poi cerca un nodo uguale.
       const fixed = appLabel(db, t.label);
       if (fixed !== t.label) { db.run('UPDATE topics SET label = ? WHERE module = ? AND name = ?', fixed, mod, t.name); t.label = fixed; }
