@@ -242,12 +242,17 @@ Jarvis diceva "ho aggiornato il piano" o "chiamo Marcolino" senza farlo.
 - Su richiesta, Jarvis modifica **solo `web/`** tramite PR su GitHub.
 - Alessio vuole **sempre un'anteprima visiva vera** (`/preview/<id>/`) prima di approvare, mai solo testo.
 
+### Autorizzazione con password a telefono spento/bloccato (15/11/2026)
+
+- **Sostituito il riconoscimento biometrico della voce con una password vocale/PIN:** in Impostazioni l'utente imposta una password o PIN (`Settings.phonePassword`).
+- **Richiesta solo a telefono spento o bloccato:** quando lo schermo è già acceso e sbloccato (`!wakeFromScreenOff && !VoiceId.isScreenOffOrLocked`), Jarvis esegue subito le azioni sul telefono (`phone_task`, `call`, `open_app`) senza chiedere autorizzazione. Solo se il comando è partito a schermo spento o telefono bloccato Jarvis chiede di pronunciare la password prima di procedere (oppure l'accetta direttamente se inclusa nella frase iniziale).
+
 ---
 
-## 5. Stato attuale (14/11/2026)
+## 5. Stato attuale (15/11/2026)
 
-- **Pubblicato:** tutto fino alla PR #25.
-- **APK:** l'ultimo è il 2.13.
+- **Pubblicato:** tutto fino alla versione 2.15 (`jarvis-shell-v17`).
+- **APK:** l'ultimo è il 2.15 (`versionCode = 17`).
 - **Mai verificato da noi sul telefono vero:**
   - l'Accessibilità sbloccata;
   - l'affidabilità della parola chiave;

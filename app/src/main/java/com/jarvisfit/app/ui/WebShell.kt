@@ -88,6 +88,7 @@ class JarvisBridge(
         put("overlay", Settings.overlay)
         put("overlayAllowed", com.jarvisfit.app.device.Overlay.allowed(activity))
         put("voiceEnrolled", com.jarvisfit.app.voice.VoiceId.enrolled)
+        put("hasPassword", Settings.phonePassword.isNotBlank())
         put("voiceLock", Settings.voiceLock)
         put("voiceStrictness", Settings.voiceStrictness)
         put("voicePhrase", com.jarvisfit.app.voice.VoiceId.PHRASE)
@@ -184,6 +185,16 @@ class JarvisBridge(
 
     @JavascriptInterface
     fun openOverlaySettings() = activity.runOnUiThread { com.jarvisfit.app.device.Overlay.openSettings(activity) }
+
+    @JavascriptInterface
+    fun setPhonePassword(pwd: String): Boolean {
+        val clean = pwd.trim()
+        if (clean.isEmpty()) return false
+        Settings.phonePassword = clean
+        Settings.voiceLock = true
+        com.jarvisfit.app.voice.VoiceId.trustNow()
+        return true
+    }
 
     @JavascriptInterface
     fun setVoiceLock(on: Boolean) { Settings.voiceLock = on && com.jarvisfit.app.voice.VoiceId.enrolled }

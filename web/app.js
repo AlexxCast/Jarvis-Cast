@@ -699,18 +699,24 @@ function viewImpostazioni() {
           : h('div', { class: 'row wrap' },
             h('p', { class: 'grow' }, 'Per vedere Jarvis e le sue grafiche sopra le altre app, senza che si apra la sua app, attivi "Mostra sopra altre app".'),
             h('button', { class: 'btn', onclick: () => { nativeCall('openOverlaySettings'); setTimeout(render, 3000); } }, 'Attiva'))) : null,
-      typeof native.enrollVoice === 'function' ? h('div', {},
-        h('div', { class: 'small' }, 'Riconoscimento della sua voce'),
+      typeof native.setPhonePassword === 'function' || typeof native.enrollVoice === 'function' ? h('div', {},
+        h('div', { class: 'small' }, 'Password per azioni a telefono spento'),
         h('p', { class: 'muted' }, cfg.voiceEnrolled
-          ? `Prima di usare il telefono o telefonare, Jarvis chiede di dire "${cfg.voicePhrase}" e controlla che sia la sua voce. Dopo un riconoscimento non lo richiede per 10 minuti.`
-          : `Registri la sua voce (tre volte la frase "${cfg.voicePhrase}"): così Jarvis usa il telefono solo se a chiederlo è lei. L'impronta resta sul telefono.`),
-        store.voiceEnroll ? h('p', { class: 'small' }, store.voiceEnroll) : null,
+          ? 'A schermo acceso e sbloccato Jarvis esegue subito i comandi sul telefono senza chiedere conferme. Quando il telefono è spento o bloccato, Jarvis chiede di dire la password impostata (valida per 10 minuti).'
+          : 'Imposti una password o un PIN vocale (es. "1234" o una parola segreta): Jarvis la chiederà solo quando il telefono è a schermo spento o bloccato prima di aprire o usare app e fare chiamate.'),
         h('div', { class: 'row wrap' },
-          h('button', { class: 'btn' + (cfg.voiceEnrolled ? '' : ' primary'), disabled: !!store.voiceEnroll, onclick: () => { store.voiceEnroll = 'Preparo il microfono…'; nativeCall('enrollVoice'); render(); } }, cfg.voiceEnrolled ? 'Registra di nuovo' : 'Registra la mia voce'),
-          cfg.voiceEnrolled ? h('button', { class: 'btn ghost danger', onclick: () => { nativeCall('forgetVoice'); setTimeout(render, 200); } }, 'Cancella la voce') : null),
-        cfg.voiceEnrolled ? toggle('Chiedi la mia voce prima di usare il telefono', 'voiceLock', 'setVoiceLock') : null,
-        cfg.voiceEnrolled ? h('div', { class: 'row wrap' }, [['Permissivo', 0.2], ['Normale', 0.5], ['Severo', 0.85]].map(([label, v]) =>
-          h('button', { class: 'btn' + (Math.abs((cfg.voiceStrictness ?? 0.5) - v) < 0.2 ? ' primary' : ''), onclick: () => { nativeCall('setVoiceStrictness', v); setTimeout(render, 200); } }, label))) : null) : null,
+          h('input', { id: 'phonePwdInput', type: 'password', placeholder: cfg.voiceEnrolled ? 'Nuova password o PIN vocale…' : 'Imposta password o PIN vocale…', style: 'flex:1;min-width:180px' }),
+          h('button', { class: 'btn primary', onclick: () => {
+            const el = document.getElementById('phonePwdInput');
+            const val = (el && el.value || '').trim();
+            if (!val) { toast('Inserisci una password o un PIN.'); return; }
+            nativeCall('setPhonePassword', val);
+            if (el) el.value = '';
+            toast('Password salvata (richiesta solo a telefono spento).');
+            setTimeout(render, 200);
+          } }, cfg.voiceEnrolled ? 'Cambia password' : 'Salva password'),
+          cfg.voiceEnrolled ? h('button', { class: 'btn ghost danger', onclick: () => { nativeCall('forgetVoice'); toast('Password rimossa.'); setTimeout(render, 200); } }, 'Rimuovi password') : null),
+        cfg.voiceEnrolled ? toggle('Chiedi la password per usare il telefono quando è spento o bloccato', 'voiceLock', 'setVoiceLock') : null) : null,
       typeof native.callPermission === 'function' ? h('div', { class: 'row wrap' },
         h('p', { class: 'grow' }, nativeCall('callPermission') === true ? 'Jarvis può telefonare ai contatti della rubrica ("chiama Marco").' : 'Per le telefonate ("chiama Marco") Jarvis ha bisogno dei permessi Contatti e Telefono.'),
         nativeCall('callPermission') === true ? null : h('button', { class: 'btn', onclick: () => { nativeCall('requestCallPermission'); setTimeout(render, 2500); } }, 'Concedi')) : null,

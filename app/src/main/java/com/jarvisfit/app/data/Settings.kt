@@ -60,7 +60,10 @@ object Settings {
         get() = prefs.getBoolean("mic_guard", true)
         set(v) = prefs.edit().putBoolean("mic_guard", v).apply()
 
-    // Riconoscimento della voce: impronta registrata (solo numeri, resta sul telefono) e blocco attivo.
+    // Autorizzazione a telefono spento/bloccato tramite password (resta solo sul telefono).
+    var phonePassword: String
+        get() = prefs.getString("phone_password", "") ?: ""
+        set(v) = prefs.edit().putString("phone_password", v.trim()).apply()
     var voiceModel: String
         get() = prefs.getString("voice_model", "") ?: ""
         set(v) = prefs.edit().putString("voice_model", v).apply()

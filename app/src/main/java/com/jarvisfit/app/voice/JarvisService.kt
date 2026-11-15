@@ -502,6 +502,9 @@ class JarvisService : LifecycleService(), SensorEventListener {
         }, 6_000)
     }
 
+    /** True se quando l'utente ha chiamato Jarvis lo schermo del telefono era spento o bloccato. */
+    private var wakeFromScreenOff = false
+
     private fun onWakeWordDetected(remainingCommand: String, openApp: Boolean = true) {
         if (busy) return
         // Ferma immediatamente qualsiasi discorso del TTS per non ascoltare se stesso
@@ -509,6 +512,10 @@ class JarvisService : LifecycleService(), SensorEventListener {
         busy = true
         inConversationMode = true
         lastConversationActivityTime = System.currentTimeMillis()
+
+        // 0. Ricorda se il telefono era a schermo spento o bloccato PRIMA di risvegliare lo schermo:
+        // così Jarvis chiede la password solo a telefono spento/bloccato, e mai a telefono già acceso e sbloccato.
+        wakeFromScreenOff = VoiceId.isScreenOffOrLocked(this)
 
         // 1. Risveglia lo schermo del telefono se spento
         runCatching {
@@ -684,6 +691,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
     private fun backToWaiting() {
         busy = false
         inConversationMode = false
+        wakeFromScreenOff = false
         if (yielded) return
         main.postDelayed({ if (Settings.listeningEnabled && !yielded) startWakeWord() }, 300)
     }
@@ -711,11 +719,12 @@ class JarvisService : LifecycleService(), SensorEventListener {
             if (reply.photoRequest != null) notifyPhotoRequest(reply.photoRequest)
             // "Apri Spotify": a schermo spento o con Jarvis in secondo piano Android può rifiutare l'avvio.
             var callWho: String? = null
-            // Usare il telefono o telefonare: prima controlla che a parlare sia il proprietario.
-            val sensitive = reply.device.any { it.first == "phone_task" || it.first == "call" }
-            val allowed = !sensitive || !VoiceId.needed() || VoiceId.gate(this@JarvisService)
+            // Usare il telefono, aprire app o telefonare: chiede la password SOLO se il telefono era spento o bloccato.
+            val sensitive = reply.device.any { it.first == "phone_task" || it.first == "call" || it.first == "open_app" }
+            val allowed = !sensitive || !VoiceId.needed(this@JarvisService, wakeFromScreenOff) || VoiceId.gate(this@JarvisService, wakeFromScreenOff, text)
+            if (allowed && sensitive) wakeFromScreenOff = false
             for ((type, value) in reply.device) {
-                if (!allowed && (type == "phone_task" || type == "call")) continue
+                if (!allowed && (type == "phone_task" || type == "call" || type == "open_app")) continue
                 when (type) {
                     "call" -> callWho = value // parte dopo che Jarvis ha finito di parlare
                     "visual" -> Overlay.showVisual(this@JarvisService, value)
