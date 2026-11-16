@@ -182,12 +182,29 @@ def api_call(cfg: dict, method: str, path: str, payload: dict = None) -> dict:
         base = "https://" + base
     url = f"{base}/api{path}"
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
-    headers = {"Authorization": f"Bearer {token}", "Accept": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/json",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+    }
     if data is not None:
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    with urllib.request.urlopen(req, timeout=15) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        body_txt = ""
+        try:
+            body_txt = e.read().decode("utf-8", errors="ignore")
+            err_obj = json.loads(body_txt)
+            if err_obj.get("error"):
+                raise RuntimeError(f"{err_obj['error']} (HTTP {e.code})")
+        except RuntimeError:
+            raise
+        except Exception:
+            pass
+        raise RuntimeError(f"HTTP {e.code}: {e.reason}")
 
 
 def open_jarvis_webapp(cfg: dict) -> None:
@@ -215,7 +232,7 @@ class JarvisDesktopApp:
         self.online = False
 
         self.root.title("JARVIS • Desktop System Manager")
-        self.root.geometry("560x500")
+        self.root.geometry("650x520")
         self.root.configure(bg="#050f08")
 
         # Header
@@ -282,7 +299,35 @@ class JarvisDesktopApp:
         self.cfg["server_url"] = self.url_var.get().strip().rstrip("/")
         self.cfg["server_token"] = self.tok_var.get().strip()
         save_config(self.cfg)
-        self.log("Configurazione salvata. Sincronizzazione con Jarvis Cloud in corso...")
+        self.log("Configurazione salvata. Verifica connessione a Jarvis Cloud...")
+        threading.Thread(target=self.ping_once, daemon=True).start()
+
+    def ping_once(self) -> None:
+        try:
+            pc_name = f"PC {socket.gethostname()}"
+            plat = f"{platform.system()} {platform.release()}"
+            res = api_call(
+                self.cfg,
+                "POST",
+                "/devices/heartbeat",
+                {
+                    "id": f"desktop-{socket.gethostname().lower()}",
+                    "kind": "desktop",
+                    "name": pc_name,
+                    "platform": plat,
+                    "metrics": get_pc_metrics(),
+                    "apps": ["Chrome", "Edge", "VS Code", "Esplora File", "PowerShell", "Blocco Note", "Calcolatrice", "Spotify"],
+                },
+            )
+            self.online = True
+            self.root.after(0, lambda: self.status_lbl.configure(text="● CONNESSO A JARVIS CLOUD", fg="#39ff14"))
+            self.log("Connesso con successo a Jarvis Cloud! Il PC è online.")
+            for cmd in res.get("commands") or []:
+                execute_pc_command(cmd, self.log)
+        except Exception as e:
+            self.online = False
+            self.root.after(0, lambda: self.status_lbl.configure(text="○ Errore connessione", fg="#ef4444"))
+            self.log(f"Connessione non riuscita: {e}")
 
     def send_command(self) -> None:
         text = self.cmd_var.get().strip()
