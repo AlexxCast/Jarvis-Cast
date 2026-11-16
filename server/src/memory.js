@@ -253,7 +253,9 @@ export function graph(db, { perModule = 24 } = {}) {
   for (const m of listModules(db)) {
     const topics = db.all('SELECT name, label, parent FROM topics WHERE module = ? ORDER BY uses DESC, last_used DESC LIMIT ?', m.name, perModule)
       .map(t => ({ id: `t:${m.name}/${t.name}`, label: t.label, kind: 'topic', ...(t.parent ? { parent: `t:${m.name}/${t.parent}` } : {}) }));
-    const rows = db.all('SELECT id, text FROM memories WHERE module = ? ORDER BY uses DESC, id DESC LIMIT ?', m.name, Math.max(2, perModule - topics.length))
+    const memCap = Math.max(2, Math.min(6, perModule - topics.length));
+    const rows = db.all('SELECT id, text FROM memories WHERE module = ? ORDER BY uses DESC, id DESC LIMIT ?', m.name, memCap)
+      .filter(r => !topics.some(t => sameTopic(t.label, r.text)))
       .map(r => ({ id: 'm:' + r.id, label: r.text }));
     const children = [...topics, ...rows].slice(0, perModule + 4);
     // Un'area con lo stesso nome di un ramo fisso (es. "dieta") si aggiunge a quel ramo.

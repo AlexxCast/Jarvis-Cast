@@ -545,12 +545,59 @@ const jobTag = (j) => h('span', { class: 'tag ' + ({ done: 'ok', failed: 'bad' }
 
 // ------------------------------------------------------------------ altro
 
-const SUBS = [['storico', 'Storico'], ['mente', 'Mente'], ['memoria', 'Memoria'], ['modelli', 'Modelli'], ['profilo', 'Profilo'], ['impostazioni', 'Impostazioni']];
+const SUBS = [['storico', 'Storico'], ['mente', 'Mente'], ['dispositivi', 'Dispositivi'], ['memoria', 'Memoria'], ['modelli', 'Modelli'], ['profilo', 'Profilo'], ['impostazioni', 'Impostazioni']];
 
 function viewAltro() {
   const bar = h('div', { class: 'row wrap' }, SUBS.map(([id, label]) => h('button', { class: 'btn' + (store.sub === id ? ' primary' : ''), 'aria-pressed': String(store.sub === id), onclick: () => go('altro', id) }, label)));
-  const body = { storico: viewStorico, mente: viewMente, memoria: viewMemoria, modelli: viewModelli, profilo: viewProfilo, impostazioni: viewImpostazioni }[store.sub]();
+  const body = { storico: viewStorico, mente: viewMente, dispositivi: viewDispositivi, memoria: viewMemoria, modelli: viewModelli, profilo: viewProfilo, impostazioni: viewImpostazioni }[store.sub]();
   return [bar, ...body];
+}
+
+function viewDispositivi() {
+  if (!store.devices) { api('GET', '/devices').then(d => { store.devices = d; render(); }).catch(e => toast(e.message)); return [h('p', { class: 'empty' }, 'Carico i dispositivi connessi…')]; }
+  const devs = store.devices.devices || [];
+  const hist = store.devices.history || [];
+  const reload = async () => { store.devices = await api('GET', '/devices'); render(); };
+  const sendPc = guard(async (kind, target) => {
+    await api('POST', '/devices/command', { targetDevice: 'desktop', kind, target });
+    toast(`Comando inviato al PC: ${target}`);
+    await reload();
+  });
+  const customApp = h('input', { placeholder: 'Programma o URL da aprire sul PC (es. Chrome, code, https://...)', style: 'flex:1;min-width:190px' });
+  return [
+    h('div', { class: 'card' },
+      h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Manager Multi-Dispositivo (Jarvis Core)'), h('button', { class: 'btn', onclick: guard(reload) }, 'Aggiorna')),
+      h('p', { class: 'muted small' }, 'Controlla da qui o con la voce ("Jarvis apri Chrome sul PC", "metti in pausa sul PC") sia lo smartphone sia il computer desktop.'),
+      devs.length ? h('div', { class: 'list' }, devs.map(d => {
+        const m = d.metrics || {};
+        return h('div', { class: 'item' },
+          h('div', { class: 'grow' },
+            h('div', {}, h('b', {}, d.name), ' · ', h('span', { class: 'muted small' }, d.platform || d.kind)),
+            h('div', { class: 'muted small num' }, [
+              m.cpu ? `CPU ${Math.round(m.cpu)}%` : '',
+              m.ram ? `RAM ${Math.round(m.ram)}%` : '',
+              m.battery != null ? `Batteria ${Math.round(m.battery)}%` : '',
+              m.activeWindow ? `Attivo: ${m.activeWindow}` : '',
+            ].filter(Boolean).join(' · ') || 'Pronto')),
+          h('span', { class: 'tag ' + (d.online ? 'ok' : 'warn') }, d.online ? '● Online' : '○ Offline'));
+      })) : h('p', { class: 'empty' }, 'Nessun PC Desktop ancora connesso. Avvia desktop/Avvia_Jarvis_PC.bat sul computer per collegarlo.')),
+    h('div', { class: 'card' }, h('h2', {}, 'Controllo rapido PC Desktop'),
+      h('div', { class: 'row wrap' },
+        [['Apri Chrome', 'open_app', 'chrome'], ['Apri VS Code', 'open_app', 'code'], ['Esplora File', 'open_app', 'explorer'], ['Terminale', 'open_app', 'powershell'], ['Play / Pausa', 'system', 'play_pause'], ['Volume +', 'system', 'vol_up'], ['Volume -', 'system', 'vol_down'], ['Blocca PC', 'system', 'lock']].map(([lbl, k, t]) =>
+          h('button', { class: 'btn', onclick: () => sendPc(k, t) }, lbl))),
+      h('div', { class: 'row wrap', style: 'margin-top:8px' },
+        customApp,
+        h('button', { class: 'btn primary', onclick: () => {
+          const v = customApp.value.trim();
+          if (!v) return;
+          sendPc(/^https?:\/\//i.test(v) ? 'open_url' : 'open_app', v);
+          customApp.value = '';
+        } }, 'Esegui su PC'))),
+    hist.length ? h('div', { class: 'card' }, h('h2', {}, 'Ultimi comandi multi-dispositivo'),
+      h('div', { class: 'list' }, hist.slice(0, 8).map(c => h('div', { class: 'item' },
+        h('span', { class: 'tag' }, c.targetDevice),
+        h('span', { class: 'grow small' }, `${c.kind}: ${c.target}`))))) : null,
+  ];
 }
 
 function viewStorico() {
@@ -710,23 +757,20 @@ function viewImpostazioni() {
             h('p', { class: 'grow' }, 'Per vedere Jarvis e le sue grafiche sopra le altre app, senza che si apra la sua app, attivi "Mostra sopra altre app".'),
             h('button', { class: 'btn', onclick: () => { nativeCall('openOverlaySettings'); setTimeout(render, 3000); } }, 'Attiva'))) : null,
       typeof native.setPhonePassword === 'function' || typeof native.enrollVoice === 'function' ? h('div', {},
-        h('div', { class: 'small' }, 'Password per azioni a telefono spento'),
-        h('p', { class: 'muted' }, cfg.voiceEnrolled
-          ? 'A schermo acceso e sbloccato Jarvis esegue subito i comandi sul telefono senza chiedere conferme. Quando il telefono è spento o bloccato, Jarvis chiede di dire la password impostata (valida per 10 minuti).'
-          : 'Imposti una password o un PIN vocale (es. "1234" o una parola segreta): Jarvis la chiederà solo quando il telefono è a schermo spento o bloccato prima di aprire o usare app e fare chiamate.'),
+        h('div', { class: 'small' }, 'Parola d\'ordine per le attività sul telefono'),
+        h('p', { class: 'muted' }, 'Jarvis non chiede più conferme intermedie mentre usa il telefono: chiede solo la parola d\'ordine (predefinita: "niente più fili", valida per 15 minuti). Può anche dirla direttamente dentro il comando vocale.'),
         h('div', { class: 'row wrap' },
-          h('input', { id: 'phonePwdInput', type: 'password', placeholder: cfg.voiceEnrolled ? 'Nuova password o PIN vocale…' : 'Imposta password o PIN vocale…', style: 'flex:1;min-width:180px' }),
+          h('input', { id: 'phonePwdInput', type: 'text', placeholder: 'Parola d\'ordine (predefinita: niente più fili)', style: 'flex:1;min-width:180px' }),
           h('button', { class: 'btn primary', onclick: () => {
             const el = document.getElementById('phonePwdInput');
-            const val = (el && el.value || '').trim();
-            if (!val) { toast('Inserisci una password o un PIN.'); return; }
+            const val = (el && el.value || '').trim() || 'niente più fili';
             nativeCall('setPhonePassword', val);
             if (el) el.value = '';
-            toast('Password salvata (richiesta solo a telefono spento).');
+            toast(`Parola d'ordine impostata: "${val}"`);
             setTimeout(render, 200);
-          } }, cfg.voiceEnrolled ? 'Cambia password' : 'Salva password'),
-          cfg.voiceEnrolled ? h('button', { class: 'btn ghost danger', onclick: () => { nativeCall('forgetVoice'); toast('Password rimossa.'); setTimeout(render, 200); } }, 'Rimuovi password') : null),
-        cfg.voiceEnrolled ? toggle('Chiedi la password per usare il telefono quando è spento o bloccato', 'voiceLock', 'setVoiceLock') : null) : null,
+          } }, 'Salva parola d\'ordine'),
+          h('button', { class: 'btn', onclick: () => { nativeCall('setPhonePassword', 'niente più fili'); toast('Ripristinata: "niente più fili"'); setTimeout(render, 200); } }, 'Usa "niente più fili"')),
+        toggle('Richiedi la parola d\'ordine ("niente più fili") per le attività sul telefono', 'voiceLock', 'setVoiceLock')) : null,
       typeof native.callPermission === 'function' ? h('div', { class: 'row wrap' },
         h('p', { class: 'grow' }, nativeCall('callPermission') === true ? 'Jarvis può telefonare ai contatti della rubrica ("chiama Marco").' : 'Per le telefonate ("chiama Marco") Jarvis ha bisogno dei permessi Contatti e Telefono.'),
         nativeCall('callPermission') === true ? null : h('button', { class: 'btn', onclick: () => { nativeCall('requestCallPermission'); setTimeout(render, 2500); } }, 'Concedi')) : null,

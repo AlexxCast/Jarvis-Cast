@@ -6,7 +6,7 @@
 // Velocità, impulsi e respiro cambiano con lo stato (in attesa, in ascolto, sta pensando, sta parlando).
 
 const ZOOM = 2;           // ingrandimento quando un ramo è aperto
-const SPREAD = 0.42;      // distanza (in radianti) delle foglie dal loro ramo, sulla superficie
+const SPREAD = 0.28;      // distanza ordinata (in radianti) delle foglie dal loro ramo, sulla superficie
 const STEPS = 7;          // punti per tratto di pista curva
 const SHELL_MIN = 0.42;   // raggio del guscio più interno (informazioni personali, leggere, frequenti)
 const LEVEL_STEP = 1 - SHELL_MIN; // raggio guadagnato per ogni unità di livello (non c'è un massimo)
@@ -58,12 +58,13 @@ function layoutBranches(list, old) {
     // Prima gli argomenti principali attorno al ramo, poi i sotto-argomenti attorno al loro argomento.
     const kids = all.filter(c => !c.parent || !ids.has(c.parent));
     const subs = all.filter(c => c.parent && ids.has(c.parent));
+    const perRing = 6;
     const leaves = kids.map((c, k) => {
-      const a = ((k % 10) / Math.min(10, Math.max(1, kids.length))) * Math.PI * 2 + i * 0.7 + Math.floor(k / 10) * 0.31;
-      // Stessa distanza a schermo su ogni guscio: sui gusci piccoli l'angolo è più ampio.
-      // Tante foglie: si dispongono su più giri attorno al ramo, sempre più fitti.
-      const turn = Math.floor(k / 10);
-      const dist = Math.min(0.75, SPREAD / Math.sqrt(r)) * (k % 2 ? 1.25 : 1) * (1 + turn * 0.45);
+      const turn = Math.floor(k / perRing);
+      const inRing = Math.min(perRing, Math.max(1, kids.length - turn * perRing));
+      const a = ((k % perRing) / inRing) * Math.PI * 2 + i * 0.5 + turn * 0.52;
+      // Disposizione ordinata su anelli concentrici regolari attorno al ramo, senza zig-zag né sovrapposizioni.
+      const dist = Math.min(0.52, (SPREAD / Math.sqrt(r)) * (1 + turn * 0.52));
       const llat = clampLat(lat + Math.sin(a) * dist);
       const llon = lon + (Math.cos(a) * dist) / Math.max(0.35, Math.cos(llat));
       const before = prev?.leaves.find(l => l.id === c.id);
@@ -341,6 +342,14 @@ export function createOrb() {
         ctx.beginPath(); ctx.arc(p.sx, p.sy, r * 2.8, 0, Math.PI * 2); ctx.fill();
       }
     };
+    const labelBoxes = [];
+    const canPlaceLabel = (x, y, rw, rh = 15) => {
+      for (const box of labelBoxes) {
+        if (Math.abs(x - box.x) < (rw + box.w) * 0.5 && Math.abs(y - box.y) < rh) return false;
+      }
+      labelBoxes.push({ x, y, w: rw });
+      return true;
+    };
     for (const b of order) {
       const shellScale = Math.max(0.52, Math.min(1.08, 0.42 + b.hub.rad * 0.58));
       const leafCrowd = Math.max(0.55, 1 / Math.sqrt(1 + Math.max(0, b.leaves.length - 4) * 0.14));
@@ -349,18 +358,27 @@ export function createOrb() {
         const isAuto = !!(b.auto || l.auto);
         const lRgb = isAuto ? autoRgb : b.rgb;
         ring(l, (2.6 + l.d * 2 + l.heat * 1.8) * bScale, l.heat, ((0.35 + l.d * 0.6) * cur.glow + l.heat * 0.4) * b.fade, true, lRgb, isAuto);
-        if (!compact && b.fade > 0.5 && (focused === b ? cur.zoom > 1.6 : (l.heat > 0.3 && l.d > 0.4))) {
+        if (!compact && b.fade > 0.5 && (focused === b ? cur.zoom > 1.5 : (l.heat > 0.35 && l.d > 0.45))) {
           const right = l.sx >= cx;
-          ctx.font = '12px system-ui, sans-serif';
+          ctx.font = '11.5px system-ui, sans-serif';
           ctx.textAlign = right ? 'left' : 'right';
           ctx.fillStyle = isAuto
             ? `rgba(${autoRgb.map(Math.round).join(',')},${0.65 + l.heat * 0.35})`
             : `rgba(200,255,190,${0.55 + l.heat * 0.45})`;
-          // Il testo resta dentro lo schermo: si accorcia finché ci sta.
+          // Il testo resta dentro lo schermo e non si sovrappone mai alle etichette vicine.
           const room = (right ? w - l.sx : l.sx) - 14;
-          let text = clip(l.label, 38);
+          let text = clip(l.label, focused === b ? 34 : 24);
           while (text.length > 4 && ctx.measureText(text).width > room) text = clip(text, text.length - 1);
-          ctx.fillText(text, l.sx + (right ? 9 : -9), l.sy);
+          const tw = ctx.measureText(text).width;
+          const tx = l.sx + (right ? 9 : -9);
+          const midX = right ? tx + tw * 0.5 : tx - tw * 0.5;
+          let ty = l.sy;
+          if (!canPlaceLabel(midX, ty, tw, 14) && focused === b) {
+            if (canPlaceLabel(midX, ty - 14, tw, 14)) ty -= 14;
+            else if (canPlaceLabel(midX, ty + 14, tw, 14)) ty += 14;
+            else ty = -999;
+          }
+          if (ty > 0) ctx.fillText(text, tx, ty);
         }
       }
       const h = b.hub, r = (4 + h.d * 2.8 + h.heat * 2) * bScale * (focused === b ? 1.3 : b.auto ? 1.22 : 1);

@@ -9,6 +9,7 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import com.jarvisfit.app.data.Settings
+import java.text.Normalizer
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.suspendCancellableCoroutine
@@ -17,20 +18,19 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.coroutines.resume
 
 /**
- * Autorizzazione tramite password per le azioni sul telefono (aprire app, usare app, telefonare).
- * Viene richiesta SOLO quando il telefono è a schermo spento o bloccato.
- * A schermo acceso e sbloccato Jarvis esegue subito senza chiedere nulla.
+ * Autorizzazione tramite parola d'ordine ("niente più fili") per le azioni sul telefono.
+ * Niente più conferme intermedie: una volta detta la parola d'ordine, Jarvis esegue l'attività fino in fondo.
  */
 object VoiceId {
-    const val PHRASE = "Password vocale"
-    /** Dopo un'autorizzazione riuscita non richiede la password per 10 minuti. */
-    private const val TRUST_MS = 10 * 60_000L
+    const val PHRASE = "niente più fili"
+    /** Dopo un'autorizzazione riuscita non richiede la parola d'ordine per 15 minuti. */
+    private const val TRUST_MS = 15 * 60_000L
 
     @Volatile private var trustedUntil = 0L
     @Volatile var enrolling = false
         private set
 
-    /** True se l'utente ha impostato una password sul telefono. */
+    /** True se c'è una parola d'ordine attiva (predefinita: "niente più fili"). */
     val enrolled: Boolean get() = Settings.phonePassword.isNotBlank()
 
     fun isTrusted(): Boolean = System.currentTimeMillis() <= trustedUntil
@@ -39,7 +39,7 @@ object VoiceId {
         trustedUntil = System.currentTimeMillis() + TRUST_MS
     }
 
-    /** Rileva se in questo istante lo schermo del telefono è spento oppure bloccato dal keyguard. */
+    /** Rileva se lo schermo del telefono è spento oppure bloccato dal keyguard. */
     fun isScreenOffOrLocked(ctx: Context): Boolean {
         val pm = ctx.getSystemService(Context.POWER_SERVICE) as? PowerManager
         val km = ctx.getSystemService(KeyguardManager::class.java)
@@ -47,18 +47,15 @@ object VoiceId {
     }
 
     /**
-     * Serve chiedere la password adesso?
-     * Solo se il telefono era a schermo spento o bloccato ([wasScreenOff] o [isScreenOffOrLocked]),
-     * l'utente ha attivato il blocco e impostato una password, e non è già stato autorizzato di recente.
+     * Serve chiedere la parola d'ordine adesso?
+     * Se il blocco è attivo e non siamo già autorizzati negli ultimi 15 minuti.
      */
     fun needed(ctx: Context? = null, wasScreenOff: Boolean = false): Boolean {
-        val screenOffOrLocked = wasScreenOff || (ctx != null && isScreenOffOrLocked(ctx))
-        if (!screenOffOrLocked) return false
         return Settings.voiceLock && enrolled && !isTrusted()
     }
 
     fun forget() {
-        Settings.phonePassword = ""
+        Settings.phonePassword = PHRASE
         Settings.voiceModel = ""
         Settings.voiceLock = false
         trustedUntil = 0L
@@ -70,23 +67,30 @@ object VoiceId {
         "sei" to "6", "sette" to "7", "otto" to "8", "nove" to "9", "dieci" to "10"
     )
 
-    /** Normalizza testo o numeri dettati a voce (es. "uno due tre quattro" -> "1234") per il confronto con la password. */
+    /** Normalizza testo, accenti ("più" -> "piu") e numeri dettati a voce per il confronto con la parola d'ordine. */
     fun normalizeForPassword(raw: String): String {
-        val tokens = raw.lowercase()
-            .replace(Regex("[^a-z0-9àèéìòù\\s]"), " ")
+        val noAccents = Normalizer.normalize(raw.lowercase(), Normalizer.Form.NFD)
+            .replace(Regex("\\p{InCombiningDiacriticalMarks}+"), "")
+        val tokens = noAccents
+            .replace(Regex("[^a-z0-9\\s]"), " ")
             .trim()
             .split(Regex("\\s+"))
             .filter { it.isNotBlank() }
         return tokens.joinToString("") { NUMBER_WORDS[it] ?: it }
     }
 
-    /** Verifica se la frase pronunciata contiene o coincide con la password impostata. */
+    /** Verifica se la frase pronunciata contiene o coincide con la parola d'ordine (es. "niente più fili"). */
     fun matchesPassword(heard: String, expected: String = Settings.phonePassword): Boolean {
         val exp = normalizeForPassword(expected)
         if (exp.isEmpty()) return true
         val normHeard = normalizeForPassword(heard)
         if (normHeard.isEmpty()) return false
-        return normHeard == exp || normHeard.contains(exp)
+        if (normHeard == exp || normHeard.contains(exp)) return true
+        // Tolleranza per piccole imprecisioni del microfono su "niente più fili" (es. "niente piu fili", "niente fili")
+        if (exp == "nientepiufili" && (normHeard.contains("nientepiufil") || normHeard.contains("nientefili") || normHeard.contains("piufili"))) {
+            return true
+        }
+        return false
     }
 
     private suspend fun say(text: String) = suspendCancellableCoroutine<Unit> { c ->
@@ -137,33 +141,37 @@ object VoiceId {
         }
     }
 
-    /** Compatibilità con eventuale chiamata legacy da interfaccia. */
     suspend fun enroll(ctx: Context, progress: (String) -> Unit): String? {
-        progress("Imposta la password direttamente dal campo di testo nelle Impostazioni.")
+        progress("Parola d'ordine attiva: \"${Settings.phonePassword}\".")
         return null
     }
 
     /**
-     * Se il telefono era a schermo spento o bloccato, chiede la password prima di eseguire azioni sul telefono.
-     * Se l'utente ha già pronunciato la password nel comando iniziale, autorizza subito senza chiedere.
+     * Chiede solo la parola d'ordine ("niente più fili") prima di eseguire attività sul telefono.
+     * Se l'utente l'ha già pronunciata nel comando iniziale, procede subito senza chiedere nulla.
      */
     suspend fun gate(ctx: Context, wasScreenOff: Boolean = false, initialCommand: String = ""): Boolean {
-        if (!needed(ctx, wasScreenOff)) return true
         if (initialCommand.isNotBlank() && matchesPassword(initialCommand)) {
             trustNow()
             return true
         }
-        Speaker.init(ctx)
-        repeat(2) { attempt ->
-            say(if (attempt == 0) "Telefono spento o bloccato: dica la password per autorizzare." else "Password non riconosciuta, ripeta la password.")
-            delay(250)
-            val spoken = listenOnce(ctx).orEmpty()
-            if (spoken.isNotBlank() && matchesPassword(spoken)) {
-                trustNow()
-                return true
+        if (!needed(ctx, wasScreenOff)) return true
+        enrolling = true
+        try {
+            Speaker.init(ctx)
+            repeat(2) { attempt ->
+                say(if (attempt == 0) "Parola d'ordine?" else "Non ho capito. Ripeta la parola d'ordine.")
+                delay(250)
+                val spoken = listenOnce(ctx).orEmpty()
+                if (spoken.isNotBlank() && matchesPassword(spoken)) {
+                    trustNow()
+                    return true
+                }
             }
+            say("Parola d'ordine non corretta, non procedo.")
+            return false
+        } finally {
+            enrolling = false
         }
-        say("Password non corretta, non procedo.")
-        return false
     }
 }

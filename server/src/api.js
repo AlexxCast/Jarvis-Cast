@@ -7,6 +7,7 @@ import * as N from './nutrition.js';
 import * as memory from './memory.js';
 import * as phone from './phone.js';
 import * as flows from './flows.js';
+import * as devices from './devices.js';
 import * as places from './places.js';
 import * as agenda from './agenda.js';
 import * as ui from './ui.js';
@@ -81,6 +82,13 @@ export async function handleApi(db, env, deps, request) {
     if (path === '/api/flows' && method === 'GET') return json({ flows: flows.listFlows(db) });
     const flowDel = /^\/api\/flows\/([^/]+)$/.exec(path);
     if (flowDel && method === 'DELETE') return json({ flows: flows.deleteFlow(db, decodeURIComponent(flowDel[1])) });
+    if (path === '/api/devices' && method === 'GET') return json({ devices: devices.listDevices(db, ms), history: devices.listCommandHistory(db) });
+    if (path === '/api/devices/heartbeat' && method === 'POST') return json(devices.heartbeat(db, await body(request), ms));
+    if (path === '/api/devices/command' && method === 'POST') {
+      const b = await body(request);
+      const cmd = devices.enqueueCommand(db, b.targetDevice || 'desktop', b, ms);
+      return json({ command: cmd, devices: devices.listDevices(db, ms), history: devices.listCommandHistory(db) });
+    }
     if (path === '/api/addressed' && method === 'POST') {
       const b = await body(request);
       try { return json({ addressed: await isAddressed(db, env, deps, b.text) }); } catch { return json({ addressed: false, error: true }); }

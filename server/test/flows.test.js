@@ -203,4 +203,31 @@ test('grafo e multi-agente locale: i flow appresi creano il ramo autonomo e gli 
   assert.ok(autoAfter.children.some(c => /vasco rossi/i.test(c.label)));
   const intrAfter = gAfter.branches.find(b => b.id === 'intrattenimento');
   assert.ok(intrAfter && intrAfter.children.some(c => /joytify/i.test(c.label)));
+
+  // Jarvis Core (IA proprietaria interna) e Manager Multi-Dispositivo (PC + Telefono):
+  // risolve i comandi per il PC Desktop senza chiamare modelli esterni.
+  const zeroLlm = noModel();
+  const hb = await (await handleApi(db, ENV, deps(zeroLlm), new Request('http://x/api/devices/heartbeat', {
+    method: 'POST',
+    body: JSON.stringify({ id: 'desktop-pc', kind: 'desktop', name: 'PC Alessio', platform: 'Windows 11', metrics: { cpu: 18, ram: 42, activeWindow: 'VS Code' } }),
+  }))).json();
+  assert.equal(hb.device.online, true);
+
+  const pcOpen = await handleChat(db, ENV, deps(zeroLlm), { text: 'Jarvis apri Chrome sul PC' });
+  assert.equal(pcOpen.model, 'jarvis-core');
+  assert.ok(pcOpen.touched.includes('automazioni'));
+  assert.equal(zeroLlm.calls.length, 0);
+
+  // Il prossimo heartbeat del PC ritira il comando "open_app Chrome" dalla coda
+  const hb2 = await (await handleApi(db, ENV, deps(zeroLlm), new Request('http://x/api/devices/heartbeat', {
+    method: 'POST',
+    body: JSON.stringify({ id: 'desktop-pc', kind: 'desktop', name: 'PC Alessio' }),
+  }))).json();
+  assert.equal(hb2.commands.length, 1);
+  assert.equal(hb2.commands[0].kind, 'open_app');
+  assert.equal(hb2.commands[0].target, 'Chrome');
+
+  const pcStatus = await handleChat(db, ENV, deps(zeroLlm), { text: 'Jarvis qual è lo stato del PC?' });
+  assert.equal(pcStatus.model, 'jarvis-core');
+  assert.match(pcStatus.reply, /RAM al 42%/);
 });

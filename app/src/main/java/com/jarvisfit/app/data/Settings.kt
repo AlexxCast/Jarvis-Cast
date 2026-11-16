@@ -60,15 +60,15 @@ object Settings {
         get() = prefs.getBoolean("mic_guard", true)
         set(v) = prefs.edit().putBoolean("mic_guard", v).apply()
 
-    // Autorizzazione a telefono spento/bloccato tramite password (resta solo sul telefono).
+    // Autorizzazione tramite parola d'ordine (predefinita: "niente più fili", salvata sul telefono).
     var phonePassword: String
-        get() = prefs.getString("phone_password", "") ?: ""
+        get() = prefs.getString("phone_password", "niente più fili")?.ifBlank { "niente più fili" } ?: "niente più fili"
         set(v) = prefs.edit().putString("phone_password", v.trim()).apply()
     var voiceModel: String
         get() = prefs.getString("voice_model", "") ?: ""
         set(v) = prefs.edit().putString("voice_model", v).apply()
     var voiceLock: Boolean
-        get() = prefs.getBoolean("voice_lock", false)
+        get() = prefs.getBoolean("voice_lock", true)
         set(v) = prefs.edit().putBoolean("voice_lock", v).apply()
     /** Da 0 (permissivo) a 1 (severo). */
     var voiceStrictness: Float

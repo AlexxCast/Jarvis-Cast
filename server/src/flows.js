@@ -16,7 +16,7 @@ const MAX_FLOWS = 60;
 const MUSIC_TASK_RE = /\b(cerca|metti|riproduci|ascolta|fai\s+partire|avvia)\b[\s\S]*\b(music\w*|canzon\w*|bran[oi]|playlist|joytify|joy\s*t\w*|joy\s*f\w*|spotify|youtube\s+music)\b/i;
 /** Soglie di fiducia: sotto, decide il modello. */
 export const PHONE_THRESHOLD = 0.65;
-export const CHAT_THRESHOLD = 0.72;
+export const CHAT_THRESHOLD = 0.65;
 const ITEM_THRESHOLD = 0.62;
 
 // Scelte creative o aperte: serve comunque il modello.
@@ -146,7 +146,7 @@ export function recordTrace(db, { goal, step, screen, move, nowMs }) {
   }
   if (step === 0 || !trace || trace.goal !== goal) {
     // Un compito ripreso a metà non ha l'inizio: non diventa un flow (rovinerebbe quello buono).
-    trace = { goal, app: '', steps: [], params: [], partial: step > 0, at: nowMs };
+    trace = { goal, app: '', steps: [], params: [], partial: step > 0, at: nowMs, traceId: `${nowMs}-${Math.random().toString(36).slice(2, 8)}` };
   }
   const items = Array.isArray(screen?.items) ? screen.items : [];
   const target = move.n != null ? items.find(i => Number(i.n) === Number(move.n)) : null;
@@ -175,6 +175,11 @@ export function recordTrace(db, { goal, step, screen, move, nowMs }) {
   trace.steps.push(entry);
   trace.at = nowMs;
   kvSet(db, TRACE_KEY, trace);
+  // Salva già il flow non appena ha almeno 2 passi validi dall'inizio, così anche se l'utente ferma l'azione
+  // appena parte la canzone o non arriva il passo finale "done", la volta dopo è già automatico senza modelli.
+  if (!trace.partial && trace.steps.length >= 2) {
+    saveFlowFromTrace(db, { ...trace, steps: [...trace.steps, { do: 'done' }] }, nowMs);
+  }
 }
 
 /** Salva o aggiorna un flow a partire da una traccia completata. */
@@ -192,6 +197,7 @@ export function saveFlowFromTrace(db, trace, nowMs) {
   const id = slug(`${trace.app || 'app'}-${tokens.slice(0, 5).join('-')}`) || `flow-${nowMs}`;
   const flows = listFlows(db);
   const existing = flows.find(f => f.id === id);
+  const sameTrace = existing && trace.traceId && existing.lastTraceId === trace.traceId;
   const record = {
     id,
     app: trace.app || existing?.app || '',
@@ -200,9 +206,10 @@ export function saveFlowFromTrace(db, trace, nowMs) {
     tokens,
     hasParam: params.length > 0,
     steps: trace.steps.slice(0, 25),
-    uses: (existing?.uses || 0) + 1,
+    uses: sameTrace ? (existing.uses || 1) : (existing?.uses || 0) + 1,
     fails: existing?.fails || 0,
     updatedAt: nowMs,
+    ...(trace.traceId ? { lastTraceId: trace.traceId } : {}),
   };
   kvSet(db, FLOWS_KEY, [record, ...flows.filter(f => f.id !== id)].slice(0, MAX_FLOWS));
   kvSet(db, 'lastTouched', { at: String(nowMs), touched: ['automazioni'], leaves: ['f:' + id] });

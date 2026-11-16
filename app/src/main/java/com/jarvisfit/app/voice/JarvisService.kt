@@ -102,6 +102,10 @@ class JarvisService : LifecycleService(), SensorEventListener {
     private var sessionActive = false   // il nostro riconoscitore è acceso
     private var yielded = false         // in pausa perché il microfono serve a un'altra app
     private var freeChecks = 0
+    private var lastRecognizerActivityMs = System.currentTimeMillis()
+    private var yieldedSinceMs = 0L
+    private var busySinceMs = 0L
+    private var wakeCycles = 0
     private var wakeHeard = false       // "Jarvis" comparso nei risultati parziali della sessione
     private var lastWakePartial = ""
     private var lastCommandPartial = ""
@@ -127,6 +131,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
             .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "JarvisFit::listen").apply { setReferenceCounted(false) }
         guard = MicGuard(this, main) { onRecordingChanged() }.also { it.start() }
         ticker.postDelayed(inboxPoll, 20_000)
+        ticker.postDelayed(watchdogRunnable, 10_000)
         Places.register(this)
         // La sfera sopra le altre app segue lo stato dell'ascolto.
         lifecycleScope.launch { JarvisState.status.collect { Overlay.onStatus(this@JarvisService, it) } }
@@ -222,8 +227,9 @@ class JarvisService : LifecycleService(), SensorEventListener {
 
     /** Rilascia subito il microfono e resta in pausa finché l'altra app non ha finito. */
     private fun yieldMic() {
-        if (yielded) return
+        if (yielded || VoiceId.enrolling) return
         yielded = true
+        yieldedSinceMs = System.currentTimeMillis()
         freeChecks = 0
         main.removeCallbacksAndMessages(null)
         stopSession(cancel = true)
@@ -273,13 +279,48 @@ class JarvisService : LifecycleService(), SensorEventListener {
 
     private fun beginSession(rec: SpeechRecognizer, intent: Intent) {
         sessionActive = true
+        lastRecognizerActivityMs = System.currentTimeMillis()
         guard?.sessionStarted()
         rec.startListening(intent)
     }
 
     private fun stopSession(cancel: Boolean) {
         sessionActive = false
+        guard?.sessionStopped()
         runCatching { if (cancel) recognizer?.cancel() else recognizer?.stopListening() }
+    }
+
+    /**
+     * Watchdog anti-blocco: su Android lo SpeechRecognizer può talvolta restare appeso in silenzio
+     * senza chiamare né onResults né onError, oppure restare in pausa per una sessione fantasma.
+     * Ogni 10 secondi controlla che l'ascolto sia vivo e, se fermo da troppo, ricrea il riconoscitore e riparte.
+     */
+    private val watchdogRunnable = object : Runnable {
+        override fun run() {
+            try {
+                if (Settings.listeningEnabled && !VoiceId.enrolling && !Speaker.isSpeaking()) {
+                    val now = System.currentTimeMillis()
+                    if (yielded && guard?.inCall() != true && now - yieldedSinceMs > 18_000L) {
+                        yielded = false
+                        freeChecks = 0
+                        startWakeWord()
+                    } else if (busy && now - maxOf(busySinceMs, lastConversationActivityTime) > CONVERSATION_TIMEOUT_MS + 10_000L) {
+                        busy = false
+                        inConversationMode = false
+                        runCatching { recognizer?.destroy() }
+                        recognizer = null
+                        startWakeWord()
+                    } else if (!busy && !yielded && now - lastRecognizerActivityMs > 15_000L) {
+                        sessionActive = false
+                        guard?.sessionStopped()
+                        runCatching { recognizer?.destroy() }
+                        recognizer = null
+                        startWakeWord()
+                    }
+                }
+            } catch (_: Exception) {}
+            ticker.postDelayed(this, 10_000L)
+        }
     }
 
     // ---------------------------------------------------------------- wake word
@@ -311,12 +352,6 @@ class JarvisService : LifecycleService(), SensorEventListener {
                 restartWakeWordDelayed(500)
                 return@post
             }
-            // Se l'utente sta ascoltando musica o guardando video, non prendere l'audio focus
-            val am = getSystemService(AUDIO_SERVICE) as? AudioManager
-            if (am != null && am.isMusicActive) {
-                restartWakeWordDelayed(3000)
-                return@post
-            }
             // Se un'altra app sta registrando o c'è una chiamata, non toccare il microfono
             if (!micFreeOrYield { startWakeWord() }) return@post
 
@@ -324,15 +359,21 @@ class JarvisService : LifecycleService(), SensorEventListener {
                 wakeHeard = false
                 lastWakePartial = ""
                 main.removeCallbacks(wakeStopRunnable)
+                if (++wakeCycles >= 15) {
+                    wakeCycles = 0
+                    runCatching { recognizer?.destroy() }
+                    recognizer = null
+                }
                 val rec = recognizer ?: SpeechRecognizer.createSpeechRecognizer(this).also { recognizer = it }
                 rec.setRecognitionListener(object : RecognitionListener {
-                    override fun onReadyForSpeech(params: Bundle?) {}
-                    override fun onBeginningOfSpeech() {}
+                    override fun onReadyForSpeech(params: Bundle?) { lastRecognizerActivityMs = System.currentTimeMillis() }
+                    override fun onBeginningOfSpeech() { lastRecognizerActivityMs = System.currentTimeMillis() }
                     override fun onRmsChanged(rmsdB: Float) {}
                     override fun onBufferReceived(buffer: ByteArray?) {}
-                    override fun onEndOfSpeech() {}
+                    override fun onEndOfSpeech() { lastRecognizerActivityMs = System.currentTimeMillis() }
                     override fun onEvent(eventType: Int, params: Bundle?) {}
                     override fun onPartialResults(partialResults: Bundle?) {
+                        lastRecognizerActivityMs = System.currentTimeMillis()
                         if (Speaker.isSpeaking() || busy || yielded) return
                         val text = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
                         if (text.isBlank()) return
@@ -350,8 +391,10 @@ class JarvisService : LifecycleService(), SensorEventListener {
                         }
                     }
                     override fun onResults(results: Bundle?) {
+                        lastRecognizerActivityMs = System.currentTimeMillis()
                         main.removeCallbacks(wakeStopRunnable)
                         sessionActive = false
+                        guard?.sessionStopped()
                         if (busy || yielded || Speaker.isSpeaking()) return
                         val all = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
                         // Il primo risultato può non contenere il nome mentre un'alternativa sì ("Jarvis" detto piano).
@@ -368,8 +411,10 @@ class JarvisService : LifecycleService(), SensorEventListener {
                         handleHeard(text)
                     }
                     override fun onError(error: Int) {
+                        lastRecognizerActivityMs = System.currentTimeMillis()
                         main.removeCallbacks(wakeStopRunnable)
                         sessionActive = false
+                        guard?.sessionStopped()
                         if (busy || yielded) return
                         if (wakeHeard) {
                             // Ha chiamato Jarvis ma la sessione si è chiusa con errore: recupera l'eventuale comando dai parziali.
@@ -445,12 +490,12 @@ class JarvisService : LifecycleService(), SensorEventListener {
     }
 
     private fun restartWakeWordDelayed(delayMs: Long) {
-        if (!busy && !yielded && Settings.listeningEnabled) {
-            main.postDelayed({
-                if (!busy && !yielded && Settings.listeningEnabled && !Speaker.isSpeaking()) startWakeWord()
-                else if (!busy && !yielded && Settings.listeningEnabled && Speaker.isSpeaking()) restartWakeWordDelayed(delayMs)
-            }, delayMs)
-        }
+        if (!Settings.listeningEnabled) return
+        main.postDelayed({
+            if (!Settings.listeningEnabled || yielded) return@postDelayed
+            if (!busy && !Speaker.isSpeaking() && !VoiceId.enrolling) startWakeWord()
+            else if (Speaker.isSpeaking() || VoiceId.enrolling) restartWakeWordDelayed(maxOf(400L, delayMs))
+        }, delayMs)
     }
 
     private fun fail(msg: String) {
@@ -510,6 +555,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
         // Ferma immediatamente qualsiasi discorso del TTS per non ascoltare se stesso
         Speaker.stop()
         busy = true
+        busySinceMs = System.currentTimeMillis()
         inConversationMode = true
         lastConversationActivityTime = System.currentTimeMillis()
 
@@ -571,6 +617,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
         if (yielded) return
         if (!micFreeOrYield { listenForCommand() }) return
         busy = true
+        busySinceMs = System.currentTimeMillis()
         lastCommandPartial = ""
         main.removeCallbacks(commandStopRunnable)
         JarvisState.status.value = JarvisState.Status.LISTENING
@@ -579,13 +626,14 @@ class JarvisService : LifecycleService(), SensorEventListener {
 
         val rec = recognizer ?: SpeechRecognizer.createSpeechRecognizer(this).also { recognizer = it }
         rec.setRecognitionListener(object : RecognitionListener {
-            override fun onReadyForSpeech(params: Bundle?) {}
-            override fun onBeginningOfSpeech() {}
+            override fun onReadyForSpeech(params: Bundle?) { lastRecognizerActivityMs = System.currentTimeMillis() }
+            override fun onBeginningOfSpeech() { lastRecognizerActivityMs = System.currentTimeMillis() }
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
-            override fun onEndOfSpeech() {}
+            override fun onEndOfSpeech() { lastRecognizerActivityMs = System.currentTimeMillis() }
             override fun onEvent(eventType: Int, params: Bundle?) {}
             override fun onPartialResults(partialResults: Bundle?) {
+                lastRecognizerActivityMs = System.currentTimeMillis()
                 if (Speaker.isSpeaking()) return
                 val text = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
                 if (text.isNotBlank() && !isSelfSpeechEcho(text)) {
@@ -596,8 +644,10 @@ class JarvisService : LifecycleService(), SensorEventListener {
                 }
             }
             override fun onResults(results: Bundle?) {
+                lastRecognizerActivityMs = System.currentTimeMillis()
                 main.removeCallbacks(commandStopRunnable)
                 sessionActive = false
+                guard?.sessionStopped()
                 if (yielded) return
                 if (Speaker.isSpeaking()) {
                     lastCommandPartial = ""
@@ -620,8 +670,10 @@ class JarvisService : LifecycleService(), SensorEventListener {
                 }
             }
             override fun onError(error: Int) {
+                lastRecognizerActivityMs = System.currentTimeMillis()
                 main.removeCallbacks(commandStopRunnable)
                 sessionActive = false
+                guard?.sessionStopped()
                 if (yielded) return
                 val recovered = lastCommandPartial
                 lastCommandPartial = ""
@@ -634,6 +686,8 @@ class JarvisService : LifecycleService(), SensorEventListener {
                     SpeechRecognizer.ERROR_NO_MATCH,
                     SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> handleSilence()
                     else -> {
+                        runCatching { recognizer?.destroy() }
+                        recognizer = null
                         JarvisState.error.value = "Errore riconoscimento ($error)"
                         handleSilence()
                     }

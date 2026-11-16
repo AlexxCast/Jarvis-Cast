@@ -21,6 +21,7 @@ class MicGuard(context: Context, private val handler: Handler, private val onCha
     /** Quante registrazioni appartengono alla nostra sessione di riconoscimento (di norma 1). */
     private var ownConfigs = 1
     private var sessionStartedAt = 0L
+    private var sessionStoppedAt = 0L
 
     private val callback = object : AudioManager.AudioRecordingCallback() {
         override fun onRecordingConfigChanged(configs: MutableList<AudioRecordingConfiguration>?) {
@@ -44,6 +45,11 @@ class MicGuard(context: Context, private val handler: Handler, private val onCha
     fun sessionStarted() {
         sessionStartedAt = SystemClock.elapsedRealtime()
         ownConfigs = 1
+    }
+
+    /** Da chiamare quando una sessione di Jarvis si chiude: Android impiega fino a ~1.5s a rilasciare l'AudioRecord. */
+    fun sessionStopped() {
+        sessionStoppedAt = SystemClock.elapsedRealtime()
     }
 
     /** Nei primi istanti della sessione impara quante registrazioni apre il riconoscitore su questo telefono. */
@@ -70,8 +76,11 @@ class MicGuard(context: Context, private val handler: Handler, private val onCha
      * [ownSessionActive]: Jarvis sta ascoltando in questo momento (le sue registrazioni non contano).
      */
     fun busyElsewhere(ownSessionActive: Boolean): Boolean {
+        if (VoiceId.enrolling) return false
         if (inCall()) return true
-        val allowed = if (ownSessionActive) ownConfigs else 0
+        val now = SystemClock.elapsedRealtime()
+        val recentlyOwn = (now - sessionStartedAt <= 2200L) || (now - sessionStoppedAt <= 1800L)
+        val allowed = if (ownSessionActive || recentlyOwn) ownConfigs else 0
         return activeRecordings() > allowed
     }
 

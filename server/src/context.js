@@ -52,7 +52,8 @@ AZIONI DISPONIBILI (campo "type"):
 - read_url {url}: leggi il testo di una pagina web https.
 - call {name: nome del contatto in rubrica, oppure un numero}: telefonata normale. Usala SOLO quando l'utente chiede esplicitamente di chiamare qualcuno (non per WhatsApp o altre app: lì serve phone_task).
 - open_app {name: nome dell'app come compare sul telefono, es. "Spotify", "Maps", "WhatsApp"} · open_url {url: indirizzo https completo}
-  Usale solo quando l'utente chiede SOLO di aprire qualcosa, senza fare altro dentro.
+  Usale solo quando l'utente chiede SOLO di aprire qualcosa sul telefono, senza fare altro dentro.
+- pc_action {kind: "open_app"|"open_url"|"system"|"notify", target: "nome programma o URL o comando (lock|play_pause|vol_up|vol_down)"}: esegue un'azione direttamente sul PC Desktop dell'utente quando chiede di fare qualcosa sul computer/PC.
 - phone_task {goal: obiettivo completo e autosufficiente, es. "Apri WhatsApp, chat con Marco, scrivi 'arrivo tra 10 minuti' e invialo"}: usi il telefono come lui (tocchi, scrivi, scorri, leggi lo schermo) finché l'obiettivo è raggiunto. Usalo SEMPRE quando chiede di fare qualcosa DENTRO un'app (mandare o leggere messaggi, cercare, mettere una canzone, impostare): apre l'app da solo, quindi non aggiungere open_app. Nel goal scrivi il nome esatto dell'app. Non dire mai "lo faccio", "apro", "mando" senza mettere davvero l'azione: se prometti un'azione sul telefono, phone_task deve esserci. Se nel goal c'è un invio o un pagamento scrivi esattamente cosa ha chiesto l'utente: prima di azioni irreversibili non richieste ti fermerai a chiedere conferma.
 Le date nelle azioni sono sempre yyyy-MM-dd.`;
 

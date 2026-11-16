@@ -252,12 +252,20 @@ Jarvis diceva "ho aggiornato il piano" o "chiamo Marcolino" senza farlo.
 - **Automazioni registrate subito (`flows.registerAutoGoal`):** appena parte un `phone_task` (dalla chat, dal gatekeeper o al passo 0 di `phone.step`), oppure quando una sequenza si ferma su `ask` dopo almeno 2 passi, il nodo autonomo (`f:<id>`) viene inserito e acceso in automatico nel ramo `Automazioni` del grafo e nella sezione `Altro → Mente`, senza che l'utente debba dire "aggiungi".
 - **Generazione automatica dei nodi (`GraphAgent.inferFallbackTopics`):** se il modello risponde senza compilare `"topics"`, `GraphAgent` estrae comunque in locale app e argomenti (intrattenimento, lavoro, studio, tecnologia, salute, viaggi) e aggiorna subito la sfera 3D/2D e la vista `Mente`.
 
+### Watchdog ascolto continuo, parola d'ordine "niente più fili", Jarvis Core e App Desktop PC (16/11/2026)
+
+- **Ascolto continuo anti-blocco (`JarvisService.kt` + `MicGuard.kt`):** aggiunto un watchdog ogni 10 secondi che ricrea lo `SpeechRecognizer` se Android lo lascia appeso senza callback, rimosso il blocco su `isMusicActive` (così Jarvis ascolta anche mentre c'è musica) e aggiunta una finestra di grazia di 1,8s in `MicGuard` alla chiusura della propria sessione per evitare auto-pause fantasma.
+- **Parola d'ordine unica `"niente più fili"` senza conferme intermedie (`VoiceId.kt`, `Settings.kt`, `phone.js`):** la parola d'ordine predefinita è `"niente più fili"`. Una volta autorizzato, Jarvis esegue le attività sul telefono fino in fondo senza fermarsi a chiedere conferme intermedie.
+- **Attività già fatte 100% automatiche (`flows.js`):** i flow vengono salvati già dopo 2 passi validi dall'inizio (anche senza aspettare un passo separato `done`) e `CHAT_THRESHOLD` è allineato a `PHONE_THRESHOLD` (0.65), così alla seconda richiesta non viene chiamato nessun modello esterno.
+- **Organizzazione ordinata dei nodi (`orb.js`, `memory.js`):** foglie disposte su orbite circolari regolari attorno a ciascun ramo (senza zig-zag) e anti-collisione sulle etichette di testo per evitare sovrapposizioni.
+- **Jarvis Core (`server/src/jarvis_core.js`) e Manager Multi-Dispositivo (`server/src/devices.js` + `desktop/`):** motore cognitivo proprietario interno (`jarvis-core`) che coordina Smartphone Android e PC Desktop (`desktop/jarvis_desktop.py` + `desktop/Avvia_Jarvis_PC.bat`) con telemetria live e coda comandi multi-dispositivo.
+
 ---
 
-## 5. Stato attuale (15/11/2026)
+## 5. Stato attuale (16/11/2026)
 
-- **Pubblicato:** tutto fino alla versione 2.16 (`jarvis-shell-v18`).
-- **APK:** l'ultimo è il 2.16 (`versionCode = 18`).
+- **Pubblicato:** tutto fino alla versione 2.17 (`jarvis-shell-v19`).
+- **APK:** l'ultimo è il 2.17 (`versionCode = 19`).
 - **Mai verificato da noi sul telefono vero:**
   - l'Accessibilità sbloccata;
   - l'affidabilità della parola chiave;

@@ -3,6 +3,8 @@
 import * as phone from './phone.js';
 import * as flows from './flows.js';
 import * as agents from './agents.js';
+import * as devices from './devices.js';
+import * as jarvisCore from './jarvis_core.js';
 import { WEATHER_WORDS, weatherContext } from './weather.js';
 import * as web from './web.js';
 import * as router from './router.js';
@@ -110,6 +112,11 @@ export function applyActions(db, actions, ctx) {
       else if (coder.CODE_ACTIONS.has(a.type)) out.code.push({ type: a.type, id: String(a.id || ''), request: String(a.request || '').trim().slice(0, 2000) });
       else if (ui.UI_ACTIONS.has(a.type)) { if (!ui.applyUiAction(db, a, ctx.nowIso)) { out.failed.push(a.type); continue; } out.ui = true; }
       else if (a.type === 'start_job') { if (String(a.goal || '').trim()) out.jobs.push({ title: String(a.title || 'Compito').slice(0, 80), goal: String(a.goal).slice(0, 2000) }); }
+      else if (a.type === 'pc_action') {
+        const target = String(a.target || a.name || a.url || '').trim();
+        if (!target) { out.failed.push(a.type); continue; }
+        devices.enqueueCommand(db, a.device || 'desktop', { kind: a.kind || 'open_app', target, args: a.args || '' }, ctx.ms);
+      }
       else if (a.type === 'open_app') {
         // Eseguita dal telefono, non dal server: la inoltriamo così com'è.
         const name = String(a.name || '').trim().slice(0, 60);
@@ -173,7 +180,21 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
   const cleanCmd = agents.GraphAgent.detectCleanCommand(userText);
   if (cleanCmd) agents.GraphAgent.cleanBranch(db, cleanCmd.branch, cleanCmd.maxNodes);
 
-  // Gatekeeper locale: per richieste semplici o flow già appresi evita sia contesto/ricerche sia chiamate LLM.
+  // 1. JARVIS CORE (IA proprietaria interna): gestisce direttamente controllo multi-dispositivo (PC/Telefono) e stato sistema.
+  const coreHit = !image ? jarvisCore.handleCoreIntent(db, userText, ms) : null;
+  if (coreHit) {
+    addMessage(db, sessionId, 'user', userText, nowIso, null);
+    addMessage(db, sessionId, 'assistant', coreHit.reply, nowIso, { model: 'jarvis-core' });
+    kvSet(db, 'lastTouched', { at: nowIso + '#' + ms, touched: coreHit.touched, leaves: coreHit.touchedLeaves });
+    memory.noteUse(db, coreHit.touched, ms);
+    return {
+      reply: coreHit.reply, expectReply: false, card: '', visual: null, photoRequest: null,
+      model: 'jarvis-core', switched: false, actions: coreHit.actions, device: coreHit.device,
+      tier: 'local', layoutChanged: false, touched: coreHit.touched, touchedLeaves: coreHit.touchedLeaves,
+    };
+  }
+
+  // 2. Gatekeeper procedurale locale: attività già fatte sul telefono vanno in automatico, zero modelli esterni.
   const localHit = flows.gatekeepChat(db, userText, { hasImage: !!image, hasPendingPhone: !!phone.pendingContext(db, ms) });
   if (localHit) {
     addMessage(db, sessionId, 'user', userText, nowIso, image ? { image: true } : null);
@@ -203,7 +224,7 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
   const parts = {
     core: CORE_PROMPT(diary.profile.name, nowHuman(ms, tz)) + '\n\n' + mood.MOOD_PROMPT(mood.current(db, ms)),
     brief: dietBrief(diary, today),
-    rules: [dietOn ? DIET_RULES : '', UI_WORDS.test(userText) ? ui.uiPrompt(ui.loadLayout(db)) : '', UI_WORDS.test(userText) ? coder.codePrompt(env, db) : '', DEVICE_WORDS.test(userText) ? appsPrompt(db) : '', phone.pendingContext(db, ms)].filter(Boolean).join('\n\n'),
+    rules: [dietOn ? DIET_RULES : '', UI_WORDS.test(userText) ? ui.uiPrompt(ui.loadLayout(db)) : '', UI_WORDS.test(userText) ? coder.codePrompt(env, db) : '', DEVICE_WORDS.test(userText) ? appsPrompt(db) : '', /\b(pc|computer|desktop|windows|dispositiv\w*)\b/i.test(userText) ? devices.devicesPrompt(db, ms) : '', phone.pendingContext(db, ms)].filter(Boolean).join('\n\n'),
     blocks: dietOn ? dietContext(diary, today) : [],
     memories: recalled.entries.map(m => `- [${m.id}] (${m.module}) ${m.text}`),
     moduleIndex: [mods.length ? 'MODULI DI MEMORIA ESISTENTI: ' + mods.map(m => `${m.name}${m.description ? ` (${m.description})` : ''} [${m.entries}]`).join('; ') : '',
@@ -314,6 +335,10 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
           if (reg) autoLeaves.push('f:' + reg.id);
         }
       }
+    }
+    if (!done.jobs.length) {
+      const autoProj = jarvisCore.detectComplexProject(userText);
+      if (autoProj) { done.jobs.push(autoProj); done.applied.push('start_job'); }
     }
     for (const j of done.jobs) deps.startJob?.(j);
     for (const c of done.code) {
