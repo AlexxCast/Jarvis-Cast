@@ -101,6 +101,66 @@ function findTopic(db, mod, label) {
 const META_NOISE = /\b(gestione\s+nodi|gestione\s+promemori\w*|gestione\s+graf\w*|nodi\s+del|grafo\s+dell|modulo\s+dieta|riepilogo\s+pasti|ridu[cz]ione\s+nodi|sistem\w+\s+nodi|pulizia\s+nodi)\b/i;
 const DIET_NOISE = /^(dieta|pasto|pasti|colazione|pranzo|cena|spuntino|spuntini|spuntino\s+pomeridiano|spuntino\s+mattutino|snack|calorie|kcal|alimentazione|cibo|nutrizione|riepilogo|menu)$/i;
 
+// Mappa logistica delle aree: consolida sinonimi e trasforma sotto-categorie usate come area in parent.
+const CANONICAL_AREAS = {
+  alimentazione: { area: 'dieta', parent: '' },
+  nutrizione: { area: 'dieta', parent: '' },
+  cibo: { area: 'dieta', parent: '' },
+  pasti: { area: 'dieta', parent: '' },
+  allenamento: { area: 'sport', parent: '' },
+  palestra: { area: 'sport', parent: 'palestra' },
+  fitness: { area: 'sport', parent: '' },
+  promemoria: { area: 'agenda', parent: '' },
+  calendario: { area: 'agenda', parent: '' },
+  scadenze: { area: 'agenda', parent: '' },
+  musica: { area: 'intrattenimento', parent: 'musica' },
+  canzoni: { area: 'intrattenimento', parent: 'musica' },
+  film: { area: 'intrattenimento', parent: 'cinema e serie' },
+  serie: { area: 'intrattenimento', parent: 'cinema e serie' },
+  giochi: { area: 'intrattenimento', parent: 'videogiochi' },
+  videogiochi: { area: 'intrattenimento', parent: 'videogiochi' },
+  svago: { area: 'intrattenimento', parent: '' },
+  hobby: { area: 'intrattenimento', parent: '' },
+  pc: { area: 'tecnologia', parent: 'PC Desktop' },
+  computer: { area: 'tecnologia', parent: 'PC Desktop' },
+};
+
+/** Ripulisce un titolo di nodo da verbi discorsivi o frasi prolisse, lasciando il concetto chiave (2-4 parole). */
+export function cleanNodeTitle(raw) {
+  let s = String(raw || '').trim()
+    .replace(/\s*\(app:[^)]+\)\s*$/i, '')
+    .replace(/^(?:ehi\s+|ciao\s+|ok\s+)?jarvis\s+/i, '')
+    .replace(/^(?:ricordati\s+che|ricorda\s+che|segna\s+che|memorizza\s+che|l'utente\s+ha\s+detto\s+che|l'utente\s+)/i, '')
+    .replace(/\b(?:per\s+favore|subito|adesso|ora|grazie)\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return s.slice(0, 52);
+}
+
+/** Estrae contenitore (app/dispositivo) e titolo pulito per un nodo del ramo Automazioni. */
+function formatAutoNode(rawLabel, appHint = '') {
+  const raw = cleanNodeTitle(rawLabel);
+  let container = String(appHint || '').trim();
+  if (!container) {
+    if (/^pc\s*:/i.test(raw) || /\bsul\s+(?:pc|computer|desktop)\b/i.test(raw)) container = 'PC Desktop';
+    else if (/\b(joytify|joy\s*t\w*|joy\s*f\w*)\b/i.test(raw)) container = 'Joytify';
+    else if (/\bspotify\b/i.test(raw)) container = 'Spotify';
+    else if (/\bwhatsapp\b/i.test(raw)) container = 'WhatsApp';
+    else if (/\btelegram\b/i.test(raw)) container = 'Telegram';
+    else if (/\byoutube\b/i.test(raw)) container = 'YouTube';
+    else if (/\binstagram\b/i.test(raw)) container = 'Instagram';
+    else if (/\bmaps\b/i.test(raw)) container = 'Maps';
+  }
+  let title = raw
+    .replace(/^pc\s*:\s*/i, '')
+    .replace(/\b(?:su|in|con|dentro)\s+(?:joytify|spotify|whatsapp|telegram|youtube|instagram|maps)\b/gi, '')
+    .replace(/\bsul\s+(?:pc|computer|desktop)\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!title) title = raw;
+  return { container, title: title.charAt(0).toUpperCase() + title.slice(1) };
+}
+
 /** Vero se l'etichetta è un termine generico o meta-comando che non deve diventare un nodo nel grafo. */
 export function isNoiseTopic(mod, label) {
   const s = String(label || '').trim();
@@ -125,15 +185,19 @@ function upsertTopic(db, mod, label, nowIso) {
 export function touchTopics(db, topics, nowIso) {
   const out = { modules: [], leaves: [] };
   for (const t of topics || []) {
-    const mod = slug(t.area);
-    if (!mod) continue;
+    const rawMod = slug(t.area);
+    if (!rawMod) continue;
+    const mapped = CANONICAL_AREAS[rawMod];
+    const mod = mapped ? mapped.area : rawMod;
+    const effectiveParent = t.parent || (mapped && mapped.parent && !sameTopic(mapped.parent, t.topic) ? mapped.parent : '');
     db.run('INSERT INTO modules (name, description, created) VALUES (?, \'\', ?) ON CONFLICT(name) DO NOTHING', mod, nowIso);
     out.modules.push(mod);
-    if (!slug(t.topic) || slug(t.topic) === mod) continue;
-    const name = upsertTopic(db, mod, t.topic, nowIso);
+    const cleanTopic = cleanNodeTitle(t.topic);
+    if (!slug(cleanTopic) || slug(cleanTopic) === mod) continue;
+    const name = upsertTopic(db, mod, cleanTopic, nowIso);
     if (!name) continue;
     // Sotto-argomento: si appende al suo argomento più generale (creato se manca).
-    const parent = t.parent && !sameTopic(t.parent, t.topic) && slug(t.parent) !== mod ? upsertTopic(db, mod, t.parent, nowIso) : null;
+    const parent = effectiveParent && !sameTopic(effectiveParent, cleanTopic) && slug(effectiveParent) !== mod ? upsertTopic(db, mod, cleanNodeTitle(effectiveParent), nowIso) : null;
     if (parent && parent !== name) {
       db.run('UPDATE topics SET parent = ? WHERE module = ? AND name = ?', parent, mod, name);
       out.leaves.push(`t:${mod}/${parent}`);
@@ -169,6 +233,18 @@ export function tidyTopics(db) {
       db.run('UPDATE topics SET parent = ? WHERE module = ? AND parent = ?', into.name, mod, t.name);
       db.run('DELETE FROM topics WHERE module = ? AND name = ?', mod, t.name);
       merged++;
+    }
+    // Annidamento logico automatico: se un argomento specifico contiene il nome di un argomento contenitore
+    // nello stesso modulo (es. "Tagliando Panda" sotto "Panda", o un'app musicale sotto "musica"), lo annida sotto di esso.
+    const current = db.all('SELECT name, label, parent FROM topics WHERE module = ? ORDER BY length(label) ASC', mod);
+    for (const child of current) {
+      if (child.parent) continue;
+      const cKey = topicKey(child.label);
+      const host = current.find(p => p.name !== child.name && !p.parent && topicKey(p.label).length >= 4 && cKey.length > topicKey(p.label).length + 2 && cKey.includes(topicKey(p.label)));
+      if (host) {
+        db.run('UPDATE topics SET parent = ? WHERE module = ? AND name = ?', host.name, mod, child.name);
+        child.parent = host.name;
+      }
     }
     db.run("UPDATE topics SET parent = '' WHERE module = ? AND parent = name", mod);
   }
@@ -230,24 +306,35 @@ export function graph(db, { perModule = 24 } = {}) {
   const autoGoals = kvGet(db, 'autoGoals', []);
   const seenAuto = new Set();
   const combinedAuto = [];
+  const containers = new Map();
+  const addAutoItem = (id, rawLabel, appHint) => {
+    const { container, title } = formatAutoNode(rawLabel, appHint);
+    let parentId = '';
+    if (container && !sameTopic(container, title)) {
+      const cSlug = slug(container);
+      parentId = 'fa:' + cSlug;
+      if (!containers.has(parentId)) containers.set(parentId, { id: parentId, label: container, kind: 'flow', auto: true });
+    }
+    combinedAuto.push({ id: 'f:' + id, label: title, ...(parentId ? { parent: parentId } : {}), kind: 'flow', auto: true });
+  };
   for (const f of flows) {
     const key = topicKey(f.sampleGoal || f.id);
     seenAuto.add(f.id);
     if (key) seenAuto.add(key);
-    combinedAuto.push({ id: 'f:' + f.id, label: f.sampleGoal || f.app || f.id, kind: 'flow', auto: true });
+    addAutoItem(f.id, f.sampleGoal || f.app || f.id, f.app);
   }
   for (const g of autoGoals) {
     const key = topicKey(g.label || g.id);
     if (seenAuto.has(g.id) || (key && seenAuto.has(key))) continue;
     seenAuto.add(g.id);
     if (key) seenAuto.add(key);
-    combinedAuto.push({ id: 'f:' + g.id, label: g.label || g.app || g.id, kind: 'flow', auto: true });
+    addAutoItem(g.id, g.label || g.app || g.id, g.app);
   }
   const autoChildren = combinedAuto.length
-    ? combinedAuto.slice(0, perModule)
-    : [{ id: 'f:joytify-ricerca-musica', label: 'Joytify: apri e cerca musica', kind: 'flow', auto: true }];
+    ? [...combinedAuto.slice(0, perModule), ...containers.values()]
+    : [{ id: 'f:joytify-ricerca-musica', label: 'Apri e cerca musica', parent: 'fa:joytify', kind: 'flow', auto: true }, { id: 'fa:joytify', label: 'Joytify', kind: 'flow', auto: true }];
   branches.push({
-    id: 'automazioni', label: 'Automazioni', kind: 'flow', auto: true, entries: autoChildren.length,
+    id: 'automazioni', label: 'Automazioni', kind: 'flow', auto: true, entries: combinedAuto.length || 1,
     children: autoChildren,
   });
   for (const m of listModules(db)) {
@@ -256,7 +343,11 @@ export function graph(db, { perModule = 24 } = {}) {
     const memCap = Math.max(2, Math.min(6, perModule - topics.length));
     const rows = db.all('SELECT id, text FROM memories WHERE module = ? ORDER BY uses DESC, id DESC LIMIT ?', m.name, memCap)
       .filter(r => !topics.some(t => sameTopic(t.label, r.text)))
-      .map(r => ({ id: 'm:' + r.id, label: r.text }));
+      .map(r => {
+        const rKw = new Set(keywords(r.text));
+        const hostTopic = topics.find(t => keywords(t.label).some(k => rKw.has(k)));
+        return { id: 'm:' + r.id, label: cleanNodeTitle(r.text), ...(hostTopic ? { parent: hostTopic.id } : {}) };
+      });
     const children = [...topics, ...rows].slice(0, perModule + 4);
     // Un'area con lo stesso nome di un ramo fisso (es. "dieta") si aggiunge a quel ramo.
     const fixed = branches.find(b => b.id === m.name && b.kind === 'core');

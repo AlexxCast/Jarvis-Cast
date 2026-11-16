@@ -166,16 +166,20 @@ export async function handleApi(db, env, deps, request) {
       const limits = kvGet(db, 'graphLimits', {});
       const g = memory.graph(db), d = loadDiary(db);
       const dietCap = Math.max(2, Math.min(10, Number(limits.dieta) || 5));
+      const SLOT_LABELS = { colazione: 'Colazione', pranzo: 'Pranzo', cena: 'Cena', spuntino: 'Spuntino' };
       const bySlot = new Map();
+      const slotContainers = new Map();
       for (const m of [...(d.meals || [])].reverse()) {
         const slot = String(m.meal || 'pasto').toLowerCase();
         if (bySlot.has(slot)) continue;
-        const desc = m.description || (m.items || []).map(i => i.name).filter(Boolean).slice(0, 3).join(', ');
-        bySlot.set(slot, { id: 'meal:' + m.id, label: `${m.date.slice(5)} ${slot}: ${desc}` });
+        const desc = (m.items || []).map(i => i.name).filter(Boolean).slice(0, 3).join(', ') || m.description || slot;
+        const slotId = 'slot:' + slot;
+        slotContainers.set(slotId, { id: slotId, label: SLOT_LABELS[slot] || (slot.charAt(0).toUpperCase() + slot.slice(1)), kind: 'topic' });
+        bySlot.set(slot, { id: 'meal:' + m.id, label: desc.slice(0, 42), parent: slotId });
         if (bySlot.size >= 4) break;
       }
       const dieta = g.branches.find(b => b.id === 'dieta');
-      dieta.children = [...dieta.children.slice(0, Math.max(1, dietCap - bySlot.size)), ...bySlot.values()].slice(0, dietCap);
+      dieta.children = [...dieta.children.slice(0, Math.max(1, dietCap - bySlot.size)), ...slotContainers.values(), ...bySlot.values()].slice(0, dietCap + slotContainers.size);
       // Sport: un nodo per ogni tipo di attività (corsa, palestra...), con quante volte e l'ultima data.
       const kinds = new Map();
       for (const a of d.activities || []) {

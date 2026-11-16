@@ -6,7 +6,7 @@
 // Velocità, impulsi e respiro cambiano con lo stato (in attesa, in ascolto, sta pensando, sta parlando).
 
 const ZOOM = 2;           // ingrandimento quando un ramo è aperto
-const SPREAD = 0.28;      // distanza ordinata (in radianti) delle foglie dal loro ramo, sulla superficie
+const SPREAD = 0.42;      // distanza (in radianti) delle foglie dal loro ramo, sulla superficie
 const STEPS = 7;          // punti per tratto di pista curva
 const SHELL_MIN = 0.42;   // raggio del guscio più interno (informazioni personali, leggere, frequenti)
 const LEVEL_STEP = 1 - SHELL_MIN; // raggio guadagnato per ogni unità di livello (non c'è un massimo)
@@ -58,13 +58,12 @@ function layoutBranches(list, old) {
     // Prima gli argomenti principali attorno al ramo, poi i sotto-argomenti attorno al loro argomento.
     const kids = all.filter(c => !c.parent || !ids.has(c.parent));
     const subs = all.filter(c => c.parent && ids.has(c.parent));
-    const perRing = 6;
     const leaves = kids.map((c, k) => {
-      const turn = Math.floor(k / perRing);
-      const inRing = Math.min(perRing, Math.max(1, kids.length - turn * perRing));
-      const a = ((k % perRing) / inRing) * Math.PI * 2 + i * 0.5 + turn * 0.52;
-      // Disposizione ordinata su anelli concentrici regolari attorno al ramo, senza zig-zag né sovrapposizioni.
-      const dist = Math.min(0.52, (SPREAD / Math.sqrt(r)) * (1 + turn * 0.52));
+      const a = ((k % 10) / Math.min(10, Math.max(1, kids.length))) * Math.PI * 2 + i * 0.7 + Math.floor(k / 10) * 0.31;
+      // Stessa distanza a schermo su ogni guscio: sui gusci piccoli l'angolo è più ampio.
+      // Tante foglie: si dispongono su più giri attorno al ramo, sempre più fitti.
+      const turn = Math.floor(k / 10);
+      const dist = Math.min(0.75, SPREAD / Math.sqrt(r)) * (k % 2 ? 1.25 : 1) * (1 + turn * 0.45);
       const llat = clampLat(lat + Math.sin(a) * dist);
       const llon = lon + (Math.cos(a) * dist) / Math.max(0.35, Math.cos(llat));
       const before = prev?.leaves.find(l => l.id === c.id);
@@ -73,21 +72,26 @@ function layoutBranches(list, old) {
       return { id: c.id, label: String(c.label || ''), ...pos, path: surfaceTrace(hub, pos, r), heat: before ? before.heat : 0, auto: isAuto };
     });
     const count = new Map();
-    for (const c of subs) {
-      const host = leaves.find(l => l.id === c.parent);
-      if (!host) continue;
-      const k = count.get(host.id) || 0;
-      count.set(host.id, k + 1);
-      // A ventaglio sul lato esterno dell'argomento, lontano dal ramo.
-      const out = Math.atan2(host.lat - lat, (host.lon - lon) * Math.cos(host.lat));
-      const a = out + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 0.55;
-      const dist = Math.min(0.4, (SPREAD * 0.55) / Math.sqrt(r)) * (1 + Math.floor(k / 5) * 0.4);
-      const llat = clampLat(host.lat + Math.sin(a) * dist);
-      const llon = host.lon + (Math.cos(a) * dist) / Math.max(0.35, Math.cos(llat));
-      const before = prev?.leaves.find(l => l.id === c.id);
-      const pos = { ...onSphere(llat, llon, r), lat: llat, lon: llon, rad: r };
-      const isAuto = !!(c.auto || c.kind === 'flow' || host.auto);
-      leaves.push({ id: c.id, label: String(c.label || ''), ...pos, parent: host.id, path: surfaceTrace(host, pos, r), heat: before ? before.heat : 0, sub: true, auto: isAuto });
+    const pendingSubs = [...subs];
+    for (let pass = 0; pass < 3 && pendingSubs.length; pass++) {
+      for (let idx = pendingSubs.length - 1; idx >= 0; idx--) {
+        const c = pendingSubs[idx];
+        const host = leaves.find(l => l.id === c.parent);
+        if (!host) continue;
+        pendingSubs.splice(idx, 1);
+        const k = count.get(host.id) || 0;
+        count.set(host.id, k + 1);
+        // A ventaglio sul lato esterno dell'argomento, lontano dal ramo.
+        const out = Math.atan2(host.lat - lat, (host.lon - lon) * Math.cos(host.lat));
+        const a = out + (k % 2 ? 1 : -1) * Math.ceil(k / 2) * 0.55;
+        const dist = Math.min(0.4, (SPREAD * 0.55) / Math.sqrt(r)) * (1 + Math.floor(k / 5) * 0.4);
+        const llat = clampLat(host.lat + Math.sin(a) * dist);
+        const llon = host.lon + (Math.cos(a) * dist) / Math.max(0.35, Math.cos(llat));
+        const before = prev?.leaves.find(l => l.id === c.id);
+        const pos = { ...onSphere(llat, llon, r), lat: llat, lon: llon, rad: r };
+        const isAuto = !!(c.auto || c.kind === 'flow' || host.auto);
+        leaves.push({ id: c.id, label: String(c.label || ''), ...pos, parent: host.id, path: surfaceTrace(host, pos, r), heat: before ? before.heat : 0, sub: true, auto: isAuto });
+      }
     }
     return { id: b.id, label: String(b.label || b.id), kind: b.kind || 'module', auto: !!(b.auto || b.kind === 'flow'), ring: b.ring ?? 1, zone: i, dir: hub, hub, spoke, leaves, fade: prev?.fade ?? 0 };
   });
@@ -342,14 +346,6 @@ export function createOrb() {
         ctx.beginPath(); ctx.arc(p.sx, p.sy, r * 2.8, 0, Math.PI * 2); ctx.fill();
       }
     };
-    const labelBoxes = [];
-    const canPlaceLabel = (x, y, rw, rh = 15) => {
-      for (const box of labelBoxes) {
-        if (Math.abs(x - box.x) < (rw + box.w) * 0.5 && Math.abs(y - box.y) < rh) return false;
-      }
-      labelBoxes.push({ x, y, w: rw });
-      return true;
-    };
     for (const b of order) {
       const shellScale = Math.max(0.52, Math.min(1.08, 0.42 + b.hub.rad * 0.58));
       const leafCrowd = Math.max(0.55, 1 / Math.sqrt(1 + Math.max(0, b.leaves.length - 4) * 0.14));
@@ -358,27 +354,18 @@ export function createOrb() {
         const isAuto = !!(b.auto || l.auto);
         const lRgb = isAuto ? autoRgb : b.rgb;
         ring(l, (2.6 + l.d * 2 + l.heat * 1.8) * bScale, l.heat, ((0.35 + l.d * 0.6) * cur.glow + l.heat * 0.4) * b.fade, true, lRgb, isAuto);
-        if (!compact && b.fade > 0.5 && (focused === b ? cur.zoom > 1.5 : (l.heat > 0.35 && l.d > 0.45))) {
+        if (!compact && b.fade > 0.5 && (focused === b ? cur.zoom > 1.6 : (l.heat > 0.3 && l.d > 0.4))) {
           const right = l.sx >= cx;
-          ctx.font = '11.5px system-ui, sans-serif';
+          ctx.font = '12px system-ui, sans-serif';
           ctx.textAlign = right ? 'left' : 'right';
           ctx.fillStyle = isAuto
             ? `rgba(${autoRgb.map(Math.round).join(',')},${0.65 + l.heat * 0.35})`
             : `rgba(200,255,190,${0.55 + l.heat * 0.45})`;
-          // Il testo resta dentro lo schermo e non si sovrappone mai alle etichette vicine.
+          // Il testo resta dentro lo schermo: si accorcia finché ci sta.
           const room = (right ? w - l.sx : l.sx) - 14;
-          let text = clip(l.label, focused === b ? 34 : 24);
+          let text = clip(l.label, 38);
           while (text.length > 4 && ctx.measureText(text).width > room) text = clip(text, text.length - 1);
-          const tw = ctx.measureText(text).width;
-          const tx = l.sx + (right ? 9 : -9);
-          const midX = right ? tx + tw * 0.5 : tx - tw * 0.5;
-          let ty = l.sy;
-          if (!canPlaceLabel(midX, ty, tw, 14) && focused === b) {
-            if (canPlaceLabel(midX, ty - 14, tw, 14)) ty -= 14;
-            else if (canPlaceLabel(midX, ty + 14, tw, 14)) ty += 14;
-            else ty = -999;
-          }
-          if (ty > 0) ctx.fillText(text, tx, ty);
+          ctx.fillText(text, l.sx + (right ? 9 : -9), l.sy);
         }
       }
       const h = b.hub, r = (4 + h.d * 2.8 + h.heat * 2) * bScale * (focused === b ? 1.3 : b.auto ? 1.22 : 1);
