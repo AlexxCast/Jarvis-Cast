@@ -23,7 +23,7 @@ export const DEFAULT_MODELS = [
   { provider: 'gemini', model: 'gemini-flash-latest',      tiers: ['fast', 'smart', 'vision'], ctx: 1000000, rpm: 10, rpd: 250,  tpm: 250000, free: true, prio: 10 },
   { provider: 'gemini', model: 'gemini-flash-lite-latest', tiers: ['fast', 'vision'],          ctx: 1000000, rpm: 15, rpd: 1000, tpm: 250000, free: true, prio: 12 },
   { provider: 'groq', model: 'llama-3.3-70b-versatile',    tiers: ['fast', 'smart'], ctx: 128000, rpm: 30, rpd: 1000,  tpm: 12000, tpd: 100000, free: true, prio: 20 },
-  { provider: 'groq', model: 'openai/gpt-oss-120b',        tiers: ['smart'],         ctx: 128000, rpm: 30, rpd: 1000,  tpm: 8000,  tpd: 200000, free: true, prio: 22 },
+  { provider: 'groq', model: 'openai/gpt-oss-120b',        tiers: ['fast', 'smart'], ctx: 128000, rpm: 30, rpd: 1000,  tpm: 30000, tpd: 200000, free: true, prio: 22 },
   { provider: 'groq', model: 'llama-3.1-8b-instant',       tiers: ['fast'],          ctx: 128000, rpm: 30, rpd: 14400, tpm: 6000,  tpd: 500000, free: true, prio: 28 },
   { provider: 'cerebras', model: 'gpt-oss-120b',           tiers: ['fast', 'smart'], ctx: 64000,  rpm: 30, rpd: 14400, tpm: 60000, tpd: 1000000, free: true, prio: 30 },
   { provider: 'cerebras', model: 'llama3.1-8b',            tiers: ['fast'],          ctx: 8000,   rpm: 30, rpd: 14400, tpm: 60000, tpd: 1000000, free: true, prio: 38 },

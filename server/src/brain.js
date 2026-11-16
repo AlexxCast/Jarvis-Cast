@@ -66,7 +66,7 @@ export function cleanVisual(a) {
     v.svg = svg;
   }
   if (kind === 'image') {
-    if (!/^https:\/\//i.test(String(a.url || ''))) return null;
+    if (!/^(https:\/\/|\/api\/devices\/screen)/i.test(String(a.url || ''))) return null;
     v.url = String(a.url).slice(0, 500);
   }
   return v;
@@ -180,15 +180,22 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
   const cleanCmd = agents.GraphAgent.detectCleanCommand(userText);
   if (cleanCmd) agents.GraphAgent.cleanBranch(db, cleanCmd.branch, cleanCmd.maxNodes);
 
-  // 1. JARVIS CORE (IA proprietaria interna): gestisce direttamente controllo multi-dispositivo (PC/Telefono) e stato sistema.
-  const coreHit = !image ? jarvisCore.handleCoreIntent(db, userText, ms) : null;
+  // 0. Auto-interrogazione autonoma a zero crediti (salvaguardia modelli, sorveglianza dispositivi, pulizia grafo).
+  jarvisCore.selfInterrogate(db, env, ms, tz);
+
+  // 1. JARVIS CORE (IA proprietaria interna): gestisce direttamente controllo multi-dispositivo (PC/Telefono), Antigravity e diagnostica.
+  const coreHit = !image ? jarvisCore.handleCoreIntent(db, userText, ms, env) : null;
   if (coreHit) {
-    addMessage(db, sessionId, 'user', userText, nowIso, null);
-    addMessage(db, sessionId, 'assistant', coreHit.reply, nowIso, { model: 'jarvis-core' });
-    kvSet(db, 'lastTouched', { at: nowIso + '#' + ms, touched: coreHit.touched, leaves: coreHit.touchedLeaves });
-    memory.noteUse(db, coreHit.touched, ms);
+    if (coreHit.reply) {
+      addMessage(db, sessionId, 'user', userText, nowIso, null);
+      addMessage(db, sessionId, 'assistant', coreHit.reply, nowIso, { model: 'jarvis-core', visual: coreHit.visual || undefined });
+    }
+    if (coreHit.touched?.length) {
+      kvSet(db, 'lastTouched', { at: nowIso + '#' + ms, touched: coreHit.touched, leaves: coreHit.touchedLeaves });
+      memory.noteUse(db, coreHit.touched, ms);
+    }
     return {
-      reply: coreHit.reply, expectReply: false, card: '', visual: null, photoRequest: null,
+      reply: coreHit.reply, expectReply: false, card: '', visual: coreHit.visual || null, photoRequest: null,
       model: 'jarvis-core', switched: false, actions: coreHit.actions, device: coreHit.device,
       tier: 'local', layoutChanged: false, touched: coreHit.touched, touchedLeaves: coreHit.touchedLeaves,
     };
@@ -340,6 +347,21 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
             done.applied.push('pc_action');
           }
         }
+      }
+    }
+    // Notizie o diagnostiche chieste a voce/chat: se il modello non ha già creato una grafica "show",
+    // costruisce in automatico la scheda in sovraimpressione (visual overlay) con i punti principali.
+    if (!done.visual && /\b(notizi\w*|news|novit[aà]|ultim'ora|giornale|cronaca|attualit[aà]|diagnostic\w*)\b/i.test(userText) && parsed.reply) {
+      const bullets = parsed.reply
+        .split(/(?:\.\s+|\n+|;\s+)/)
+        .map(s => s.replace(/^(?:certamente|subito|ecco|signore)[,\s]*/gi, '').trim())
+        .filter(s => s.length >= 12)
+        .slice(0, 5)
+        .map(s => ({ label: s.slice(0, 40), value: '' }));
+      if (bullets.length) {
+        done.visual = { kind: 'list', title: 'Notizie in Sovraimpressione', seconds: 18, items: bullets, text: parsed.reply.slice(0, 260) };
+        done.device.push({ type: 'visual', data: done.visual });
+        done.applied.push('show');
       }
     }
     const autoLeaves = [];

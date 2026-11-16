@@ -280,7 +280,7 @@ fun WebShell(onDisconnect: () -> Unit) {
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.mediaPlaybackRequiresUserGesture = true
-            setBackgroundColor(0xFF050F05.toInt())
+            setBackgroundColor(0xFF000000.toInt())
             webViewClient = object : WebViewClient() {
                 override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                     // Il ponte nativo deve restare visibile solo al server di Jarvis: tutto il resto si apre nel browser.

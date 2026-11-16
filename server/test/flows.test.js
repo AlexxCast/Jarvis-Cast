@@ -250,4 +250,16 @@ test('grafo e multi-agente locale: i flow appresi creano il ramo autonomo e gli 
   assert.equal(childCom.parent, 'whatsapp');
   assert.match(childCom.label, /^lettura/i);
   assert.doesNotMatch(childCom.label, /whatsapp/i, 'il nome del genitore non viene ripetuto nel figlio');
+
+  // Amministratore autonomo (auto-interrogazione a zero crediti), diagnostica in sovraimpressione e task Antigravity con schermo PC.
+  const diagRes = await handleChat(db, ENV, deps(zeroLlm), { text: 'Jarvis fammi una diagnostica del sistema' });
+  assert.equal(diagRes.model, 'jarvis-core');
+  assert.ok(diagRes.visual && diagRes.visual.kind === 'bars');
+  assert.ok(diagRes.device.some(d => d.type === 'visual'));
+
+  const agyRes = await handleChat(db, ENV, deps(zeroLlm), { text: 'Jarvis fai partire un task a Antigravity sul progetto Jarvis-Cast per ottimizzare il codice' });
+  assert.equal(agyRes.model, 'jarvis-core');
+  assert.ok(agyRes.visual && agyRes.visual.kind === 'image');
+  assert.match(agyRes.visual.url, /^\/api\/devices\/screen/);
+  assert.ok(agyRes.device.some(d => d.type === 'visual'));
 });

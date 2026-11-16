@@ -6,6 +6,7 @@ import { wrapDurableSql, migrate } from './db.js';
 import { handleApi } from './api.js';
 import * as agenda from './agenda.js';
 import * as jobs from './jobs.js';
+import * as jarvisCore from './jarvis_core.js';
 import { PROVIDERS } from './models.js';
 
 function sameToken(a, b) {
@@ -43,6 +44,7 @@ export class JarvisDO extends DurableObject {
 
   async alarm() {
     const deps = this.deps();
+    jarvisCore.selfInterrogate(this.db, this.env, Date.now(), deps.tz);
     const nextDue = agenda.fireDue(this.db, Date.now(), deps.tz);
     const delay = await jobs.advance(this.db, this.env, deps);
     const candidates = [nextDue, delay != null ? Date.now() + delay : null].filter(x => x != null);

@@ -1,6 +1,6 @@
 :root {
-  --bg: #050f05; --surface: #0a1a0a; --surface2: #152a15; --line: #1f3a1f;
-  --text: #e5f6e5; --muted: #8fb08f; --primary: #39ff14; --on-primary: #003300; --accent: #22d3ee; --error: #f87171;
+  --bg: #000000; --surface: #000000; --surface2: #040904; --line: #1f5c1f;
+  --text: #e5ffe5; --muted: #6bc46b; --primary: #39ff14; --on-primary: #000000; --accent: #39ff14; --error: #f87171;
   --radius: 14px; --nav-h: 62px; --mood: 57,255,20; --mood-a: 0;
 }
 * { box-sizing: border-box; }
@@ -52,7 +52,7 @@ label.check input { width: 20px; height: 20px; min-height: 0; accent-color: var(
 .list > .item:first-child { border-top: 0; }
 .tag { font-size: .72rem; padding: 2px 8px; border-radius: 99px; background: var(--surface2); color: var(--muted); white-space: nowrap; }
 .tag.ok { color: var(--primary); } .tag.warn { color: #fbbf24; } .tag.bad { color: var(--error); }
-.banner { background: #0d2a0d; border: 1px solid var(--primary); border-radius: var(--radius); padding: 12px 14px; }
+.banner { background: #000000; border: 1px solid var(--primary); border-radius: var(--radius); padding: 12px 14px; }
 .chat { flex: 1; min-height: 0; overflow-y: auto; padding: 4px 16px 10px; display: flex; flex-direction: column; gap: 8px; }
 .msg { max-width: 86%; padding: 9px 13px; border-radius: 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .msg.user { align-self: flex-end; background: var(--surface2); border-bottom-right-radius: 4px; }
@@ -96,7 +96,7 @@ details > summary { cursor: pointer; color: var(--muted); }
 /* Mente di Jarvis: blocchi piccoli */
 .blocks { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
 .block > .tag { align-self: flex-start; }
-.block { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px solid var(--line, rgba(57,255,20,.18)); border-radius: 10px; background: rgba(57,255,20,.03); min-width: 0; }
+.block { display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border: 1px solid var(--line, rgba(57,255,20,.3)); border-radius: 10px; background: #000000; min-width: 0; }
 .block summary { cursor: pointer; font-size: .85rem; }
 .chips { display: flex; flex-wrap: wrap; gap: 4px; }
 .chip { font-size: .75rem; padding: 2px 8px; border-radius: 999px; border: 1px solid rgba(57,255,20,.22); }

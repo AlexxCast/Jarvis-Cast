@@ -165,10 +165,95 @@ def play_youtube_first_video(query: str, log_fn) -> None:
     webbrowser.open(search_url)
 
 
-def execute_pc_command(cmd: dict, log_fn) -> None:
+def capture_and_upload_screen(cfg: dict, log_fn, title: str = "Schermo PC") -> None:
+    """Cattura uno screenshot JPEG compresso dello schermo del PC usando .NET nativo e lo invia a Jarvis Cloud."""
+    if os.name != "nt":
+        return
+    ps = (
+        "Add-Type -AssemblyName System.Windows.Forms,System.Drawing; "
+        "$b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds; "
+        "$bmp = New-Object System.Drawing.Bitmap($b.Width, $b.Height); "
+        "$g = [System.Drawing.Graphics]::FromImage($bmp); "
+        "$g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size); "
+        "$w = 1024; $h = [int]($b.Height * ($w / $b.Width)); "
+        "$small = New-Object System.Drawing.Bitmap($bmp, $w, $h); "
+        "$ms = New-Object System.IO.MemoryStream; "
+        "$small.Save($ms, [System.Drawing.Imaging.ImageFormat]::Jpeg); "
+        "[Convert]::ToBase64String($ms.ToArray())"
+    )
+    try:
+        out = subprocess.check_output(
+            ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps],
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            timeout=10,
+        )
+        b64 = out.decode("utf-8", errors="ignore").strip()
+        if b64:
+            api_call(cfg, "POST", "/devices/screen", {"image": b64, "title": title})
+            log_fn("Screenshot dello schermo PC inviato in sovraimpressione.")
+    except Exception as e:
+        log_fn(f"Errore cattura schermo: {e}")
+
+
+def find_project_path(project_name: str) -> Path:
+    clean = (project_name or "Jarvis-Cast").strip()
+    roots = [Path("G:/"), Path.home(), Path.home() / "Desktop", Path.home() / "Documents", Path.home() / "Projects"]
+    for r in roots:
+        if not r.exists():
+            continue
+        cand = r / clean
+        if cand.exists():
+            return cand
+        try:
+            for sub in r.iterdir():
+                if sub.is_dir() and clean.lower() in sub.name.lower():
+                    return sub
+        except Exception:
+            pass
+    return Path("G:/Jarvis-Cast")
+
+
+def run_antigravity_task(project: str, task_prompt: str, cfg: dict, log_fn) -> None:
+    proj_path = find_project_path(project)
+    log_fn(f"Avvio Antigravity su progetto '{proj_path}' — Task: {task_prompt}")
+    # Copia il prompt del task negli appunti così è subito pronto anche per l'agente
+    if task_prompt and os.name == "nt":
+        try:
+            subprocess.run(["clip"], input=task_prompt.encode("utf-16le"), check=False)
+        except Exception:
+            pass
+    launched = False
+    for cmd_name in ["antigravity", "agy", "code"]:
+        try:
+            subprocess.Popen(f'{cmd_name} "{proj_path}"', shell=True)
+            launched = True
+            break
+        except Exception:
+            pass
+    if not launched and os.name == "nt":
+        try:
+            os.startfile(str(proj_path))
+        except Exception:
+            pass
+    time.sleep(2.5)
+    capture_and_upload_screen(cfg, log_fn, title=f"Antigravity • {proj_path.name}")
+
+
+def execute_pc_command(cmd: dict, log_fn, cfg: dict = None) -> None:
     kind = (cmd.get("kind") or "open_app").lower()
     target = (cmd.get("target") or "").strip()
+    args = (cmd.get("args") or "").strip()
     log_fn(f"Eseguo comando [{kind}]: {target}")
+
+    if kind == "capture_screen":
+        if cfg:
+            threading.Thread(target=capture_and_upload_screen, args=(cfg, log_fn), daemon=True).start()
+        return
+
+    if kind == "antigravity_task":
+        if cfg:
+            threading.Thread(target=run_antigravity_task, args=(target, args, cfg, log_fn), daemon=True).start()
+        return
 
     if kind == "play_youtube" and target:
         threading.Thread(target=play_youtube_first_video, args=(target, log_fn), daemon=True).start()
@@ -276,58 +361,58 @@ class JarvisDesktopApp:
 
         self.root.title("JARVIS • Desktop System Manager")
         self.root.geometry("650x520")
-        self.root.configure(bg="#050f08")
+        self.root.configure(bg="#000000")
 
         # Header
-        hdr = tk.Frame(root, bg="#050f08", pady=10, padx=14)
+        hdr = tk.Frame(root, bg="#000000", pady=10, padx=14)
         hdr.pack(fill="x")
-        tk.Label(hdr, text="◉ JARVIS CORE • DESKTOP", font=("Consolas", 14, "bold"), fg="#39ff14", bg="#050f08").pack(side="left")
-        self.status_lbl = tk.Label(hdr, text="○ In attesa di connessione", font=("Segoe UI", 9, "bold"), fg="#9ca3af", bg="#050f08")
+        tk.Label(hdr, text="◉ JARVIS CORE • DESKTOP", font=("Consolas", 14, "bold"), fg="#39ff14", bg="#000000").pack(side="left")
+        self.status_lbl = tk.Label(hdr, text="○ In attesa di connessione", font=("Segoe UI", 9, "bold"), fg="#39ff14", bg="#000000")
         self.status_lbl.pack(side="right")
 
         # Telemetria
-        tele = tk.Frame(root, bg="#0a1c10", pady=8, padx=14, highlightbackground="#1c4426", highlightthickness=1)
+        tele = tk.Frame(root, bg="#000000", pady=8, padx=14, highlightbackground="#39ff14", highlightthickness=1)
         tele.pack(fill="x", padx=14, pady=(0, 10))
-        self.tele_lbl = tk.Label(tele, text=f"PC: {socket.gethostname()} ({platform.system()} {platform.release()}) • RAM: --%", font=("Consolas", 9), fg="#a7f3d0", bg="#0a1c10")
+        self.tele_lbl = tk.Label(tele, text=f"PC: {socket.gethostname()} ({platform.system()} {platform.release()}) • RAM: --%", font=("Consolas", 9), fg="#39ff14", bg="#000000")
         self.tele_lbl.pack(side="left")
         tk.Button(
             tele, text="Apri Sfera 3D / Web App", font=("Segoe UI", 9, "bold"),
-            bg="#15803d", fg="#ffffff", activebackground="#22c55e", relief="flat", padx=10, pady=3,
+            bg="#000000", fg="#39ff14", activebackground="#39ff14", activeforeground="#000000", highlightbackground="#39ff14", highlightthickness=1, relief="solid", bd=1, padx=10, pady=3,
             command=lambda: open_jarvis_webapp(self.cfg),
         ).pack(side="right")
 
         # Configurazione Server
-        cfg_frame = tk.LabelFrame(root, text=" Connessione Jarvis Cloud ", font=("Segoe UI", 9, "bold"), fg="#39ff14", bg="#050f08", padx=10, pady=8)
+        cfg_frame = tk.LabelFrame(root, text=" Connessione Jarvis Cloud ", font=("Segoe UI", 9, "bold"), fg="#39ff14", bg="#000000", padx=10, pady=8)
         cfg_frame.pack(fill="x", padx=14, pady=(0, 10))
 
-        tk.Label(cfg_frame, text="Indirizzo Server:", fg="#d1fae5", bg="#050f08", font=("Segoe UI", 9)).grid(row=0, column=0, sticky="w")
+        tk.Label(cfg_frame, text="Indirizzo Server:", fg="#39ff14", bg="#000000", font=("Segoe UI", 9)).grid(row=0, column=0, sticky="w")
         self.url_var = tk.StringVar(value=self.cfg.get("server_url", ""))
-        tk.Entry(cfg_frame, textvariable=self.url_var, bg="#0c2213", fg="#ecfdf5", insertbackground="#39ff14", relief="flat", width=42).grid(row=0, column=1, padx=6, pady=3, sticky="ew")
+        tk.Entry(cfg_frame, textvariable=self.url_var, bg="#000000", fg="#39ff14", insertbackground="#39ff14", relief="solid", bd=1, width=42).grid(row=0, column=1, padx=6, pady=3, sticky="ew")
 
-        tk.Label(cfg_frame, text="Token (JARVIS_TOKEN):", fg="#d1fae5", bg="#050f08", font=("Segoe UI", 9)).grid(row=1, column=0, sticky="w")
+        tk.Label(cfg_frame, text="Token (JARVIS_TOKEN):", fg="#39ff14", bg="#000000", font=("Segoe UI", 9)).grid(row=1, column=0, sticky="w")
         self.tok_var = tk.StringVar(value=self.cfg.get("server_token", ""))
-        tk.Entry(cfg_frame, textvariable=self.tok_var, show="*", bg="#0c2213", fg="#ecfdf5", insertbackground="#39ff14", relief="flat", width=42).grid(row=1, column=1, padx=6, pady=3, sticky="ew")
+        tk.Entry(cfg_frame, textvariable=self.tok_var, show="*", bg="#000000", fg="#39ff14", insertbackground="#39ff14", relief="solid", bd=1, width=42).grid(row=1, column=1, padx=6, pady=3, sticky="ew")
 
         tk.Button(
             cfg_frame, text="Salva e Connetti", font=("Segoe UI", 9, "bold"),
-            bg="#166534", fg="#ffffff", relief="flat", padx=8, pady=4, command=self.save_and_connect,
+            bg="#39ff14", fg="#000000", relief="flat", padx=8, pady=4, command=self.save_and_connect,
         ).grid(row=0, column=2, rowspan=2, padx=4)
         cfg_frame.columnconfigure(1, weight=1)
 
         # Chat / Barra di comando diretta
-        cmd_frame = tk.Frame(root, bg="#050f08", padx=14)
+        cmd_frame = tk.Frame(root, bg="#000000", padx=14)
         cmd_frame.pack(fill="x", pady=(0, 8))
         self.cmd_var = tk.StringVar()
-        entry = tk.Entry(cmd_frame, textvariable=self.cmd_var, font=("Segoe UI", 10), bg="#0c2213", fg="#ffffff", insertbackground="#39ff14", relief="flat")
+        entry = tk.Entry(cmd_frame, textvariable=self.cmd_var, font=("Segoe UI", 10), bg="#000000", fg="#39ff14", insertbackground="#39ff14", relief="solid", bd=1)
         entry.pack(side="left", fill="x", expand=True, ipady=6, padx=(0, 8))
         entry.bind("<Return>", lambda e: self.send_command())
         tk.Button(
             cmd_frame, text="Invia a Jarvis →", font=("Segoe UI", 9, "bold"),
-            bg="#22c55e", fg="#050f08", relief="flat", padx=12, pady=5, command=self.send_command,
+            bg="#39ff14", fg="#000000", relief="flat", padx=12, pady=5, command=self.send_command,
         ).pack(side="right")
 
         # Log attività e risposte
-        self.log_box = tk.Text(root, bg="#07150b", fg="#d1fae5", font=("Consolas", 9), relief="flat", height=14, wrap="word")
+        self.log_box = tk.Text(root, bg="#000000", fg="#39ff14", font=("Consolas", 9), relief="solid", bd=1, height=14, wrap="word")
         self.log_box.pack(fill="both", expand=True, padx=14, pady=(0, 12))
         self.log("Jarvis Desktop pronto. Inserisci URL e Token se è il primo avvio, oppure scrivi un comando.")
 
@@ -366,7 +451,7 @@ class JarvisDesktopApp:
             self.root.after(0, lambda: self.status_lbl.configure(text="● CONNESSO A JARVIS CLOUD", fg="#39ff14"))
             self.log("Connesso con successo a Jarvis Cloud! Il PC è online.")
             for cmd in res.get("commands") or []:
-                execute_pc_command(cmd, self.log)
+                execute_pc_command(cmd, self.log, self.cfg)
         except Exception as e:
             self.online = False
             self.root.after(0, lambda: self.status_lbl.configure(text="○ Errore connessione", fg="#ef4444"))

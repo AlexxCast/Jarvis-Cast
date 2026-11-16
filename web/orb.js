@@ -391,7 +391,7 @@ export function createOrb() {
     g.addColorStop(1, `rgba(${core},0)`);
     ctx.fillStyle = g;
     ctx.beginPath(); ctx.arc(center.sx, center.sy, cr * 3.2, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = `rgba(8,30,8,${0.9 * fadeCenter})`;
+    ctx.fillStyle = `rgba(0,0,0,${0.95 * fadeCenter})`;
     ctx.strokeStyle = color(0.4 + heat * 0.3, (0.7 + heat * 0.3) * cur.glow * fadeCenter, tintAt(0));
     ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(center.sx, center.sy, cr, 0, Math.PI * 2); ctx.fill(); ctx.stroke();

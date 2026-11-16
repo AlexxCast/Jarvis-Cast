@@ -89,6 +89,17 @@ export async function handleApi(db, env, deps, request) {
       const cmd = devices.enqueueCommand(db, b.targetDevice || 'desktop', b, ms);
       return json({ command: cmd, devices: devices.listDevices(db, ms), history: devices.listCommandHistory(db) });
     }
+    if (path === '/api/devices/screen' && method === 'POST') {
+      const b = await body(request);
+      const img = String(b.image || '').replace(/^data:image\/\w+;base64,/, '');
+      if (!img) return bad('immagine mancante');
+      kvSet(db, 'pcScreen', { image: img, title: String(b.title || 'Schermo PC').slice(0, 100), at: ms });
+      return json({ ok: true, at: ms });
+    }
+    if (path === '/api/devices/screen' && method === 'GET') {
+      const scr = kvGet(db, 'pcScreen', null);
+      return json(scr || { image: '', title: 'In attesa dello screenshot dal PC...', at: 0 });
+    }
     if (path === '/api/addressed' && method === 'POST') {
       const b = await body(request);
       try { return json({ addressed: await isAddressed(db, env, deps, b.text) }); } catch { return json({ addressed: false, error: true }); }

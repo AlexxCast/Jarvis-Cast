@@ -1,17 +1,23 @@
-// JARVIS CORE: motore cognitivo proprietario interno a Jarvis.
+// JARVIS CORE: motore cognitivo proprietario e Amministratore Autonomo interno a Jarvis.
 // Agisce in prima persona (prima e sopra i modelli LLM esterni) con:
-// 1. Esecuzione procedurale istantanea (flow già fatti su telefono e PC, zero modelli esterni);
-// 2. Orchestrazione multi-dispositivo (controllo diretto di PC Desktop e Smartphone, anche per nome es. "Ghideon" / "Gideon");
-// 3. Gestione della parola d'ordine ("niente più fili") e filtro anti-eco della propria voce;
-// 4. Gestione di problemi complessi e prolungati nel tempo (pianificazione multi-step autonoma).
+// 1. Auto-interrogazione autonoma a zero crediti (selfInterrogate): controlla salute modelli, RAM/CPU dispositivi,
+//    pulizia grafo e compiti in sospeso, prendendo iniziativa in caso di necessità senza sprecare token LLM;
+// 2. Diagnostica completa con grafica in sovraimpressione (visual overlay);
+// 3. Controllo autonomo di Antigravity / VS Code su progetti del PC con cattura e invio dello schermo PC in sovraimpressione;
+// 4. Esecuzione procedurale istantanea e orchestrazione multi-dispositivo (PC Ghideon + Smartphone).
 
-import { kvGet } from './db.js';
+import { kvGet, kvSet, pushInbox } from './db.js';
 import * as flows from './flows.js';
 import * as devices from './devices.js';
 import * as memory from './memory.js';
+import * as router from './router.js';
+import * as agents from './agents.js';
+import { nowIso as nowIsoOf } from './clock.js';
 
-const BASE_PC_RE = /\b(pc|computer|desktop|portatile|windows|gh?ideon)\b/i;
-const PC_STATUS_RE = /\b(stato\s+del\s+(?:pc|computer|sistema|gh?ideon)|dispositiv[io]\s+conness\w*|come\s+sta\s+il\s+pc|quanta\s+ram|cpu\s+del\s+pc)\b/i;
+const BASE_PC_RE = /\b(pc|computer|desktop|portatile|windows|gh?ideon|antigravit\w*)\b/i;
+const DIAGNOSTIC_RE = /\b(diagnostic\w*|stato\s+del\s+(?:pc|computer|sistema|gh?ideon|jarvis)|dispositiv[io]\s+conness\w*|come\s+sta\s+il\s+(?:pc|sistema)|quanta\s+ram|cpu\s+del\s+pc|controllo\s+sistema|report\s+sistema)\b/i;
+const PC_SCREEN_RE = /\b(mostra(?:mi)?\s+lo\s+schermo|fa(?:mmi|i)\s+vedere\s+lo\s+schermo|screenshot\s+(?:del\s+)?(?:pc|computer|gh?ideon)|schermo\s+del\s+(?:pc|computer|gh?ideon)|cosa\s+c'[eè]\s+sullo\s+schermo)\b/i;
+const ANTIGRAVITY_RE = /\b(?:antigravit\w*|anti\s+gravit\w*)\b/i;
 const PASSPHRASE_RE = /^\W*(?:la\s+parola\s+d'ordine\s+[eè]\s+|parola\s+d'ordine\s+)?niente\s+pi[uù]\s+fili\W*$/i;
 const SELF_PROMPT_ECHO_RE = /^\W*(?:parola\s+d'ordine(?:\s+non\s+corretta.*)?|certamente\s+signore.*|subito\s+signore.*|ricevuto\s+signore.*|ottimo\s+lavoro\s+signore.*|ho\s+avviato\s+la\s+riproduzione.*|signore\s+ho\s+riscontrato.*)\W*$/i;
 
@@ -28,7 +34,112 @@ const WEB_SERVICES = {
   google: 'https://www.google.com',
 };
 
-/** Verifica se il testo si riferisce al PC Desktop (qualsiasi preposizione: "sul pc", "da pc", "al pc", "gideon", "ghideon"). */
+/**
+ * Meccanismo di Auto-Interrogazione e Iniziativa Autonoma (Zero Crediti LLM).
+ * Gira in background su timer e heartbeat: ripara i modelli bloccati da errori transitori,
+ * isola i modelli ritirati (404/410), sorveglia le risorse del PC/Telefono e mantiene ordinato il grafo.
+ */
+export function selfInterrogate(db, env = {}, nowMs = Date.now(), tz = 'Europe/Rome') {
+  const lastRun = Number(kvGet(db, 'lastSelfInterrogateMs', 0));
+  if (nowMs - lastRun < 45_000) return { ran: false };
+  kvSet(db, 'lastSelfInterrogateMs', nowMs);
+
+  const actionsTaken = [];
+  const atIso = nowIsoOf(nowMs, tz);
+
+  // 1. Auto-guarigione dei modelli e salvaguardia crediti:
+  // - Sblocca i modelli principali (es. Gemini) se erano in pausa per un picco 503/timeout ormai passato (> 90s);
+  // - Isola per 24h i modelli con errore 410 (Gone / End-of-Life) o 404 (non più gratuiti) così non rallentano Jarvis.
+  try {
+    const states = db.all('SELECT * FROM model_state');
+    for (const st of states) {
+      const err = String(st.last_error || '');
+      if (/^(404|410)\b/.test(err) && st.blocked_until < nowMs + 12 * 3600_000) {
+        db.run('UPDATE model_state SET blocked_until = ? WHERE model_key = ?', nowMs + 24 * 3600_000, st.model_key);
+        actionsTaken.push(`isolato modello obsoleto ${st.model_key}`);
+      } else if (/^(0|500|502|503|504)\b/.test(err) && st.blocked_until > nowMs && nowMs - Number(st.updated || 0) > 90_000) {
+        db.run('UPDATE model_state SET blocked_until = 0, fails = 0 WHERE model_key = ?', st.model_key);
+        actionsTaken.push(`riattivato modello ${st.model_key}`);
+      }
+    }
+  } catch { /* tabella non pronta */ }
+
+  // 2. Sorveglianza autonoma dispositivi (es. RAM/CPU critica sul PC Ghideon):
+  const devs = devices.listDevices(db, nowMs);
+  for (const d of devs) {
+    if (!d.online) continue;
+    const ram = Number(d.metrics?.ram || 0);
+    if (ram >= 90) {
+      const lastAlert = Number(kvGet(db, `ramAlert:${d.id}`, 0));
+      if (nowMs - lastAlert > 60 * 60_000) {
+        kvSet(db, `ramAlert:${d.id}`, nowMs);
+        pushInbox(db, atIso, 'admin', `Signore, ho rilevato che su ${d.name} la RAM è al ${ram}%. Se vuole posso chiudere le applicazioni superflue.`);
+        actionsTaken.push(`avviso RAM critica su ${d.name} (${ram}%)`);
+      }
+    }
+  }
+
+  // 3. Igiene periodica del grafo e delle automazioni (ogni 10 minuti, zero crediti):
+  const lastTidy = Number(kvGet(db, 'lastAutoTidyMs', 0));
+  if (nowMs - lastTidy > 10 * 60_000) {
+    kvSet(db, 'lastAutoTidyMs', nowMs);
+    const merged = memory.tidyTopics(db);
+    const pruned = agents.FlowAgent.prune(db);
+    if (merged > 0 || pruned > 0) actionsTaken.push(`grafo ottimizzato (${merged} uniti, ${pruned} flow potati)`);
+  }
+
+  return { ran: true, actionsTaken };
+}
+
+/** Costruisce il rapporto diagnostico completo con grafica in sovraimpressione (visual). */
+export function buildDiagnosticReport(db, env = {}, nowMs = Date.now()) {
+  selfInterrogate(db, env, nowMs);
+  const devs = devices.listDevices(db, nowMs);
+  const pc = devs.find(d => d.kind === 'desktop');
+  const mStatus = router.status(db, env, nowMs).filter(m => m.configured);
+  const healthyModels = mStatus.filter(m => m.blockedForSec === 0 && !/^(404|410)\b/.test(m.lastError || ''));
+  const blockedModels = mStatus.filter(m => m.blockedForSec > 0 || /^(404|410)\b/.test(m.lastError || ''));
+  const learnedFlows = flows.listFlows(db).length + flows.listAutoGoals(db).length;
+  const modulesCount = memory.listModules(db).length;
+
+  const items = [];
+  if (pc) {
+    items.push({ label: `${pc.name} (${pc.online ? 'Online' : 'Offline'})`, value: Number(pc.metrics?.ram || 0) });
+  } else {
+    items.push({ label: 'PC Desktop (Offline)', value: 0 });
+  }
+  items.push({ label: `Modelli IA attivi (${healthyModels.length}/${mStatus.length})`, value: Math.round((healthyModels.length / Math.max(1, mStatus.length)) * 100) });
+  const primaryLoad = healthyModels[0]?.load ?? 0;
+  items.push({ label: `Crediti disponibili (${healthyModels[0]?.provider || 'IA'})`, value: Math.max(0, 100 - primaryLoad) });
+  items.push({ label: `Automazioni (${learnedFlows}) e Dipartimenti (${modulesCount})`, value: Math.min(100, learnedFlows * 10 + modulesCount * 5) });
+
+  const visual = {
+    kind: 'bars',
+    title: 'Diagnostica Sistema • Jarvis Core',
+    unit: '%',
+    seconds: 20,
+    items,
+    text: pc?.online
+      ? `Finestra attiva su ${pc.name}: "${pc.metrics?.activeWindow || 'Desktop'}" · Modelli in pausa/EOL: ${blockedModels.length}`
+      : `Modelli operativi: ${healthyModels.map(m => m.model).slice(0, 3).join(', ')}`,
+  };
+
+  const pcPart = pc
+    ? `${pc.name} è ${pc.online ? `online con RAM al ${Math.round(Number(pc.metrics?.ram || 0))}%` : 'offline'}`
+    : 'il PC Desktop non è connesso';
+  const reply = `Diagnostica completata, signore: ${pcPart}; ${healthyModels.length} modelli IA sono operativi con pieno risparmio crediti (${blockedModels.length} obsoleti isolati in automatico) e ${learnedFlows} automazioni sono pronte.`;
+
+  return {
+    reply,
+    visual,
+    device: [{ type: 'visual', data: visual }],
+    actions: ['core_diagnostic', 'show'],
+    touched: ['automazioni', 'tecnologia'],
+    touchedLeaves: [],
+  };
+}
+
+/** Verifica se il testo si riferisce al PC Desktop (qualsiasi preposizione: "sul pc", "da pc", "al pc", "gideon", "ghideon", "antigravity"). */
 export function isPcTarget(db, text) {
   const s = String(text || '');
   if (BASE_PC_RE.test(s)) return true;
@@ -44,7 +155,7 @@ export function isPcTarget(db, text) {
 
 function stripPcWords(db, text) {
   let out = String(text || '')
-    .replace(/\b(?:su|sul|sullo|in|nel|da|dal|al|il|lo| col|con\s+il)?\s*(?:pc|computer|desktop|portatile|windows|gh?ideon)(?:\s+(?:gh?ideon|pc|computer|desktop))?\b/gi, ' ');
+    .replace(/\b(?:su|sul|sullo|in|nel|da|dal|al|il|lo|col|con\s+il)?\s*(?:pc|computer|desktop|portatile|windows|gh?ideon)(?:\s+(?:gh?ideon|pc|computer|desktop))?\b/gi, ' ');
   for (const d of devices.listDevices(db)) {
     if (d.kind === 'desktop' && d.name) {
       const cleanName = d.name.replace(/^PC\s+/i, '').trim();
@@ -101,11 +212,63 @@ export function dispatchPcPlayYoutube(db, rawQuery, nowMs = Date.now()) {
   };
 }
 
+/** Avvia un task su Antigravity sul progetto richiesto sul PC e mostra lo schermo del PC in sovraimpressione! */
+export function dispatchAntigravityTask(db, userText, nowMs = Date.now()) {
+  const s = String(userText || '').replace(/^\W*(ehi|ciao|ok)?\W*jarvis\W*/i, '').trim();
+  const projMatch = /\b(?:sul\s+progetto|progetto|cartella|repo)\s+([a-z0-9_.-]+)/i.exec(s);
+  const project = projMatch ? projMatch[1] : 'Jarvis-Cast';
+  let taskPrompt = s
+    .replace(/^.*?\b(?:antigravit\w*|anti\s+gravit\w*)\b\s*/i, '')
+    .replace(/\b(?:sul\s+progetto|progetto)\s+[a-z0-9_.-]+\b/i, '')
+    .replace(/^(?:per|di|che|su|:|-)\s+/i, '')
+    .trim();
+  if (!taskPrompt) taskPrompt = s;
+
+  const reg = flows.registerAutoGoal(db, `Antigravity: ${project}`, nowMs);
+  devices.enqueueCommand(db, 'desktop', { kind: 'antigravity_task', target: project, args: taskPrompt }, nowMs);
+  memory.touchTopics(db, [{ area: 'programmazione', topic: project, parent: 'Antigravity' }], new Date(nowMs).toISOString());
+
+  const visual = {
+    kind: 'image',
+    title: `Antigravity • Progetto ${project} (Schermo PC)`,
+    url: `/api/devices/screen?t=${nowMs}`,
+    seconds: 25,
+    text: `Task avviato: "${taskPrompt.slice(0, 100)}"`,
+  };
+  return {
+    reply: `Avvio subito Antigravity sul progetto ${project} sul PC e le mostro lo schermo in sovraimpressione, signore.`,
+    visual,
+    device: [{ type: 'visual', data: visual }],
+    actions: ['pc_action', 'show'],
+    touched: ['automazioni', 'programmazione'],
+    touchedLeaves: reg ? ['f:' + reg.id] : [],
+  };
+}
+
+/** Richiede uno screenshot live dello schermo del PC e lo mostra in sovraimpressione. */
+export function dispatchPcScreenView(db, nowMs = Date.now()) {
+  devices.enqueueCommand(db, 'desktop', { kind: 'capture_screen', target: 'screen' }, nowMs);
+  const visual = {
+    kind: 'image',
+    title: 'Schermo PC (Live)',
+    url: `/api/devices/screen?t=${nowMs}`,
+    seconds: 25,
+  };
+  return {
+    reply: 'Catturo e le mostro subito lo schermo del PC in sovraimpressione, signore.',
+    visual,
+    device: [{ type: 'visual', data: visual }],
+    actions: ['pc_action', 'show'],
+    touched: ['automazioni'],
+    touchedLeaves: [],
+  };
+}
+
 /**
- * Riconosce comandi diretti al PC Desktop, la parola d'ordine "niente più fili" o lo stato multi-dispositivo
+ * Riconosce comandi diretti al PC Desktop, Antigravity, diagnostica, cattura schermo o parola d'ordine
  * e li esegue localmente tramite il nucleo proprietario Jarvis Core (zero chiamate a modelli esterni).
  */
-export function handleCoreIntent(db, userText, nowMs = Date.now()) {
+export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}) {
   const raw = String(userText || '').trim();
   if (!raw) return null;
 
@@ -143,30 +306,22 @@ export function handleCoreIntent(db, userText, nowMs = Date.now()) {
   const clean = raw.replace(/^\W*(ehi|ciao|ok)?\W*jarvis\W*/i, '').replace(/\bniente\s+pi[uù]\s+fili\b/gi, '').trim();
   if (!clean) return null;
 
-  // 2. Stato del sistema / dispositivi connessi (PC + Telefono)
-  if (PC_STATUS_RE.test(clean)) {
-    const list = devices.listDevices(db, nowMs);
-    const pc = list.find(d => d.kind === 'desktop');
-    if (!pc) {
-      return {
-        reply: 'Al momento il PC Desktop non risulta ancora collegato, signore. Avvii l\'app Jarvis Desktop sul computer per metterlo sotto il mio controllo.',
-        device: [], actions: ['core_status'], touched: ['automazioni'], touchedLeaves: [],
-      };
-    }
-    const m = pc.metrics || {};
-    const parts = [
-      pc.online ? `${pc.name} è online` : `${pc.name} risulta offline`,
-      m.cpu ? `CPU al ${Math.round(m.cpu)}%` : '',
-      m.ram ? `RAM al ${Math.round(m.ram)}%` : '',
-      m.activeWindow ? `finestra attiva "${m.activeWindow}"` : '',
-    ].filter(Boolean);
-    return {
-      reply: `Stato sistema: ${parts.join(', ')}, signore.`,
-      device: [], actions: ['core_status'], touched: ['automazioni'], touchedLeaves: [],
-    };
+  // 2. Diagnostica completa del sistema / stato PC / stato modelli (con grafica in sovraimpressione!)
+  if (DIAGNOSTIC_RE.test(clean)) {
+    return buildDiagnosticReport(db, env, nowMs);
   }
 
-  // 3. Comandi verso il PC Desktop (es. "apri youtube e fai partire un video al pc", "metti un video su youtube da pc gideon")
+  // 3. Richiesta di vedere lo schermo del PC in sovraimpressione
+  if (PC_SCREEN_RE.test(clean)) {
+    return dispatchPcScreenView(db, nowMs);
+  }
+
+  // 4. Task autonomo su Antigravity ("fai partire un task a Antigravity sul progetto X")
+  if (ANTIGRAVITY_RE.test(clean)) {
+    return dispatchAntigravityTask(db, clean, nowMs);
+  }
+
+  // 5. Comandi verso il PC Desktop (es. "apri youtube e fai partire un video al pc", "metti un video su youtube da pc gideon")
   if (isPcTarget(db, clean)) {
     const withoutPc = stripPcWords(db, clean);
 

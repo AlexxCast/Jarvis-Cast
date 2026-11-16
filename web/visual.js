@@ -70,7 +70,23 @@ function drawing(v) {
 }
 
 function image(v) {
-  return el('img', { class: 'v-img', alt: v.title || 'immagine', src: v.url, referrerpolicy: 'no-referrer' });
+  const img = el('img', { class: 'v-img', alt: v.title || 'immagine', referrerpolicy: 'no-referrer', style: 'width:100%;border-radius:10px;border:1px solid #39ff14' });
+  if (String(v.url || '').startsWith('/api/devices/screen')) {
+    const loadScreen = (attempt = 0) => {
+      let tok = localStorage.getItem('jarvis_token') || '';
+      try { if (!tok && window.JarvisNative) tok = JSON.parse(window.JarvisNative.getConfig() || '{}').token || ''; } catch {}
+      fetch('/api/devices/screen', { headers: tok ? { Authorization: 'Bearer ' + tok } : {} })
+        .then(r => r.json())
+        .then(d => {
+          if (d?.image) img.src = 'data:image/jpeg;base64,' + d.image;
+          if (attempt < 2) setTimeout(() => loadScreen(attempt + 1), 2600);
+        }).catch(() => {});
+    };
+    loadScreen(0);
+  } else {
+    img.src = v.url;
+  }
+  return img;
 }
 
 const KINDS = { bars, line, pie, list, text: bigText, svg: drawing, image };
@@ -88,8 +104,8 @@ export function renderVisual(v) {
 export const VISUAL_CSS = `
 .visual, .visual * { box-sizing: border-box; }
 .visual > * { min-width: 0; }
-.visual { margin: 0; max-width: 100%; overflow: hidden; background: rgba(8,24,8,.92); border: 1px solid #1f3a1f; border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 10px;
-  color: #e5f6e5; animation: v-in .45s cubic-bezier(.2,.9,.3,1.2) both; box-shadow: 0 0 24px rgba(57,255,20,.18); }
+.visual { margin: 0; max-width: 100%; overflow: hidden; background: rgba(0,0,0,.95); border: 1px solid #39ff14; border-radius: 16px; padding: 14px; display: flex; flex-direction: column; gap: 10px;
+  color: #e5ffe5; animation: v-in .45s cubic-bezier(.2,.9,.3,1.2) both; box-shadow: 0 0 24px rgba(57,255,20,.22); }
 .visual figcaption { font-weight: 650; font-size: 1rem; }
 .v-note { color: #8fb08f; font-size: .88rem; margin: 0; }
 @keyframes v-in { from { opacity: 0; transform: translateY(14px) scale(.96); } to { opacity: 1; transform: none; } }

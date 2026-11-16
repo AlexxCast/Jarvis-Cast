@@ -261,12 +261,18 @@ Jarvis diceva "ho aggiornato il piano" o "chiamo Marcolino" senza farlo.
 
 - **Deduplicazione semantica e pulizia gerarchica dei nodi (`memory.js`):** `sameTopic` confronta le radici concettuali (`topicStems`) ignorando parole pleonastiche come `"messaggi"` o `"app"` (così `"lettura whatsapp"` e `"lettura messaggi WhatsApp"` si fondono in un solo nodo invece di coesistere o annidarsi tra loro); `isNoiseTopic` elimina nodi generici (`generale`, `ascolto`, `traduzione`) e nodi che ripetono il nome del ramo (`comunicazione` dentro `comunicazioni`); `stripParentWord` rimuove dall'etichetta del nodo figlio la ripetizione del nodo padre (`"ristoranti tipici Klagenfurt"` sotto `"Klagenfurt"` diventa `"ristoranti tipici"`), e `formatAutoNode` unifica le varianti prolisse delle automazioni (`"Apri Joytify, cerca Mannarino e avvia..."` + `"Apri Joytify, cerca Mannarino"` → `"Cerca Mannarino"` sotto `"Joytify"`).
 
+- **Amministratore autonomo a zero crediti (`selfInterrogate` in `jarvis_core.js`), Task Antigravity con Schermo PC Live, Notizie/Diagnostica in Sovraimpressione e Sfondo Nero puro (`#000000`):**
+  - `selfInterrogate` gira in automatico su timer e heartbeat senza consumare token LLM: isola per 24h i modelli EOL/410, riattiva i modelli usciti da picchi 503/timeout, avvisa se la RAM del PC supera il 90% e ottimizza il grafo ogni 10 minuti.
+  - Chiedendo *"fai partire un task a Antigravity sul progetto X"*, il PC apre Antigravity sulla cartella del progetto, copia il prompt, cattura uno screenshot dello schermo del PC (`POST /api/devices/screen`) e lo mostra in sovraimpressione sul telefono.
+  - Diagnostiche e notizie generano sempre una scheda grafica in sovraimpressione (`visual` / `Overlay.showVisual`).
+  - Lo sfondo di web app, overlay, WebView Android e app Desktop è ora nero puro (`#000000`) con soli dettagli verdi (`#39ff14`).
+
 ---
 
 ## 5. Stato attuale (16/11/2026)
 
-- **Pubblicato:** tutto fino alla versione 2.17 (`jarvis-shell-v21`).
-- **APK:** l'ultimo è il 2.17 (`versionCode = 19`).
+- **Pubblicato:** tutto fino alla versione 2.20 (`jarvis-shell-v24`).
+- **APK:** l'ultimo è il 2.20 (`versionCode = 22`).
 - **Mai verificato da noi sul telefono vero:**
   - l'Accessibilità sbloccata;
   - l'affidabilità della parola chiave;

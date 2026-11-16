@@ -124,9 +124,13 @@ async function callProvider(fetchFn, env, m, messages, maxTokens, tier = 'smart'
       if (reasoning && (res.status === 400 || res.status === 422)) { clearTimeout(timer); return callProvider(fetchFn, env, m, messages, maxTokens, tier, true); }
       return { ok: false, status: res.status, error: (data?.error?.message || data?.message || raw || '').toString().slice(0, 300), headers: res.headers };
     }
+    const msg = data?.choices?.[0]?.message;
+    const rawContent = Array.isArray(msg?.content)
+      ? msg.content.map(c => c?.text || '').join('\n')
+      : (typeof msg?.content === 'string' ? msg.content : '');
     const text = anth
       ? (data?.content || []).filter(c => c.type === 'text').map(c => c.text).join('\n')
-      : (typeof data?.choices?.[0]?.message?.content === 'string' ? data.choices[0].message.content : '');
+      : (rawContent || (typeof msg?.reasoning_content === 'string' ? msg.reasoning_content : ''));
     const tokens = anth ? (data?.usage?.input_tokens || 0) + (data?.usage?.output_tokens || 0) : (data?.usage?.total_tokens || 0);
     if (!text.trim()) return { ok: false, status: 502, error: 'risposta vuota', headers: res.headers };
     return { ok: true, text, tokens, headers: res.headers };
@@ -153,7 +157,7 @@ function blockFor(status, error, fails, headers) {
   if (status === 429) return Number.isFinite(retryAfter) && retryAfter > 0 ? Math.min(retryAfter * 1000, 6 * 3600_000) : Math.min(MINUTE * 2 ** fails, 6 * 3600_000);
   if (status === 401 || status === 403) return 6 * 3600_000;                 // chiave non valida
   if (status === 402) return 12 * 3600_000;                                  // crediti esauriti
-  if (status === 404 || (status === 400 && /model/i.test(error))) return 24 * 3600_000; // modello ritirato
+  if (status === 404 || status === 410 || (status === 400 && /model/i.test(error))) return 24 * 3600_000; // modello ritirato o non più gratuito
   if (status === 400 || status === 413) return 0;                            // richiesta non adatta a questo modello: prova il prossimo, senza bloccarlo
   return 30_000;                                                             // 5xx, timeout, rete
 }
