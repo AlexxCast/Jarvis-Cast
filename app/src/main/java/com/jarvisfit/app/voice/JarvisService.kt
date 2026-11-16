@@ -710,6 +710,8 @@ class JarvisService : LifecycleService(), SensorEventListener {
      * letta dagli altoparlanti da Jarvis stesso, impedendogli di rispondere al proprio messaggio.
      */
     private fun isSelfSpeechEcho(recognizedText: String): Boolean {
+        val low = recognizedText.lowercase().trim()
+        if (low == "parola d'ordine" || low.startsWith("parola d'ordine non corretta")) return true
         return VoiceText.isSelfEcho(
             recognized = recognizedText,
             lastSpoken = lastSpokenText,
@@ -742,12 +744,36 @@ class JarvisService : LifecycleService(), SensorEventListener {
         }
     }
 
+    private var awaitingPassphrase = false
+    private var pendingDeviceActions: List<Pair<String, String>> = emptyList()
+    private var pendingReplyText: String = ""
+
     private fun backToWaiting() {
         busy = false
         inConversationMode = false
         wakeFromScreenOff = false
+        awaitingPassphrase = false
+        pendingDeviceActions = emptyList()
         if (yielded) return
         main.postDelayed({ if (Settings.listeningEnabled && !yielded) startWakeWord() }, 300)
+    }
+
+    private fun runApprovedDeviceActions(actions: List<Pair<String, String>>): String? {
+        var callWho: String? = null
+        for ((type, value) in actions) {
+            when (type) {
+                "call" -> callWho = value
+                "visual" -> Overlay.showVisual(this@JarvisService, value)
+                "open_app" -> AppLauncher.open(this@JarvisService, value)
+                "open_url" -> AppLauncher.openUrl(this@JarvisService, value)
+                "phone_task" -> PhoneAgent.start(this@JarvisService, value)
+                "save_place" -> when (Places.saveHere(this@JarvisService, value)) {
+                    "permesso" -> notifyInfoPopup("Per salvare \"$value\" apri Jarvis e concedi la posizione (Consenti sempre).", 12)
+                    "spento" -> notifyInfoPopup("Accendi la posizione del telefono e ripeti.", 12)
+                }
+            }
+        }
+        return callWho
     }
 
     // ---------------------------------------------------------------- brain
@@ -755,8 +781,45 @@ class JarvisService : LifecycleService(), SensorEventListener {
     private fun process(text: String) {
         if (VoiceText.isCancelPhrase(text.trim())) {
             inConversationMode = false
+            awaitingPassphrase = false
+            pendingDeviceActions = emptyList()
             Speaker.speak("Ai suoi ordini, signore. Resto a disposizione.") {
                 main.post { backToWaiting() }
+            }
+            return
+        }
+
+        // Se Jarvis stava aspettando la parola d'ordine ("niente più fili"), la verifica qui usando lo stesso riconoscitore
+        // (senza mai aprirne un secondo in conflitto né inviare la parola d'ordine alla chat).
+        if (awaitingPassphrase) {
+            stopSession(cancel = false)
+            if (VoiceId.matchesPassword(text)) {
+                awaitingPassphrase = false
+                wakeFromScreenOff = false
+                VoiceId.trustNow()
+                val actions = pendingDeviceActions
+                val replySay = pendingReplyText.ifBlank { "Parola d'ordine confermata, procedo signore." }
+                pendingDeviceActions = emptyList()
+                pendingReplyText = ""
+                val callWho = runApprovedDeviceActions(actions)
+                JarvisState.status.value = JarvisState.Status.SPEAKING
+                Overlay.caption(this@JarvisService, replySay)
+                lastSpokenText = replySay
+                lastSpokenTime = System.currentTimeMillis()
+                Speaker.speak(replySay) {
+                    main.post {
+                        callWho?.let { com.jarvisfit.app.device.Dialer.call(this@JarvisService, it) }
+                        backToWaiting()
+                    }
+                }
+            } else {
+                awaitingPassphrase = false
+                pendingDeviceActions = emptyList()
+                pendingReplyText = ""
+                val msg = "Parola d'ordine non corretta, non procedo."
+                lastSpokenText = msg
+                lastSpokenTime = System.currentTimeMillis()
+                Speaker.speak(msg) { main.post { backToWaiting() } }
             }
             return
         }
@@ -766,31 +829,36 @@ class JarvisService : LifecycleService(), SensorEventListener {
         stopSession(cancel = false)
 
         lifecycleScope.launch {
+            if (VoiceId.matchesPassword(text)) VoiceId.trustNow()
             val cloud = Settings.cloudEnabled
             val reply = if (cloud) Cloud.chat(text) else Brain.handle(text)
             JarvisState.exchanges.value = JarvisState.exchanges.value + 1
             if (cloud) scheduleInbox(20_000) // un promemoria appena creato può scadere a breve
             if (reply.photoRequest != null) notifyPhotoRequest(reply.photoRequest)
-            // "Apri Spotify": a schermo spento o con Jarvis in secondo piano Android può rifiutare l'avvio.
-            var callWho: String? = null
-            // Usare il telefono, aprire app o telefonare: chiede la password SOLO se il telefono era spento o bloccato.
+            // Usare il telefono, aprire app o telefonare: se serve la parola d'ordine, la chiede con il riconoscitore principale.
             val sensitive = reply.device.any { it.first == "phone_task" || it.first == "call" || it.first == "open_app" }
-            val allowed = !sensitive || !VoiceId.needed(this@JarvisService, wakeFromScreenOff) || VoiceId.gate(this@JarvisService, wakeFromScreenOff, text)
-            if (allowed && sensitive) wakeFromScreenOff = false
-            for ((type, value) in reply.device) {
-                if (!allowed && (type == "phone_task" || type == "call" || type == "open_app")) continue
-                when (type) {
-                    "call" -> callWho = value // parte dopo che Jarvis ha finito di parlare
-                    "visual" -> Overlay.showVisual(this@JarvisService, value)
-                    "open_app" -> AppLauncher.open(this@JarvisService, value)
-                    "open_url" -> AppLauncher.openUrl(this@JarvisService, value)
-                    "phone_task" -> PhoneAgent.start(this@JarvisService, value)
-                    "save_place" -> when (Places.saveHere(this@JarvisService, value)) {
-                        "permesso" -> notifyInfoPopup("Per salvare \"$value\" apri Jarvis e concedi la posizione (Consenti sempre).", 12)
-                        "spento" -> notifyInfoPopup("Accendi la posizione del telefono e ripeti.", 12)
-                    }
+            if (sensitive && VoiceId.needed(this@JarvisService, wakeFromScreenOff)) {
+                awaitingPassphrase = true
+                pendingDeviceActions = reply.device
+                pendingReplyText = reply.text
+                inConversationMode = true
+                val prompt = "Parola d'ordine?"
+                JarvisState.status.value = JarvisState.Status.SPEAKING
+                Overlay.caption(this@JarvisService, prompt)
+                updateNotification(prompt)
+                lastSpokenText = prompt
+                lastSpokenTime = System.currentTimeMillis()
+                Speaker.speak(prompt) {
+                    main.postDelayed({
+                        busy = false
+                        lastConversationActivityTime = System.currentTimeMillis()
+                        listenForCommand()
+                    }, 350)
                 }
+                return@launch
             }
+            if (sensitive) wakeFromScreenOff = false
+            val callWho = runApprovedDeviceActions(reply.device)
             
             // Pop-up notifica a schermo con i soli dati schematici (es. macro, kcal, ricetta e dosi), NON il discorso parlato!
             val popupText = reply.cardInfo ?: run {
@@ -803,12 +871,6 @@ class JarvisService : LifecycleService(), SensorEventListener {
                 notifyInfoPopup(popupText)
             }
 
-            if (!allowed) {
-                // Voce non riconosciuta: l'ha già detto, e non legge la risposta che annunciava l'azione.
-                inConversationMode = false
-                backToWaiting()
-                return@launch
-            }
             if (yielded) {
                 // Nel frattempo un'altra app ha preso il microfono: niente voce sopra il suo audio,
                 // la risposta resta leggibile nella notifica.

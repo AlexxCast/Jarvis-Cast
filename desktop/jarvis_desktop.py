@@ -49,7 +49,16 @@ COMMON_APPS = {
     "spotify": "spotify",
     "discord": "discord",
     "telegram": "telegram",
-    "whatsapp": "whatsapp",
+    "whatsapp": "https://web.whatsapp.com",
+    "youtube": "https://www.youtube.com",
+    "gmail": "https://mail.google.com",
+    "instagram": "https://www.instagram.com",
+    "netflix": "https://www.netflix.com",
+    "twitch": "https://www.twitch.com",
+    "github": "https://github.com",
+    "chatgpt": "https://chatgpt.com",
+    "maps": "https://maps.google.com",
+    "google": "https://www.google.com",
     "gestione attivita": "taskmgr",
     "task manager": "taskmgr",
     "impostazioni": "ms-settings:",
@@ -161,6 +170,9 @@ def execute_pc_command(cmd: dict, log_fn) -> None:
 
     if kind == "open_app" and target:
         exe = COMMON_APPS.get(target.lower(), target)
+        if exe.startswith(("http://", "https://")):
+            webbrowser.open(exe)
+            return
         try:
             if os.name == "nt":
                 os.startfile(exe)
@@ -386,7 +398,7 @@ class JarvisDesktopApp:
                     if self.online:
                         self.online = False
                         self.root.after(0, lambda: self.status_lbl.configure(text="○ Disconnesso (riprovo...)", fg="#f59e0b"))
-            time.sleep(4)
+            time.sleep(2)
 
 
 if __name__ == "__main__":

@@ -325,12 +325,22 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
       done.device = [{ type: 'phone_task', goal: `${goal} (app: ${done.device[0].name})` }];
       done.applied.push('phone_task');
     }
+    // Rete di sicurezza per il PC: se l'utente o il modello parla di aprire qualcosa sul PC/Ghideon ma manca pc_action, lo invia comunque al PC.
+    if (!done.applied.includes('pc_action') && (jarvisCore.isPcTarget(db, userText) || jarvisCore.isPcTarget(db, parsed.reply))) {
+      const mApp = /\b(?:apri|apro|avvia|avvio|eseguo\s+l'apertura\s+di)\s+(?:l'app\s+|il\s+programma\s+)?([a-z0-9]+)/i.exec(userText + ' ' + parsed.reply);
+      if (mApp) {
+        jarvisCore.dispatchPcOpen(db, mApp[1], ms);
+        done.applied.push('pc_action');
+        done.device = [];
+      }
+    }
     const autoLeaves = [];
     if (done.device.some(d => d.type === 'phone_task')) {
       kvSet(db, 'phonePending', null);
       agents.FlowAgent.prune(db);
       for (const d of done.device) {
         if (d.type === 'phone_task' && d.goal) {
+          kvSet(db, 'lastPhoneGoal', d.goal);
           const reg = flows.registerAutoGoal(db, d.goal, ms);
           if (reg) autoLeaves.push('f:' + reg.id);
         }
