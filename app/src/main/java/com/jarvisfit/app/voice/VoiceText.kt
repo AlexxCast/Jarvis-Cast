@@ -15,9 +15,15 @@ object VoiceText {
      * Volutamente conservativo: una risposta breve dell'utente che riprende 1-2 parole di Jarvis
      * ("sì, il pranzo") NON deve essere scartata.
      */
+    private val selfSignatureRegex = Regex(
+        "^(?:certamente signore|subito signore|ricevuto signore|ottimo lavoro signore|ho avviato la riproduzione|" +
+            "signore ho riscontrato|parola d ordine|apro joytify|riprendo subito|fatto signore|eseguo subito)\\b"
+    )
+
     fun isSelfEcho(recognized: String, lastSpoken: String, msSinceSpoken: Long, windowMs: Long = 15_000L): Boolean {
-        if (lastSpoken.isBlank() || msSinceSpoken < 0 || msSinceSpoken > windowMs) return false
         val rec = normalize(recognized)
+        if (selfSignatureRegex.containsMatchIn(rec)) return true
+        if (lastSpoken.isBlank() || msSinceSpoken < 0 || msSinceSpoken > windowMs) return false
         val spoken = normalize(lastSpoken)
         val recWords = rec.split(" ").filter { it.length > 2 }
         if (recWords.size < 3) return false
@@ -27,7 +33,7 @@ object VoiceText {
 
         val spokenWords = spoken.split(" ").filter { it.length > 2 }.toSet()
         val ratio = recWords.count { it in spokenWords }.toDouble() / recWords.size
-        return ratio >= 0.85
+        return ratio >= 0.65
     }
 
     /**

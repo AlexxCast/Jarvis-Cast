@@ -13,8 +13,8 @@ android {
         applicationId = "com.jarvisfit.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 20
-        versionName = "2.18"
+        versionCode = 21
+        versionName = "2.19"
     }
 
     // In GitHub Actions la chiave del PC arriva dal segreto DEBUG_KEYSTORE_B64 (vedi build-apk.yml):

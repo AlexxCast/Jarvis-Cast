@@ -16,7 +16,9 @@ import subprocess
 import sys
 import threading
 import time
+import re
 import urllib.error
+import urllib.parse
 import urllib.request
 import webbrowser
 from pathlib import Path
@@ -138,10 +140,39 @@ def press_media_key(vk_code: int) -> None:
             pass
 
 
+def play_youtube_first_video(query: str, log_fn) -> None:
+    """Cerca il video su YouTube, estrae il primo videoId e lo apre direttamente in riproduzione sul PC."""
+    q = (query or "musica rilassante").strip()
+    search_url = f"https://www.youtube.com/results?search_query={urllib.parse.quote(q)}"
+    try:
+        req = urllib.request.Request(
+            search_url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                "Accept-Language": "it-IT,it;q=0.9",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            html = resp.read().decode("utf-8", errors="ignore")
+        m = re.search(r'"videoId":"([a-zA-Z0-9_-]{11})"', html)
+        if m:
+            watch_url = f"https://www.youtube.com/watch?v={m.group(1)}&autoplay=1"
+            log_fn(f"Avvio video YouTube: {q} ({watch_url})")
+            webbrowser.open(watch_url)
+            return
+    except Exception as e:
+        log_fn(f"Fallback ricerca YouTube ({e})")
+    webbrowser.open(search_url)
+
+
 def execute_pc_command(cmd: dict, log_fn) -> None:
     kind = (cmd.get("kind") or "open_app").lower()
     target = (cmd.get("target") or "").strip()
     log_fn(f"Eseguo comando [{kind}]: {target}")
+
+    if kind == "play_youtube" and target:
+        threading.Thread(target=play_youtube_first_video, args=(target, log_fn), daemon=True).start()
+        return
 
     if kind == "open_url" and target:
         url = target if target.startswith(("http://", "https://")) else "https://" + target

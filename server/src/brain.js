@@ -325,13 +325,21 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
       done.device = [{ type: 'phone_task', goal: `${goal} (app: ${done.device[0].name})` }];
       done.applied.push('phone_task');
     }
-    // Rete di sicurezza per il PC: se l'utente o il modello parla di aprire qualcosa sul PC/Ghideon ma manca pc_action, lo invia comunque al PC.
-    if (!done.applied.includes('pc_action') && (jarvisCore.isPcTarget(db, userText) || jarvisCore.isPcTarget(db, parsed.reply))) {
-      const mApp = /\b(?:apri|apro|avvia|avvio|eseguo\s+l'apertura\s+di)\s+(?:l'app\s+|il\s+programma\s+)?([a-z0-9]+)/i.exec(userText + ' ' + parsed.reply);
-      if (mApp) {
-        jarvisCore.dispatchPcOpen(db, mApp[1], ms);
-        done.applied.push('pc_action');
-        done.device = [];
+    // Rete di sicurezza per il PC: se l'utente o il modello parla di fare qualcosa sul PC/Ghideon/Gideon,
+    // svuota sempre le azioni sul telefono (così non parte MAI sul telefono per errore) e invia il comando al PC.
+    if (jarvisCore.isPcTarget(db, userText) || jarvisCore.isPcTarget(db, parsed.reply)) {
+      done.device = [];
+      if (!done.applied.includes('pc_action')) {
+        if (/\b(video|film|youtube|musica|canzon\w*)\b/i.test(userText) && /\b(fai\s+partire|fammi\s+partire|metti|riproduci|avvia|cerca)\b/i.test(userText)) {
+          jarvisCore.dispatchPcPlayYoutube(db, userText, ms);
+          done.applied.push('pc_action');
+        } else {
+          const mApp = /\b(?:apri|apro|avvia|avvio|eseguo\s+l'apertura\s+di)\s+(?:l'app\s+|il\s+programma\s+)?([a-z0-9]+)/i.exec(userText + ' ' + parsed.reply);
+          if (mApp) {
+            jarvisCore.dispatchPcOpen(db, mApp[1], ms);
+            done.applied.push('pc_action');
+          }
+        }
       }
     }
     const autoLeaves = [];

@@ -352,6 +352,13 @@ class JarvisService : LifecycleService(), SensorEventListener {
                 restartWakeWordDelayed(500)
                 return@post
             }
+            // Mentre un'app musicale (es. Joytify) riproduce musica o PhoneAgent sta lavorando,
+            // non avviare continuamente lo SpeechRecognizer altrimenti Android ruba l'audio focus e mette in pausa la musica!
+            val am = getSystemService(AUDIO_SERVICE) as? AudioManager
+            if ((am != null && am.isMusicActive) || PhoneAgent.running) {
+                restartWakeWordDelayed(3500)
+                return@post
+            }
             // Se un'altra app sta registrando o c'è una chiamata, non toccare il microfono
             if (!micFreeOrYield { startWakeWord() }) return@post
 
@@ -857,7 +864,12 @@ class JarvisService : LifecycleService(), SensorEventListener {
                 }
                 return@launch
             }
-            if (sensitive) wakeFromScreenOff = false
+            if (sensitive) {
+                wakeFromScreenOff = false
+                // Quando parte un'azione sul telefono (es. musica su Joytify), chiude la conversazione vocale
+                // così il microfono non si riapre sopra la musica mettendola in pausa.
+                inConversationMode = false
+            }
             val callWho = runApprovedDeviceActions(reply.device)
             
             // Pop-up notifica a schermo con i soli dati schematici (es. macro, kcal, ricetta e dosi), NON il discorso parlato!

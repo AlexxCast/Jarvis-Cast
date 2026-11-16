@@ -106,10 +106,10 @@ export const INSIDE_WORDS = /\b(manda|mandami|invia|scrivi|metti|cerca|leggi|leg
 export const INTERNAL_JARVIS_WORDS = /\b(grafo|nod[io]|mappa|sfera|dieta|calori\w*|kcal|macro|proteine|carboidrati|grassi|pasto|pasti|pranzo|cena|colazion\w*|spuntin\w*|peso|pesata|allenament\w*|dispensa|ricett\w*|promemoria|agenda|ricord\w*|memoria|riquadr\w*|widget|codice|anteprima|meteo|tempo\s+fa)\b/i;
 const EXPLICIT_PHONE_TARGETS = /\b(whatsapp|telegram|instagram|spotify|joytify|joy\s*t\w*|joy\s*f\w*|youtube|tiktok|maps|waze|gmail|mail|messaggi|messaggio|sms|playlist|canzon\w*|musica|brano|sveglia|impostazioni|rubrica)\b/i;
 
-/** Vero solo se il messaggio nomina davvero un'app o una funzione del telefono (e non il grafo/dieta/memoria di Jarvis). */
+/** Vero solo se il messaggio nomina davvero un'app o una funzione del telefono (e MAI quando è rivolto al PC/Desktop/Ghideon). */
 export function isPhoneTarget(db, text) {
   const s = String(text || '');
-  if (!s || INTERNAL_JARVIS_WORDS.test(s)) return false;
+  if (!s || INTERNAL_JARVIS_WORDS.test(s) || /\b(pc|computer|desktop|portatile|windows|gh?ideon)\b/i.test(s)) return false;
   if (EXPLICIT_PHONE_TARGETS.test(s)) return true;
   const low = s.toLowerCase();
   for (const app of kvGet(db, 'apps', [])) {
