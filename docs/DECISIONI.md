@@ -259,11 +259,13 @@ Jarvis diceva "ho aggiornato il piano" o "chiamo Marcolino" senza farlo.
 - **Attività già fatte 100% automatiche (`flows.js`):** i flow vengono salvati già dopo 2 passi validi dall'inizio (anche senza aspettare un passo separato `done`) e `CHAT_THRESHOLD` è allineato a `PHONE_THRESHOLD` (0.65), così alla seconda richiesta non viene chiamato nessun modello esterno.
 - **Nomi, annidamento e gestione logistica dei nodi (`memory.js`, `api.js`, `context.js`, `orb.js`):** mantenuto invariato il layout estetico di `web/orb.js` (con supporto a più livelli di sotto-nodi); introdotta la gestione logistica dei rami (`CANONICAL_AREAS`, che consolida sinonimi come `alimentazione -> dieta`, `musica/film -> intrattenimento` con `parent` automatico), pulizia concettuale dei titoli (`cleanNodeTitle` e `formatAutoNode` senza frasi discorsive né suffissi tecnici) e annidamento gerarchico automatico (`Automazioni -> App/Dispositivo -> Azione`, `Dieta -> Fascia pasto -> Alimenti`, `Modulo -> Argomento contenitore -> Sotto-argomento / Ricordo`).
 
+- **Deduplicazione semantica e pulizia gerarchica dei nodi (`memory.js`):** `sameTopic` confronta le radici concettuali (`topicStems`) ignorando parole pleonastiche come `"messaggi"` o `"app"` (così `"lettura whatsapp"` e `"lettura messaggi WhatsApp"` si fondono in un solo nodo invece di coesistere o annidarsi tra loro); `isNoiseTopic` elimina nodi generici (`generale`, `ascolto`, `traduzione`) e nodi che ripetono il nome del ramo (`comunicazione` dentro `comunicazioni`); `stripParentWord` rimuove dall'etichetta del nodo figlio la ripetizione del nodo padre (`"ristoranti tipici Klagenfurt"` sotto `"Klagenfurt"` diventa `"ristoranti tipici"`), e `formatAutoNode` unifica le varianti prolisse delle automazioni (`"Apri Joytify, cerca Mannarino e avvia..."` + `"Apri Joytify, cerca Mannarino"` → `"Cerca Mannarino"` sotto `"Joytify"`).
+
 ---
 
 ## 5. Stato attuale (16/11/2026)
 
-- **Pubblicato:** tutto fino alla versione 2.17 (`jarvis-shell-v20`).
+- **Pubblicato:** tutto fino alla versione 2.17 (`jarvis-shell-v21`).
 - **APK:** l'ultimo è il 2.17 (`versionCode = 19`).
 - **Mai verificato da noi sul telefono vero:**
   - l'Accessibilità sbloccata;

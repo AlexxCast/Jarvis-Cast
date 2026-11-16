@@ -230,4 +230,24 @@ test('grafo e multi-agente locale: i flow appresi creano il ramo autonomo e gli 
   const pcStatus = await handleChat(db, ENV, deps(zeroLlm), { text: 'Jarvis qual è lo stato del PC?' });
   assert.equal(pcStatus.model, 'jarvis-core');
   assert.match(pcStatus.reply, /RAM al 42%/);
+
+  // Deduplicazione semantica e annidamento pulito (casi reali: "lettura whatsapp" vs "lettura messaggi WhatsApp",
+  // "comunicazione" dentro "comunicazioni", "ristoranti tipici Klagenfurt" sotto "Klagenfurt", automazioni duplicate).
+  assert.equal(memory.sameTopic('lettura whatsapp', 'lettura messaggi WhatsApp'), true);
+  assert.equal(memory.sameTopic('comunicazione', 'comunicazioni'), true);
+  memory.touchTopics(db, [
+    { area: 'comunicazioni', topic: 'comunicazione' },
+    { area: 'comunicazioni', topic: 'generale' },
+    { area: 'comunicazioni', topic: 'ascolto' },
+    { area: 'comunicazioni', topic: 'WhatsApp' },
+    { area: 'comunicazioni', topic: 'lettura messaggi WhatsApp' },
+    { area: 'comunicazioni', topic: 'lettura whatsapp' },
+  ], '2026-11-16T12:00');
+  memory.tidyTopics(db);
+  const comTopics = db.all("SELECT name, label, parent FROM topics WHERE module = 'comunicazioni'");
+  assert.equal(comTopics.length, 2, 'restano solo WhatsApp e un unico nodo lettura annidato');
+  const childCom = comTopics.find(t => t.name !== 'whatsapp');
+  assert.equal(childCom.parent, 'whatsapp');
+  assert.match(childCom.label, /^lettura/i);
+  assert.doesNotMatch(childCom.label, /whatsapp/i, 'il nome del genitore non viene ripetuto nel figlio');
 });

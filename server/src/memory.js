@@ -42,9 +42,28 @@ export function forget(db, id) {
  */
 // ---------------------------------------------------------------- argomenti senza doppioni
 // "Joy Tifi", "app Joy-TyFi" e "joy-tyfi" sono lo stesso nodo: si confrontano in forma compatta.
-const FILLER = /\b(app|applicazione|l|la|il|lo|i|gli|le|un|una|uno|di|del|della|pronuncia|nome|programma)\b/g;
+const FILLER = /\b(app|applicazione|l|la|il|lo|i|gli|le|un|una|uno|di|del|della|dei|delle|al|alla|ai|alle|dal|dalla|nel|nella|sul|sulla|su|per|con|in|a|da|pronuncia|nome|programma)\b/g;
+const PLEONASM = new Set(['app', 'applicazione', 'programma', 'messaggio', 'messaggi', 'chat', 'notifica', 'notifiche', 'brano', 'brani', 'canzone', 'canzoni', 'musica', 'ultimi', 'ultimo', 'nuovi', 'nuovo', 'tutti', 'tutte', 'lista', 'elenco', 'pronuncia', 'nome']);
+
 export const topicKey = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
   .replace(/[^a-z0-9]+/g, ' ').replace(FILLER, ' ').replace(/\s+/g, '');
+
+function stemWord(w) {
+  if (/^(legg\w*|lettur\w*)$/.test(w)) return 'lettur';
+  if (/^(invi\w*|mand\w*|scriv\w*|scrittur\w*)$/.test(w)) return 'invi';
+  if (/^(cerc\w*|ricerc\w*|trov\w*)$/.test(w)) return 'cerc';
+  if (/^(riproduc\w*|riproduzion\w*|ascolt\w*)$/.test(w)) return 'riproduz';
+  return w.length >= 5 ? w.replace(/[aeiou]$/, '') : w;
+}
+
+/** Estrae le radici concettuali di un'etichetta (ignorando parole pleonastiche come "messaggi" in "lettura messaggi whatsapp"). */
+export function topicStems(s, { dropPleonasm = true } = {}) {
+  const raw = String(s || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ').replace(FILLER, ' ').trim().split(/\s+/).filter(w => w.length >= 2 && !STOP.has(w));
+  const filtered = dropPleonasm ? raw.filter(w => !PLEONASM.has(w)) : raw;
+  const list = filtered.length ? filtered : raw;
+  return [...new Set(list.map(stemWord))];
+}
 
 function editDistance(a, b) {
   let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
@@ -56,14 +75,24 @@ function editDistance(a, b) {
   return prev[b.length];
 }
 
-/** Vero se due argomenti sono lo stesso concetto scritto in modo diverso. */
+/** Vero se due argomenti sono lo stesso concetto scritto in modo diverso (es. "lettura whatsapp" e "lettura messaggi WhatsApp"). */
 export function sameTopic(a, b) {
   const x = topicKey(a), y = topicKey(b);
   if (!x || !y) return false;
   if (x === y) return true;
   const short = Math.min(x.length, y.length), long = Math.max(x.length, y.length);
   if (short >= 5 && (x.includes(y) || y.includes(x)) && short / long >= 0.6) return true;
-  return short >= 4 && 1 - editDistance(x, y) / long >= 0.72;
+  if (short >= 4 && 1 - editDistance(x, y) / long >= 0.72) return true;
+
+  const sa = topicStems(a, { dropPleonasm: true });
+  const sb = topicStems(b, { dropPleonasm: true });
+  if (sa.length && sa.length === sb.length && sa.every(w => sb.includes(w))) return true;
+  if (Math.min(sa.length, sb.length) >= 2) {
+    const common = sa.filter(w => sb.includes(w)).length;
+    const union = new Set([...sa, ...sb]).size;
+    if (common / union >= 0.66) return true;
+  }
+  return false;
 }
 
 /**
@@ -100,6 +129,7 @@ function findTopic(db, mod, label) {
 
 const META_NOISE = /\b(gestione\s+nodi|gestione\s+promemori\w*|gestione\s+graf\w*|nodi\s+del|grafo\s+dell|modulo\s+dieta|riepilogo\s+pasti|ridu[cz]ione\s+nodi|sistem\w+\s+nodi|pulizia\s+nodi)\b/i;
 const DIET_NOISE = /^(dieta|pasto|pasti|colazione|pranzo|cena|spuntino|spuntini|spuntino\s+pomeridiano|spuntino\s+mattutino|snack|calorie|kcal|alimentazione|cibo|nutrizione|riepilogo|menu)$/i;
+const GENERIC_NOISE = /^(generale|ascolto|conversazione|richiesta|risposta|informazioni|dettagli|altro|varie|aiuto|domanda|azione|comando|esecuzione|stato|sistema|utente|jarvis|traduzione|comunicazione|comunicazioni)$/i;
 
 // Mappa logistica delle aree: consolida sinonimi e trasforma sotto-categorie usate come area in parent.
 const CANONICAL_AREAS = {
@@ -123,6 +153,8 @@ const CANONICAL_AREAS = {
   hobby: { area: 'intrattenimento', parent: '' },
   pc: { area: 'tecnologia', parent: 'PC Desktop' },
   computer: { area: 'tecnologia', parent: 'PC Desktop' },
+  viaggio: { area: 'viaggi', parent: '' },
+  comunicazione: { area: 'comunicazioni', parent: '' },
 };
 
 /** Ripulisce un titolo di nodo da verbi discorsivi o frasi prolisse, lasciando il concetto chiave (2-4 parole). */
@@ -137,15 +169,29 @@ export function cleanNodeTitle(raw) {
   return s.slice(0, 52);
 }
 
-/** Estrae contenitore (app/dispositivo) e titolo pulito per un nodo del ramo Automazioni. */
-function formatAutoNode(rawLabel, appHint = '') {
+/** Rimuove il nome del nodo genitore dall'etichetta del figlio (es. "ristoranti tipici Klagenfurt" sotto "Klagenfurt" -> "ristoranti tipici"). */
+function stripParentWord(childLabel, parentLabel) {
+  const p = String(parentLabel || '').trim();
+  const c = String(childLabel || '').trim();
+  if (!p || !c || p.length < 3) return c;
+  const esc = p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const cleaned = c
+    .replace(new RegExp(`\\b(?:su|in|di|a|per|con|da|del|della)?\\s*${esc}\\b`, 'gi'), ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/^[,.:;\-\s]+|[,.:;\-\s]+$/g, '')
+    .trim();
+  return cleaned.length >= 3 ? cleaned : c;
+}
+
+/** Estrae contenitore (app/dispositivo), titolo conciso e chiave di deduplicazione per un nodo del ramo Automazioni. */
+export function formatAutoNode(rawLabel, appHint = '') {
   const raw = cleanNodeTitle(rawLabel);
   let container = String(appHint || '').trim();
   if (!container) {
     if (/^pc\s*:/i.test(raw) || /\bsul\s+(?:pc|computer|desktop)\b/i.test(raw)) container = 'PC Desktop';
-    else if (/\b(joytify|joy\s*t\w*|joy\s*f\w*)\b/i.test(raw)) container = 'Joytify';
+    else if (/\b(joytify|joy\s*t\w*|joy\s*f\w*|joy\s+division)\b/i.test(raw)) container = 'Joytify';
     else if (/\bspotify\b/i.test(raw)) container = 'Spotify';
-    else if (/\bwhatsapp\b/i.test(raw)) container = 'WhatsApp';
+    else if (/\bwhatsapp\b/i.test(raw) || /\bultimi\s+messagg/i.test(raw)) container = 'WhatsApp';
     else if (/\btelegram\b/i.test(raw)) container = 'Telegram';
     else if (/\byoutube\b/i.test(raw)) container = 'YouTube';
     else if (/\binstagram\b/i.test(raw)) container = 'Instagram';
@@ -153,20 +199,28 @@ function formatAutoNode(rawLabel, appHint = '') {
   }
   let title = raw
     .replace(/^pc\s*:\s*/i, '')
+    .replace(/^(?:apri|avvia)\s+(?:l'app\s+|la\s+app\s+|il\s+programma\s+)?(?:joytify|spotify|whatsapp|telegram|youtube|instagram|maps)\s*(?:,\s*|\s+e\s+|\s+)/i, '')
+    .replace(/^(?:vai\s+su(?:lla\s+barra\s+di)?\s+ricerca\s+e\s+|tocca\s+cerca\s+e\s+|seleziona\s+una\s+|seleziona\s+)/i, '')
+    .replace(/\s*(?:,\s*|\s+e\s+)(?:avvia\s+la\s+riproduzione|seleziona\s+il\s+primo\s+risultato|riproduci\w*|invia\w*|fai\s+partire).*$/i, '')
     .replace(/\b(?:su|in|con|dentro)\s+(?:joytify|spotify|whatsapp|telegram|youtube|instagram|maps)\b/gi, '')
     .replace(/\bsul\s+(?:pc|computer|desktop)\b/gi, '')
     .replace(/\s+/g, ' ')
+    .replace(/^[,.:;\-\s]+|[,.:;\-\s]+$/g, '')
     .trim();
-  if (!title) title = raw;
-  return { container, title: title.charAt(0).toUpperCase() + title.slice(1) };
+  if (/^legg\w*\s+(?:gli\s+)?(?:ultimi\s+)?messagg\w*/i.test(title)) title = 'Lettura messaggi';
+  if (!title || sameTopic(title, container)) title = container ? `Apri ${container}` : raw;
+  const pretty = title.charAt(0).toUpperCase() + title.slice(1);
+  const dedupKey = `${slug(container || 'auto')}:${topicStems(pretty, { dropPleonasm: true }).join('-') || slug(pretty)}`;
+  return { container, title: pretty.slice(0, 44), dedupKey };
 }
 
-/** Vero se l'etichetta è un termine generico o meta-comando che non deve diventare un nodo nel grafo. */
+/** Vero se l'etichetta è un termine generico, meta-comando o coincide col nome stesso del ramo. */
 export function isNoiseTopic(mod, label) {
   const s = String(label || '').trim();
   if (!s) return true;
-  if (META_NOISE.test(s)) return true;
+  if (META_NOISE.test(s) || GENERIC_NOISE.test(s)) return true;
   if (mod === 'dieta' && DIET_NOISE.test(s)) return true;
+  if (mod && sameTopic(mod, s)) return true;
   return false;
 }
 
@@ -235,19 +289,44 @@ export function tidyTopics(db) {
       merged++;
     }
     // Annidamento logico automatico: se un argomento specifico contiene il nome di un argomento contenitore
-    // nello stesso modulo (es. "Tagliando Panda" sotto "Panda", o un'app musicale sotto "musica"), lo annida sotto di esso.
+    // nello stesso modulo (es. "ristoranti tipici Klagenfurt" sotto "Klagenfurt", o "lettura WhatsApp" sotto "WhatsApp"),
+    // lo annida sotto di esso e rimuove dall'etichetta del figlio la ripetizione del nome del genitore.
     const current = db.all('SELECT name, label, parent FROM topics WHERE module = ? ORDER BY length(label) ASC', mod);
     for (const child of current) {
-      if (child.parent) continue;
       const cKey = topicKey(child.label);
-      const host = current.find(p => p.name !== child.name && !p.parent && topicKey(p.label).length >= 4 && cKey.length > topicKey(p.label).length + 2 && cKey.includes(topicKey(p.label)));
-      if (host) {
-        db.run('UPDATE topics SET parent = ? WHERE module = ? AND name = ?', host.name, mod, child.name);
-        child.parent = host.name;
+      const host = child.parent
+        ? current.find(p => p.name === child.parent)
+        : current.find(p => p.name !== child.name && !p.parent && topicKey(p.label).length >= 4 && cKey.length > topicKey(p.label).length + 2 && cKey.includes(topicKey(p.label)));
+      if (host && host.name !== child.name) {
+        const shorter = stripParentWord(child.label, host.label);
+        if (sameTopic(shorter, host.label)) {
+          // Rimossa la parola del genitore non resta altro di significativo: era un doppione, lo fonde nel genitore.
+          db.run('UPDATE topics SET parent = ? WHERE module = ? AND parent = ?', host.name, mod, child.name);
+          db.run('DELETE FROM topics WHERE module = ? AND name = ?', mod, child.name);
+          merged++;
+        } else {
+          db.run('UPDATE topics SET parent = ?, label = ? WHERE module = ? AND name = ?', host.name, shorter, mod, child.name);
+          child.parent = host.name;
+          child.label = shorter;
+        }
       }
     }
     db.run("UPDATE topics SET parent = '' WHERE module = ? AND parent = name", mod);
   }
+  // Pulisce e fonde anche i doppioni già presenti in autoGoals (es. "Apri Joytify, cerca Mannarino e avvia..." vs "Apri Joytify, cerca Mannarino").
+  const rawGoals = kvGet(db, 'autoGoals', []);
+  if (rawGoals.length > 1) {
+    const seenKeys = new Set();
+    const cleanGoals = [];
+    for (const g of rawGoals) {
+      const { dedupKey } = formatAutoNode(g.label || g.id, g.app);
+      if (seenKeys.has(dedupKey)) continue;
+      seenKeys.add(dedupKey);
+      cleanGoals.push(g);
+    }
+    if (cleanGoals.length !== rawGoals.length) kvSet(db, 'autoGoals', cleanGoals);
+  }
+  db.run('DELETE FROM modules WHERE name NOT IN (SELECT DISTINCT module FROM memories) AND name NOT IN (SELECT DISTINCT module FROM topics)');
   return merged;
 }
 
@@ -308,7 +387,10 @@ export function graph(db, { perModule = 24 } = {}) {
   const combinedAuto = [];
   const containers = new Map();
   const addAutoItem = (id, rawLabel, appHint) => {
-    const { container, title } = formatAutoNode(rawLabel, appHint);
+    const { container, title, dedupKey } = formatAutoNode(rawLabel, appHint);
+    if (seenAuto.has(id) || seenAuto.has(dedupKey)) return;
+    seenAuto.add(id);
+    seenAuto.add(dedupKey);
     let parentId = '';
     if (container && !sameTopic(container, title)) {
       const cSlug = slug(container);
@@ -317,19 +399,8 @@ export function graph(db, { perModule = 24 } = {}) {
     }
     combinedAuto.push({ id: 'f:' + id, label: title, ...(parentId ? { parent: parentId } : {}), kind: 'flow', auto: true });
   };
-  for (const f of flows) {
-    const key = topicKey(f.sampleGoal || f.id);
-    seenAuto.add(f.id);
-    if (key) seenAuto.add(key);
-    addAutoItem(f.id, f.sampleGoal || f.app || f.id, f.app);
-  }
-  for (const g of autoGoals) {
-    const key = topicKey(g.label || g.id);
-    if (seenAuto.has(g.id) || (key && seenAuto.has(key))) continue;
-    seenAuto.add(g.id);
-    if (key) seenAuto.add(key);
-    addAutoItem(g.id, g.label || g.app || g.id, g.app);
-  }
+  for (const f of flows) addAutoItem(f.id, f.sampleGoal || f.app || f.id, f.app);
+  for (const g of autoGoals) addAutoItem(g.id, g.label || g.app || g.id, g.app);
   const autoChildren = combinedAuto.length
     ? [...combinedAuto.slice(0, perModule), ...containers.values()]
     : [{ id: 'f:joytify-ricerca-musica', label: 'Apri e cerca musica', parent: 'fa:joytify', kind: 'flow', auto: true }, { id: 'fa:joytify', label: 'Joytify', kind: 'flow', auto: true }];
@@ -340,14 +411,18 @@ export function graph(db, { perModule = 24 } = {}) {
   for (const m of listModules(db)) {
     const topics = db.all('SELECT name, label, parent FROM topics WHERE module = ? ORDER BY uses DESC, last_used DESC LIMIT ?', m.name, perModule)
       .map(t => ({ id: `t:${m.name}/${t.name}`, label: t.label, kind: 'topic', ...(t.parent ? { parent: `t:${m.name}/${t.parent}` } : {}) }));
+    // Se il modulo ha già i suoi nodi concettuali (topics), non mostra come nodi separati le frasi intere dei ricordi
+    // che parlano già degli stessi concetti (es. "A Klagenfurt sono consigliati..." quando c'è già "Klagenfurt" / "ristoranti tipici").
     const memCap = Math.max(2, Math.min(6, perModule - topics.length));
     const rows = db.all('SELECT id, text FROM memories WHERE module = ? ORDER BY uses DESC, id DESC LIMIT ?', m.name, memCap)
-      .filter(r => !topics.some(t => sameTopic(t.label, r.text)))
-      .map(r => {
+      .filter(r => {
+        if (!topics.length) return true;
+        if (topics.some(t => sameTopic(t.label, r.text))) return false;
         const rKw = new Set(keywords(r.text));
-        const hostTopic = topics.find(t => keywords(t.label).some(k => rKw.has(k)));
-        return { id: 'm:' + r.id, label: cleanNodeTitle(r.text), ...(hostTopic ? { parent: hostTopic.id } : {}) };
-      });
+        const covered = topics.some(t => keywords(t.label).some(k => rKw.has(k)));
+        return !covered;
+      })
+      .map(r => ({ id: 'm:' + r.id, label: cleanNodeTitle(r.text) }));
     const children = [...topics, ...rows].slice(0, perModule + 4);
     // Un'area con lo stesso nome di un ramo fisso (es. "dieta") si aggiunge a quel ramo.
     const fixed = branches.find(b => b.id === m.name && b.kind === 'core');
