@@ -73,7 +73,7 @@ export function cleanVisual(a) {
 }
 
 /** Frasi con cui il modello dichiara di aver salvato o cambiato qualcosa. */
-export const CLAIM_WORDS = /\b(ho|l'ho|li ho|le ho|te l'ho|gliel'ho)\s+(appena\s+|già\s+|subito\s+|anche\s+)?(registrat|aggiunt|aggiornat|salvat|segnat|impostat|annotat|memorizzat|eliminat|cancellat|inserit|creat|modificat|spostat|tolt|rimoss)|\b(promemoria|piano|diario|pasto|peso|allenamento|dispensa|ricetta)\s+(è stat[oa]\s+)?(impostat|aggiornat|registrat|salvat|creat|aggiunt)[oa]\b|^\W*(fatto|registrato|aggiornato|salvato|segnato|annotato)\b/i;
+export const CLAIM_WORDS = /\b(ho|l'ho|li ho|le ho|te l'ho|gliel'ho)\s+(appena\s+|già\s+|subito\s+|anche\s+)?(registrat|aggiunt|aggiornat|salvat|segnat|impostat|annotat|memorizzat|eliminat|cancellat|inserit|creat|modificat|spostat|tolt|rimoss|chius|apert)|\b(chiudo|apro|avvio|cerco|eseguo|seleziono)\s+(?:subito|ora|adesso|immediatamente)\b|\b(promemoria|piano|diario|pasto|peso|allenamento|dispensa|ricetta)\s+(è stat[oa]\s+)?(impostat|aggiornat|registrat|salvat|creat|aggiunt)[oa]\b|^\W*(fatto|registrato|aggiornato|salvato|segnato|annotato)\b/i;
 const FAIL_LABELS = { show: 'mostrare la grafica', web_search: 'cercare su internet', read_url: 'leggere la pagina', add_meal: 'registrare il pasto (mancano gli alimenti)', update_meal: 'modificare il pasto (non l\'ho trovato)', delete_meal: 'eliminare il pasto (non l\'ho trovato)', add_weight: 'registrare il peso', add_activity: 'registrare l\'allenamento', add_reminder: 'creare il promemoria (data non valida)', remember: 'salvare il ricordo', call: 'avviare la chiamata (manca il nome)', update_profile: 'aggiornare il profilo', delete_activity: 'eliminare l\'attività (non l\'ho trovata)' };
 const failLabel = (t) => FAIL_LABELS[t] || `completare l'operazione "${t}"`;
 const REPAIR_PROMPT = (failed) => `CONTROLLO AUTOMATICO: nella tua risposta ${failed.length ? `queste azioni non erano valide e NON sono state eseguite: ${failed.join(', ')}` : 'dichiari di aver fatto qualcosa ma il campo "actions" è vuoto o incompleto'}. Finora NON è stato salvato nulla. Rimanda SOLO il JSON completo, con in "actions" tutte le azioni corrette e complete (per un pasto: items con name, grams, kcal, protein, carbs, fat; per update/delete: l'id esatto preso dal contesto). Se davvero non c'è nulla da salvare, lascia "actions" vuoto e scrivi una reply che NON dica di aver salvato o fatto qualcosa.`;
@@ -398,7 +398,12 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
     if (jarvisCore.isPcTarget(db, userText) || jarvisCore.isPcTarget(db, parsed.reply)) {
       done.device = [];
       if (!done.applied.includes('pc_action')) {
-        if (/\b(video|film|youtube|musica|canzon\w*)\b/i.test(userText) && /\b(fai\s+partire|fammi\s+partire|metti|riproduci|avvia|cerca)\b/i.test(userText)) {
+        if (/\b(chiudi|chiudo)\s+(?:subito\s+)?(?:google\s+chrome|chrome|edge|spotify|vscode|youtube|prime(?:\s+video)?)\b/i.test(userText + ' ' + parsed.reply)) {
+          const mCls = /\b(?:chiudi|chiudo)\s+(?:subito\s+)?(google\s+chrome|chrome|edge|spotify|vscode|youtube|prime(?:\s+video)?)\b/i.exec(userText + ' ' + parsed.reply);
+          const clsTarget = /chrome/i.test(mCls[1]) ? 'chrome' : mCls[1];
+          devices.enqueueCommand(db, 'desktop', { kind: 'close_app', target: clsTarget }, ms);
+          done.applied.push('pc_action');
+        } else if (/\b(video|film|youtube|musica|canzon\w*)\b/i.test(userText) && /\b(fai\s+partire|fammi\s+partire|metti|riproduci|avvia|cerca)\b/i.test(userText)) {
           jarvisCore.dispatchPcPlayYoutube(db, userText, ms);
           done.applied.push('pc_action');
         } else {

@@ -758,8 +758,9 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
   }
 
   // 5. Comandi verso il PC Desktop (espliciti oppure ereditati dal contesto attivo "dispositivo(pc(...))")
-  const PC_CONTINUATION_RE = /^(?:per\s+favore\s+)?(?:(?:ok|no|s[iì]|ora|adesso|poi|invece)\s+){0,2}(?:apri|aprire|aprilo|aprila|avvia|avviare|lancia|chiudi|chiudere|chiudilo|chiudila|termina|cerca|cercare|trova|vai\s+su|scrivi|digita|nuova\s+scheda|chiudi\s+(?:la\s+)?(?:scheda|pagina)|ricarica|aggiorna|schermo\s+intero|scorri|cambia\s+finestra|mostra\s+desktop|minimizza|alza\s+il\s+volume|abbassa\s+il\s+volume|muto|pausa|play|prossim[ao]|precedente|blocca|fallo|falla|seleziona\s+(?:il\s+)?(?:profilo|account)|usa\s+(?:il\s+|l')?(?:profilo|account))\b/i;
-  const inheritPc = !isPcTarget(db, clean) && !PHONE_REF_RE.test(clean) && focus?.domain === 'dispositivo' && focus?.device === 'pc' && PC_CONTINUATION_RE.test(clean);
+  const PC_CONTINUATION_RE = /^(?:per\s+favore\s+)?(?:(?:ok|no|s[iì]|ora|adesso|poi|invece|dai)\s+){0,3}(?:apri|aprire|aprilo|aprila|avvia|avviare|lancia|chiudi|chiudere|chiudilo|chiudila|termina|cerca|cercare|trova|vai\s+su|scrivi|digita|nuova\s+scheda|chiudi\s+(?:la\s+)?(?:scheda|pagina)|ricarica|aggiorna|schermo\s+intero|scorri|cambia\s+finestra|mostra\s+desktop|minimizza|alza\s+il\s+volume|abbassa\s+il\s+volume|muto|pausa|play|prossim[ao]|precedente|blocca|fallo|falla|seleziona\s+(?:il\s+)?(?:profilo|account)|usa\s+(?:il\s+|l')?(?:profilo|account))\b/i;
+  const PC_EXPLICIT_APP_RE = /^(?:per\s+favore\s+)?(?:(?:ok|no|s[iì]|ora|adesso|poi|invece|dai)\s+){0,3}(?:chiudi|chiudere|termina|apri|aprire|avvia)\s+(?:google\s+chrome|chrome|prime\s+video|prime|vscode|vs\s+code|esplora\s+file|blocco\s+note|task\s+manager)\b/i;
+  const inheritPc = !isPcTarget(db, clean) && !PHONE_REF_RE.test(clean) && ((focus?.domain === 'dispositivo' && focus?.device === 'pc' && PC_CONTINUATION_RE.test(clean)) || PC_EXPLICIT_APP_RE.test(clean));
 
   if (isPcTarget(db, clean) || inheritPc) {
     const withoutPc = stripPcWords(db, clean);
@@ -864,9 +865,15 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
       devices.enqueueCommand(db, 'desktop', { kind: 'system', target: 'prev_track' }, nowMs);
       return { reply: 'Torno alla traccia precedente sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
-    if (/\b(pausa|play|ferma\s+la\s+musica|riprendi\s+la\s+musica)\b/i.test(clean) && !/\b(video|film|youtube|canzone)\b/i.test(clean)) {
+    if (/\b(pausa|play|ferma\s+la\s+musica|riprendi\s+la\s+musica)\b/i.test(clean) && !/\b(video|film|youtube|canzone|chrome|prime|spotify|netflix|vscode|edge|google|whatsapp|discord|app|programma)\b/i.test(clean)) {
       const cmd = devices.enqueueCommand(db, 'desktop', { kind: 'system', target: 'play_pause', say: 'Play/Pausa sul PC.' }, nowMs);
       return { reply: 'Invio il comando multimediale al PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: ['f:' + cmd.id] };
+    }
+    if (/^(?:play|apri)\s+(google\s+chrome|chrome|prime\s+video|prime|youtube|spotify|netflix|vscode|google)\b/i.test(withoutPc)) {
+      const mPlayApp = /^(?:play|apri)\s+(google\s+chrome|chrome|prime\s+video|prime|youtube|spotify|netflix|vscode|google)\b/i.exec(withoutPc);
+      const tgt = /chrome/i.test(mPlayApp[1]) ? 'chrome' : mPlayApp[1];
+      setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target: tgt, action: 'apri' }, nowMs);
+      return dispatchPcOpen(db, tgt, nowMs);
     }
     if (/\b(alza\s+il\s+volume|volume\s+su)\b/i.test(clean)) {
       devices.enqueueCommand(db, 'desktop', { kind: 'system', target: 'vol_up' }, nowMs);
@@ -915,10 +922,13 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
       return { reply: 'Mostro il desktop sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
 
-    // Chiusura programmi / app / siti / finestre sul PC ("chiudi chrome sul pc", "chiudi youtube", "chiudi tutto")
-    const closeMatch = /^(?:per\s+favore\s+)?(?:mi\s+)?(?:chiudi|chiudere|termina|terminare|ferma|fermare|uccidi)\s+(?:il\s+|la\s+|l'|lo\s+)?(?:programma\s+|app\s+|sito\s+|finestra\s+(?:di\s+)?)?(.+)$/i.exec(withoutPc);
+    // Chiusura programmi / app / siti / finestre sul PC ("chiudi chrome sul pc", "no no chiudi chrome", "chiudi tutto")
+    const cleanCloseSrc = withoutPc.replace(/^(?:(?:ok|no|s[iì]|ora|adesso|poi|dai)\s+){1,3}/i, '').trim();
+    const closeMatch = /^(?:per\s+favore\s+)?(?:mi\s+)?(?:chiudi|chiudere|termina|terminare|ferma|fermare|uccidi)\s+(?:il\s+|la\s+|l'|lo\s+)?(?:programma\s+|app\s+|sito\s+|finestra\s+(?:di\s+)?)?(.+)$/i.exec(cleanCloseSrc);
     if (closeMatch) {
-      const target = closeMatch[1].replace(/[.!?]+$/, '').trim();
+      let target = closeMatch[1].replace(/\b(?:ho\s+chiuso|come\s+richiesto|subito|ora|adesso|di\s+nuovo|per\s+favore)\b.*$/i, '').replace(/[.!?]+$/, '').trim() || closeMatch[1].replace(/[.!?]+$/, '').trim();
+      const knownClose = /\b(google\s+chrome|chrome|microsoft\s+edge|edge|vs\s*code|vscode|spotify|discord|telegram|blocco\s+note|notepad|vlc|youtube|prime\s+video|prime|netflix)\b/i.exec(target);
+      if (knownClose) target = /chrome/i.test(knownClose[1]) ? 'chrome' : knownClose[1];
       const norm = /^(?:questa\s+finestra|finestra|la\s+finestra)$/i.test(target) ? 'window'
         : /^(?:tutto|tutte\s+le\s+app|tutti\s+i\s+programmi)$/i.test(target) ? 'all'
         : target;

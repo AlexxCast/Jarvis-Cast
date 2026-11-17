@@ -230,6 +230,11 @@ def close_app_target(target: str, log_fn) -> None:
         log_fn("Chiuse le applicazioni principali.")
         return
     exe = CLOSE_EXE_MAP.get(t)
+    if not exe:
+        for k, v in CLOSE_EXE_MAP.items():
+            if len(k) >= 4 and k in t:
+                exe = v
+                break
     if exe:
         subprocess.run(["taskkill", "/IM", exe, "/F"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         log_fn(f"Chiuso processo: {exe}")
