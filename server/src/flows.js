@@ -405,12 +405,26 @@ export function listSkills(db) {
   return kvGet(db, SKILLS_KEY, []);
 }
 
+export function canonicalService(raw) {
+  const s = norm(raw);
+  if (/\bprime\b/.test(s)) return 'prime';
+  if (/\byoutube\b/.test(s)) return 'youtube';
+  if (/\bchrome\b/.test(s)) return 'chrome';
+  if (/\bnetflix\b/.test(s)) return 'netflix';
+  if (/\bspotify\b/.test(s)) return 'spotify';
+  if (/\bwhatsapp\b/.test(s)) return 'whatsapp';
+  if (/\binstagram\b/.test(s)) return 'instagram';
+  if (/\bgithub\b/.test(s)) return 'github';
+  if (/\bgoogle\b/.test(s)) return 'google';
+  return s.split(/\s+/)[0] || s;
+}
+
 /**
  * Propone il salvataggio di un nuovo automatismo a step se non ne esiste già uno verificato identico.
  * Ritorna true se è stata creata una proposta da confermare all'utente.
  */
 export function proposeSkill(db, sessionId = 'main', draft = {}, nowMs = Date.now()) {
-  const service = norm(draft.service || '');
+  const service = canonicalService(draft.service || '');
   const device = String(draft.device || 'pc').toLowerCase();
   const steps = Array.isArray(draft.steps) ? draft.steps.filter(s => s && s.kind) : [];
   if (!service || !steps.length) return false;

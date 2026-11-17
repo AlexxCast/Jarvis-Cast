@@ -770,11 +770,15 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
         .replace(/\s+/g, ' ')
         .trim();
       if (profName.length >= 2) {
-        const shouldPersist = /\b(quando|sempre|imposta|usa\s+sempre|di\s+default)\b/i.test(clean);
+        const shouldPersist = /\b(quando|sempre|imposta|usa\s+sempre|di\s+default|cambia|dovrebbe\s+essere|invece)\b/i.test(clean);
         devices.enqueueCommand(db, 'desktop', { kind: 'open_chrome_profile', target: profName, args: shouldPersist ? 'persist' : '' }, nowMs);
+        if (shouldPersist) {
+          const skills = flows.listSkills(db).map(sk => sk.device === 'pc' ? { ...sk, defaults: { ...(sk.defaults || {}), account: profName }, updatedAt: nowMs } : sk);
+          kvSet(db, 'modularSkills', skills);
+        }
         setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target: 'chrome', profile: profName, action: 'profilo' }, nowMs);
         return {
-          reply: `Apro Chrome sul PC con il profilo "${profName}"${shouldPersist ? ' e lo memorizzo come predefinito' : ''}, signore.`,
+          reply: `Apro Chrome sul PC con il profilo "${profName}"${shouldPersist ? ' e lo memorizzo come predefinito negli automatismi' : ''}, signore.`,
           device: [], actions: ['pc_action'], touched: ['automazioni', 'tecnologia'], touchedLeaves: [],
         };
       }
@@ -924,7 +928,7 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
           name: `${targetName} su PC`,
           service: lowT,
           device: 'pc',
-          defaults: { account: focus?.profile || 'Persona 1' },
+          defaults: { account: focus?.profile || 'alexx cast' },
           steps,
         }, nowMs);
         if (proposed) res.reply += ' Ha funzionato? Se sì, me lo conferma così salvo ogni step negli automatismi?';

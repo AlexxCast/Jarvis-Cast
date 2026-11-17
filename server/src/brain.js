@@ -350,7 +350,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
           name: `${svc} su PC`,
           service: svc,
           device: 'pc',
-          defaults: { account: activeFocus?.profile || 'Persona 1' },
+          defaults: { account: activeFocus?.profile || 'alexx cast' },
           steps: [{ kind: String(pcAct.kind || 'open_app'), target: tgt, args: pcAct.args || '', optional: false }, { kind: 'dynamic_media', param: 'media', optional: true }],
         }, ms);
         if (proposed && !/\bfunzionato\b/i.test(parsed.reply)) parsed.reply += ' Ha funzionato? Se sì, me lo conferma così lo salvo negli automatismi?';
