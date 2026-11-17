@@ -26,3 +26,19 @@
 [2026-11-17 16:08:13] Eseguo comando [open_app]: per
 [2026-11-17 16:08:30] Eseguo comando [open_app]: l
 [2026-11-17 16:11:06] Demone Jarvis Desktop avviato in background.
+[2026-11-17 16:34:17] Demone Jarvis Desktop avviato in background.
+[2026-11-17 16:34:29] Eseguo comando [open_chrome_profile]: Alessio cast
+[2026-11-17 16:34:29] Chrome avviato (Default)
+[2026-11-17 16:34:29] Eseguo comando [open_app]: Chrome --profile-directory="Profile 1"
+[2026-11-17 16:34:29] App 'Chrome --profile-directory="Profile 1"' non trovata sul PC (nessun popup aperto).
+[2026-11-17 16:35:07] Eseguo comando [open_app]: Chrome
+[2026-11-17 16:35:07] Chrome avviato (Default)
+[2026-11-17 16:36:24] Errore heartbeat: <urlopen error _ssl.c:1063: The handshake operation timed out>
+[2026-11-17 16:37:39] Eseguo comando [open_app]: del
+[2026-11-17 16:37:39] App 'del' non trovata sul PC (nessun popup aperto).
+[2026-11-17 16:39:55] Errore heartbeat: <urlopen error _ssl.c:1063: The handshake operation timed out>
+[2026-11-17 16:40:02] Eseguo comando [open_app]: Prime Video
+[2026-11-17 16:40:02] App 'Prime Video' non trovata sul PC (nessun popup aperto).
+[2026-11-17 16:40:44] Eseguo comando [open_app]: Chrome
+[2026-11-17 16:40:44] Chrome avviato (Default)
+[2026-11-17 16:44:50] Demone Jarvis Desktop avviato in background.

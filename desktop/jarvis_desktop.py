@@ -54,6 +54,9 @@ COMMON_APPS = {
     "telegram": "telegram",
     "whatsapp": "https://web.whatsapp.com",
     "youtube": "https://www.youtube.com",
+    "prime": "https://www.primevideo.com",
+    "prime video": "https://www.primevideo.com",
+    "amazon prime": "https://www.primevideo.com",
     "gmail": "https://mail.google.com",
     "instagram": "https://www.instagram.com",
     "netflix": "https://www.netflix.com",
@@ -272,7 +275,7 @@ def search_web_target(query: str, log_fn) -> None:
     webbrowser.open(url)
 
 
-STOPWORDS_APP = {"l", "la", "lo", "le", "il", "i", "gli", "un", "una", "uno", "per", "su", "da", "in", "di", "a", "e", "o", "che", "con", "non", "si", "no"}
+STOPWORDS_APP = {"l", "la", "lo", "le", "il", "i", "gli", "un", "una", "uno", "per", "su", "da", "in", "di", "a", "e", "o", "che", "con", "non", "si", "no", "del", "della", "dello", "dei", "degli", "delle", "al", "alla", "allo", "nel", "nella", "nello", "sul", "sulla", "sullo"}
 
 
 def find_chrome_exe() -> str:

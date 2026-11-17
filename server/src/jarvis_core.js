@@ -634,21 +634,28 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
   }
 
   // 5. Comandi verso il PC Desktop (espliciti oppure ereditati dal contesto attivo "dispositivo(pc(...))")
-  const PC_CONTINUATION_RE = /^(?:per\s+favore\s+)?(?:ora\s+|adesso\s+|poi\s+|invece\s+)?(?:apri|aprire|avvia|avviare|lancia|chiudi|chiudere|termina|cerca|cercare|trova|vai\s+su|scrivi|digita|nuova\s+scheda|chiudi\s+(?:la\s+)?scheda|ricarica|aggiorna|schermo\s+intero|scorri|cambia\s+finestra|mostra\s+desktop|minimizza|alza\s+il\s+volume|abbassa\s+il\s+volume|muto|pausa|play|prossim[ao]|precedente|blocca|aprilo|chiudilo|fallo|seleziona\s+(?:il\s+)?(?:profilo|account)|usa\s+(?:il\s+|l')?(?:profilo|account))\b/i;
+  const PC_CONTINUATION_RE = /^(?:per\s+favore\s+)?(?:s[iì]\s+|ok\s+|ora\s+|adesso\s+|poi\s+|invece\s+)?(?:apri|aprire|aprilo|aprila|avvia|avviare|lancia|chiudi|chiudere|chiudilo|chiudila|termina|cerca|cercare|trova|vai\s+su|scrivi|digita|nuova\s+scheda|chiudi\s+(?:la\s+)?scheda|ricarica|aggiorna|schermo\s+intero|scorri|cambia\s+finestra|mostra\s+desktop|minimizza|alza\s+il\s+volume|abbassa\s+il\s+volume|muto|pausa|play|prossim[ao]|precedente|blocca|fallo|falla|seleziona\s+(?:il\s+)?(?:profilo|account)|usa\s+(?:il\s+|l')?(?:profilo|account))\b/i;
   const inheritPc = !isPcTarget(db, clean) && !PHONE_REF_RE.test(clean) && focus?.domain === 'dispositivo' && focus?.device === 'pc' && PC_CONTINUATION_RE.test(clean);
 
   if (isPcTarget(db, clean) || inheritPc) {
     const withoutPc = stripPcWords(db, clean);
 
-    // Anafora contestuale ("aprilo", "chiudilo", "fallo") usando focus.target dal grafo attivo
-    if (/^(?:ora\s+|adesso\s+)?(?:aprilo|fallo|eseguilo|chiudilo)\s*$/i.test(withoutPc) && focus?.target) {
-      if (/chiud/i.test(withoutPc)) {
-        devices.enqueueCommand(db, 'desktop', { kind: 'close_app', target: focus.target }, nowMs);
-        setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target: focus.target, action: 'chiudi' }, nowMs);
-        return { reply: `Chiudo ${focus.target} sul PC, signore.`, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+    // Anafora contestuale ("aprilo", "sì aprila", "chiudilo", "fallo") usando focus.target o l'ultimo servizio citato nella chat
+    if (/^(?:s[iì]\s+|ok\s+|ora\s+|adesso\s+)?(?:aprilo|aprila|fallo|falla|eseguilo|eseguila|chiudilo|chiudila)\s*$/i.test(withoutPc)) {
+      const recentSvc = db.all("SELECT text FROM messages ORDER BY id DESC LIMIT 4")
+        .map(r => String(r.text || ''))
+        .map(t => /\b(prime\s+video|prime|youtube|netflix|twitch|spotify|whatsapp|gmail|instagram|chrome|vscode)\b/i.exec(t)?.[1])
+        .find(Boolean);
+      const tgt = recentSvc || focus?.target;
+      if (tgt) {
+        if (/chiud/i.test(withoutPc)) {
+          devices.enqueueCommand(db, 'desktop', { kind: 'close_app', target: tgt }, nowMs);
+          setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target: tgt, action: 'chiudi' }, nowMs);
+          return { reply: `Chiudo ${tgt} sul PC, signore.`, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+        }
+        setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target: tgt, action: 'apri' }, nowMs);
+        return dispatchPcOpen(db, tgt, nowMs);
       }
-      setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target: focus.target, action: 'apri' }, nowMs);
-      return dispatchPcOpen(db, focus.target, nowMs);
     }
 
     // Correzione rapida ("ma no sul pc", "aprilo sul pc", "fallo sul pc"): recupera l'azione dal messaggio precedente!

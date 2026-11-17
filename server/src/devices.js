@@ -60,7 +60,7 @@ export function heartbeat(db, payload = {}, nowMs = Date.now()) {
   return { device: { ...record, online: true }, commands: mine };
 }
 
-const STOPWORDS_APP = new Set(['l', 'la', 'lo', 'le', 'il', 'i', 'gli', 'un', 'una', 'uno', 'per', 'su', 'da', 'in', 'di', 'a', 'e', 'o', 'che', 'con', 'non', 'si', 'no']);
+const STOPWORDS_APP = new Set(['l', 'la', 'lo', 'le', 'il', 'i', 'gli', 'un', 'una', 'uno', 'per', 'su', 'da', 'in', 'di', 'a', 'e', 'o', 'che', 'con', 'non', 'si', 'no', 'del', 'della', 'dello', 'dei', 'degli', 'delle', 'al', 'alla', 'allo', 'nel', 'nella', 'nello', 'sul', 'sulla', 'sullo']);
 
 /** Mette in coda un comando per un dispositivo ('desktop' o 'android') e lo registra nelle Automazioni. */
 export function enqueueCommand(db, targetDevice, cmd, nowMs = Date.now()) {
