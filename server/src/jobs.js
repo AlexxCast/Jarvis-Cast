@@ -126,8 +126,13 @@ export async function advance(db, env, deps) {
       const createdFiles = steps.slice(0, i).filter(s => s.status === 'done').flatMap(s => extractProjectFiles(s.output).map(f => f.path));
       const manifest = createdFiles.length ? `FILE GIÀ CREATI NEL PROGETTO: ${[...new Set(createdFiles)].join(', ')}\n\n` : '';
       const prior = depsList.map((s, k) => `Nodo ${s.id || k + 1} (${s.role || 'Agente'}) — ${s.title}:\n${compactNodeContract(s.output, 900)}`).join('\n\n');
-      const isCodeGoal = /\b(programm\w*|progett\w*|multi[\s-]*file|interfaccia|gui|app|script|calcol\w*|codice|html|python|graf[io]|sito|gestionale|sistema)\b/i.test(job.goal);
-      const codeHint = isCodeGoal ? ' Se devi scrivere file di codice o interfacce grafiche, scrivi il codice completo preceduto da "=== FILE: nomefile.ext ===" così il sistema li creerà davvero sul PC.' : '';
+      const isCodeGoal = /\b(programm\w*|progett\w*|multi[\s-]*file|interfaccia|gui|app|script|calcol\w*|codice|html|python|graf[io]|sito|gestionale|sistema|document\w*|pdf|dsa|lezion\w*|sched\w*|dispens\w*)\b/i.test(job.goal);
+      const isDocGoal = /\b(document\w*|pdf|dsa|lezion\w*|sched\w*|dispens\w*|word)\b/i.test(job.goal);
+      const codeHint = isDocGoal
+        ? ' IMPORTANTE: per creare un documento reale leggibile (e stampabile in PDF) genera un file HTML completo preceduto da "=== FILE: documento.html ===" con sfondo crema #FAF6EE, testo scuro #1A1A1A, font sans-serif grande 18px (Verdana/Arial), interlinea 1.75, allineamento a sinistra, grassetto sui concetti chiave e un pulsante "Stampa / Salva PDF" (@media print).'
+        : isCodeGoal
+          ? ' Se devi scrivere file di codice o interfacce grafiche, scrivi il codice completo preceduto da "=== FILE: nomefile.ext ===" così il sistema li creerà davvero sul PC.'
+          : '';
       const res = await call(steps[i].tier,
         `Sei il nodo-agente "${steps[i].role || 'Specialista'}" di Jarvis. Lavori con contesto chirurgico per risparmiare token: svolgi SOLO il tuo nodo in italiano, applicando logiche, calcoli o codice completo senza introduzioni.${codeHint}`,
         `${ctx.slice(0, 2000)}\n\nCOMPITO COMPLESSIVO: ${job.goal}\n\n${manifest}${prior ? 'RISULTATI DEI PASSI PRECEDENTI:\n' + prior + '\n\n' : ''}PASSO DA SVOLGERE ORA (${i + 1} di ${steps.length}) — ${steps[i].title}: ${steps[i].instruction}`, 2400);
@@ -151,6 +156,15 @@ export async function advance(db, env, deps) {
     const final = steps.length === 1 ? steps[0].output : (await call('smart',
       'Sei Jarvis. Unisci i risultati dei passi in un unico risultato finale chiaro e ordinato per l\'utente, in italiano, senza ripetizioni. Puoi usare titoli brevi ed elenchi.',
       `COMPITO: ${job.goal}\n\n${all}`, 1800)).text.trim();
+    const anyFiles = steps.some(s => extractProjectFiles(s.output || '').length > 0);
+    if (!anyFiles && /\b(document\w*|pdf|dsa|lezion\w*|sched\w*|dispens\w*)\b/i.test(job.goal)) {
+      const htmlDoc = buildDsaHtml(job.title, final);
+      devices.enqueueCommand(db, 'desktop', {
+        kind: 'write_project',
+        target: job.title,
+        args: JSON.stringify({ files: [{ path: 'documento_dsa.html', content: htmlDoc }] }),
+      }, ms);
+    }
     db.run("UPDATE jobs SET status = 'done', result = ?, updated = ? WHERE id = ?", final.slice(0, 12000), at, job.id);
     mood.feel(db, 'soddisfazione', 0.6, deps.now());
     pushInbox(db, at, 'job', `Ho completato "${job.title}", signore. Il risultato è nella sezione Attività.`);
@@ -159,6 +173,30 @@ export async function advance(db, env, deps) {
     logEvent(db, at, 'error', `job ${job.id}: ${e.message}`);
     return fail(e.message);
   }
+}
+
+/** Converte qualsiasi risultato testuale/Markdown in un documento HTML ad alta leggibilità DSA (pronto per stampa/PDF). */
+export function buildDsaHtml(title, bodyText) {
+  const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const htmlBody = esc(bodyText)
+    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2>$1</h2>')
+    .replace(/^# (.+)$/gm, '<h1>$1</h1>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/^- (.+)$/gm, '<li>$1</li>')
+    .replace(/\n{2,}/g, '</p><p>')
+    .replace(/\n/g, '<br>');
+  return `<!doctype html><html lang="it"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${esc(title)}</title>
+<style>
+  body { background:#FAF6EE; color:#1B1B1B; font-family:Verdana,Arial,sans-serif; font-size:18px; line-height:1.75; letter-spacing:0.03em; max-width:820px; margin:0 auto; padding:28px 22px; text-align:left; }
+  h1,h2,h3 { color:#0F3D2E; margin-top:1.4em; line-height:1.35; }
+  strong { background:#FFF3B0; padding:0 3px; border-radius:3px; }
+  li { margin-bottom:8px; }
+  .print-btn { background:#0F3D2E; color:#fff; border:0; padding:10px 18px; border-radius:8px; font-size:16px; cursor:pointer; margin-bottom:20px; }
+  @media print { .print-btn { display:none; } body { background:#fff; padding:0; } }
+</style></head><body>
+<button class="print-btn" onclick="window.print()">Stampa / Salva come PDF</button>
+<h1>${esc(title)}</h1><p>${htmlBody}</p></body></html>`;
 }
 
 function extractObject(text) {

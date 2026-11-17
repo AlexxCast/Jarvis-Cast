@@ -552,8 +552,8 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}) {
       return { reply: `Apro ${urlMatch[1]} sul PC, signore.`, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
 
-    // Apertura programma/app/sito sul PC ("apri YouTube su Ghideon", "apri Chrome sul PC", "avvia VS Code sul computer")
-    const openMatch = /^(?:per\s+favore\s+)?(?:mi\s+)?(?:apri|avvia|lancia|esegui)\s+(?:il\s+|la\s+|l'|lo\s+)?(?:programma\s+|app\s+|sito\s+)?(.+)$/i.exec(withoutPc);
+    // Apertura programma/app/sito sul PC ("apri YouTube su Ghideon", "aprire YouTube sul computer", "avvia VS Code sul computer")
+    const openMatch = /^(?:per\s+favore\s+)?(?:mi\s+)?(?:apri|aprire|avvia|avviare|lancia|lanciare|esegui|eseguire)\s+(?:il\s+|la\s+|l'|lo\s+)?(?:programma\s+|app\s+|sito\s+)?(.+)$/i.exec(withoutPc);
     if (openMatch) {
       const res = dispatchPcOpen(db, openMatch[1], nowMs);
       if (res) return res;

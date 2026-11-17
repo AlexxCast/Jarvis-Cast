@@ -726,6 +726,12 @@ function viewAttivita() {
         store.openJob === j.id && j.result ? h('p', { class: 'pre small', style: 'margin-top:6px;border-top:1px solid var(--line);padding-top:8px' }, j.result) : null,
         h('div', { class: 'row', style: 'margin-top:4px' },
           j.result ? h('button', { class: 'btn', onclick: () => { store.openJob = store.openJob === j.id ? null : j.id; render(); } }, store.openJob === j.id ? 'Chiudi risultato' : 'Leggi risultato') : null,
+          j.status === 'done' ? h('button', { class: 'btn primary', onclick: guard(async () => {
+            const res = await fetch('/api/jobs/' + j.id + '/document', { headers: { authorization: 'Bearer ' + store.token } });
+            const html = await res.text();
+            const blobUrl = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+            window.open(blobUrl, '_blank', 'noopener');
+          }) }, 'Apri Documento / PDF') : null,
           h('button', { class: 'btn ghost danger', onclick: guard(async () => { s.jobs = (await api('DELETE', '/jobs/' + j.id)).jobs; render(); }) }, 'Elimina')));
     }) : [h('p', { class: 'empty' }, 'Nessun progetto ancora. Chiedi a Jarvis in chat o avviane uno qui sopra.')]),
   ];

@@ -289,6 +289,16 @@ export async function handleApi(db, env, deps, request) {
       return json({ jobs: jobs.listJobs(db) });
     }
     if (path === '/api/jobs' && method === 'GET') return json({ jobs: jobs.listJobs(db) });
+    const jobDoc = /^\/api\/jobs\/([\w-]+)\/document$/.exec(path);
+    if (jobDoc && method === 'GET') {
+      const j = db.get('SELECT * FROM jobs WHERE id = ?', jobDoc[1]);
+      if (!j) return bad('non trovato', 404);
+      let steps = [];
+      try { steps = JSON.parse(j.steps || '[]'); } catch {}
+      const htmlFile = steps.flatMap(s => jobs.extractProjectFiles(s.output || '')).find(f => /\.html?$/i.test(f.path));
+      const html = htmlFile ? htmlFile.content : jobs.buildDsaHtml(j.title, j.result || j.goal);
+      return new Response(html, { status: 200, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
+    }
     const job = /^\/api\/jobs\/([\w-]+)$/.exec(path);
     if (job && method === 'GET') {
       const j = db.get('SELECT * FROM jobs WHERE id = ?', job[1]);

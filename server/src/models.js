@@ -31,8 +31,8 @@ export const DEFAULT_MODELS = [
 
   // --- Groq (ultra-veloci LPU, gratuiti) ---
   { provider: 'groq', model: 'llama-3.3-70b-versatile',                        tiers: ['fast', 'smart'],           ctx: 128000, rpm: 30, rpd: 1000,  tpm: 12000, tpd: 100000, free: true, prio: 20 },
-  { provider: 'groq', model: 'openai/gpt-oss-120b',                            tiers: ['fast', 'smart'],           ctx: 128000, rpm: 30, rpd: 1000,  tpm: 30000, tpd: 200000, free: true, prio: 22 },
-  { provider: 'groq', model: 'openai/gpt-oss-20b',                             tiers: ['fast'],                    ctx: 128000, rpm: 30, rpd: 2000,  tpm: 30000, tpd: 300000, free: true, prio: 23 },
+  { provider: 'groq', model: 'openai/gpt-oss-120b',                            tiers: ['fast', 'smart'],           ctx: 128000, rpm: 30, rpd: 1000,  tpm: 7500,  tpd: 200000, free: true, prio: 22 },
+  { provider: 'groq', model: 'openai/gpt-oss-20b',                             tiers: ['fast'],                    ctx: 128000, rpm: 30, rpd: 2000,  tpm: 7500,  tpd: 300000, free: true, prio: 23 },
   { provider: 'groq', model: 'meta-llama/llama-4-maverick-17b-128e-instruct',  tiers: ['fast', 'smart', 'vision'], ctx: 128000, rpm: 30, rpd: 1000,  tpm: 30000, tpd: 500000, free: true, prio: 24 },
   { provider: 'groq', model: 'meta-llama/llama-4-scout-17b-16e-instruct',      tiers: ['fast', 'smart', 'vision'], ctx: 128000, rpm: 30, rpd: 1000,  tpm: 30000, tpd: 500000, free: true, prio: 25 },
   { provider: 'groq', model: 'qwen/qwen3-32b',                                 tiers: ['fast', 'smart'],           ctx: 128000, rpm: 60, rpd: 1000,  tpm: 60000, tpd: 500000, free: true, prio: 26 },
