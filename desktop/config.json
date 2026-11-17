@@ -1,5 +1,6 @@
 {
   "server_url": "https://jarvis-cast.alexxcast34.workers.dev",
   "server_token": "CAST030609maria66angleo68marco08",
-  "speak": true
+  "speak": true,
+  "chrome_profile": "Persona 1"
 }

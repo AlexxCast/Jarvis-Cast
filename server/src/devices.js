@@ -60,14 +60,21 @@ export function heartbeat(db, payload = {}, nowMs = Date.now()) {
   return { device: { ...record, online: true }, commands: mine };
 }
 
+const STOPWORDS_APP = new Set(['l', 'la', 'lo', 'le', 'il', 'i', 'gli', 'un', 'una', 'uno', 'per', 'su', 'da', 'in', 'di', 'a', 'e', 'o', 'che', 'con', 'non', 'si', 'no']);
+
 /** Mette in coda un comando per un dispositivo ('desktop' o 'android') e lo registra nelle Automazioni. */
 export function enqueueCommand(db, targetDevice, cmd, nowMs = Date.now()) {
   const target = String(targetDevice || 'desktop').toLowerCase();
+  const kind = String(cmd.kind || 'open_app').slice(0, 30);
+  const cmdTarget = String(cmd.target || '').trim().slice(0, 300);
+  if (kind === 'open_app' && (cmdTarget.length < 2 || STOPWORDS_APP.has(cmdTarget.toLowerCase()))) {
+    return null;
+  }
   const entry = {
     id: `cmd-${nowMs}-${Math.random().toString(36).slice(2, 6)}`,
     targetDevice: target,
-    kind: String(cmd.kind || 'open_app').slice(0, 30),
-    target: String(cmd.target || '').slice(0, 300),
+    kind,
+    target: cmdTarget,
     args: String(cmd.args || '').slice(0, 500),
     say: String(cmd.say || '').slice(0, 240),
     createdAt: nowMs,

@@ -11,6 +11,7 @@ import ctypes
 import json
 import os
 import platform
+import shutil
 import socket
 import subprocess
 import sys
@@ -271,7 +272,76 @@ def search_web_target(query: str, log_fn) -> None:
     webbrowser.open(url)
 
 
-def play_youtube_first_video(query: str, log_fn) -> None:
+STOPWORDS_APP = {"l", "la", "lo", "le", "il", "i", "gli", "un", "una", "uno", "per", "su", "da", "in", "di", "a", "e", "o", "che", "con", "non", "si", "no"}
+
+
+def find_chrome_exe() -> str:
+    for p in (
+        os.path.expandvars(r"%ProgramFiles%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%ProgramFiles(x86)%\Google\Chrome\Application\chrome.exe"),
+        os.path.expandvars(r"%LocalAppData%\Google\Chrome\Application\chrome.exe"),
+    ):
+        if os.path.exists(p):
+            return p
+    return shutil.which("chrome") or ""
+
+
+def find_chrome_profile(hint: str) -> str:
+    """Cerca in Local State di Chrome la directory profilo ('Default', 'Profile 1', ...) corrispondente al nome o account."""
+    h = (hint or "").strip().lower()
+    if not h or os.name != "nt":
+        return ""
+    local_state = os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\User Data\Local State")
+    if not os.path.exists(local_state):
+        return ""
+    try:
+        data = json.loads(Path(local_state).read_text(encoding="utf-8", errors="ignore"))
+        cache = data.get("profile", {}).get("info_cache", {})
+        best = ""
+        for dir_name, info in cache.items():
+            fields = [
+                str(dir_name).lower(),
+                str(info.get("name", "")).lower(),
+                str(info.get("gaia_name", "")).lower(),
+                str(info.get("shortcut_name", "")).lower(),
+                str(info.get("user_name", "")).lower(),
+            ]
+            if any(h == f for f in fields if f):
+                return dir_name
+            if any(h in f or (len(f) >= 3 and f in h) for f in fields if f):
+                best = best or dir_name
+        return best
+    except Exception:
+        return ""
+
+
+def open_in_chrome(url: str, cfg: dict, log_fn, profile_hint: str = "") -> bool:
+    chrome = find_chrome_exe()
+    if not chrome:
+        return False
+    hint = (profile_hint or (cfg or {}).get("chrome_profile") or "").strip()
+    prof_dir = find_chrome_profile(hint) if hint else ""
+    cmd = [chrome]
+    if prof_dir:
+        cmd.append(f"--profile-directory={prof_dir}")
+    if url:
+        cmd.append(url)
+    try:
+        subprocess.Popen(cmd)
+        log_fn(f"Chrome avviato ({prof_dir or 'default'}){': ' + url if url else ''}")
+        return True
+    except Exception as e:
+        log_fn(f"Errore avvio Chrome: {e}")
+        return False
+
+
+def open_url_smart(url: str, cfg: dict, log_fn) -> None:
+    if (cfg or {}).get("chrome_profile") and open_in_chrome(url, cfg, log_fn):
+        return
+    webbrowser.open(url)
+
+
+def play_youtube_first_video(query: str, log_fn, cfg: dict = None) -> None:
     """Cerca il video su YouTube, estrae il primo videoId e lo apre direttamente in riproduzione sul PC."""
     q = (query or "musica rilassante").strip()
     search_url = f"https://www.youtube.com/results?search_query={urllib.parse.quote(q)}"
@@ -289,11 +359,11 @@ def play_youtube_first_video(query: str, log_fn) -> None:
         if m:
             watch_url = f"https://www.youtube.com/watch?v={m.group(1)}&autoplay=1"
             log_fn(f"Avvio video YouTube: {q} ({watch_url})")
-            webbrowser.open(watch_url)
+            open_url_smart(watch_url, cfg, log_fn)
             return
     except Exception as e:
         log_fn(f"Fallback ricerca YouTube ({e})")
-    webbrowser.open(search_url)
+    open_url_smart(search_url, cfg, log_fn)
 
 
 def capture_and_upload_screen(cfg: dict, log_fn, title: str = "Schermo PC") -> None:
@@ -427,12 +497,21 @@ def execute_pc_command(cmd: dict, log_fn, cfg: dict = None) -> None:
         return
 
     if kind == "play_youtube" and target:
-        threading.Thread(target=play_youtube_first_video, args=(target, log_fn), daemon=True).start()
+        threading.Thread(target=play_youtube_first_video, args=(target, log_fn, cfg), daemon=True).start()
+        return
+
+    if kind == "open_chrome_profile" and target:
+        if args == "persist" and cfg is not None:
+            cfg["chrome_profile"] = target
+            save_config(cfg)
+            log_fn(f"Profilo Chrome predefinito salvato: {target}")
+        if not open_in_chrome("", cfg, log_fn, profile_hint=target):
+            log_fn(f"Impossibile aprire Chrome con profilo '{target}'")
         return
 
     if kind == "open_url" and target:
         url = target if target.startswith(("http://", "https://")) else "https://" + target
-        webbrowser.open(url)
+        open_url_smart(url, cfg, log_fn)
         return
 
     if kind == "search_web" and target:
@@ -501,20 +580,28 @@ def execute_pc_command(cmd: dict, log_fn, cfg: dict = None) -> None:
         return
 
     if kind == "open_app" and target:
-        exe = COMMON_APPS.get(target.lower(), target)
+        low_t = target.strip().lower()
+        if len(low_t) < 2 or low_t in STOPWORDS_APP:
+            log_fn(f"Comando open_app ignorato (target non valido: '{target}')")
+            return
+        exe = COMMON_APPS.get(low_t, target)
         if exe.startswith(("http://", "https://")):
-            webbrowser.open(exe)
+            open_url_smart(exe, cfg, log_fn)
+            return
+        if exe == "chrome":
+            if open_in_chrome("", cfg, log_fn):
+                return
+        resolved = shutil.which(exe) or (exe if os.path.exists(exe) or ":" in exe else None)
+        if not resolved:
+            log_fn(f"App '{target}' non trovata sul PC (nessun popup aperto).")
             return
         try:
             if os.name == "nt":
-                os.startfile(exe)
+                os.startfile(resolved)
             else:
-                subprocess.Popen([exe])
-        except Exception:
-            try:
-                subprocess.Popen(f'start "" "{exe}"', shell=True)
-            except Exception as e:
-                log_fn(f"Impossibile aprire '{target}': {e}")
+                subprocess.Popen([resolved])
+        except Exception as e:
+            log_fn(f"Impossibile aprire '{target}': {e}")
 
 
 def api_call(cfg: dict, method: str, path: str, payload: dict = None) -> dict:

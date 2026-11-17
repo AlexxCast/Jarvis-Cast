@@ -14,7 +14,7 @@ import * as router from './router.js';
 import * as agents from './agents.js';
 import { nowIso as nowIsoOf } from './clock.js';
 
-const BASE_PC_RE = /\b(pc|computer|desktop|portatile|windows|gh?ideon|antigravit\w*)\b/i;
+const BASE_PC_RE = /\b(pc|computer|desktop|portatile|windows|gh?ideon|antigravit\w*|chrome|profilo\s+chrome|account\s+chrome)\b/i;
 const DIAGNOSTIC_RE = /\b(diagnostic\w*|stato\s+del\s+(?:pc|computer|sistema|gh?ideon|jarvis)|dispositiv[io]\s+conness\w*|come\s+sta\s+il\s+(?:pc|sistema)|quanta\s+ram|cpu\s+del\s+pc|controllo\s+sistema|report\s+sistema)\b/i;
 const PC_SCREEN_RE = /\b(mostra(?:mi)?\s+lo\s+schermo|fa(?:mmi|i)\s+vedere\s+lo\s+schermo|screenshot\s+(?:del\s+)?(?:pc|computer|gh?ideon)|schermo\s+del\s+(?:pc|computer|gh?ideon)|cosa\s+c'[eè]\s+sullo\s+schermo)\b/i;
 const LIVE_CALL_RE = /\b(video\s*chiamat\w*|video\s*call|modalit[aà]\s+live|live\s+vision|in\s+diretta|dal\s+vivo|ti\s+devo\s+far\s+vedere|devo\s+farti\s+vedere|guarda\s+con\s+la\s+(?:tele)?camera)\b/i;
@@ -539,6 +539,25 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}) {
         }
         const mOpen = /\b(?:apri|avvia|lancia)\s+(?:l'app\s+|il\s+programma\s+)?([a-z0-9\s._-]+)/i.exec(prev);
         if (mOpen) return dispatchPcOpen(db, mOpen[1], nowMs);
+      }
+    }
+
+    // Selezione o impostazione profilo Chrome ("seleziona persona 1 alessio cast su chrome", "quando apri chrome usa persona 1", "apri chrome con ale")
+    const chromeProfMatch = /\bchrome\b/i.test(withoutPc) && /(?:seleziona|usa|imposta|scegli|con|su)\s+(?:il\s+|l')?(?:profilo|account)?\s*(?:di\s+)?(.{2,60})$/i.exec(
+      withoutPc.replace(/\b(?:apri|aprire|avvia|su|con|chrome|google\s+chrome|quando\s+sei|e\s+devi|devi|l'account|il\s+profilo|account|profilo|per\s+favore|no)\b/gi, ' ').replace(/\s+/g, ' ').trim()
+    ) || (/\bchrome\b/i.test(withoutPc) && /\b(?:persona\s*\d+|alessio(?:\s+cast(?:ronovo)?)?|alexx(?:\s+cast)?|ale)\b/i.exec(withoutPc));
+    if (chromeProfMatch && /\b(profilo|account|persona\s*\d+|seleziona|usa\s+(?:il|l')|con\s+(?:il|l'))\b/i.test(withoutPc)) {
+      const profName = String(chromeProfMatch[1] || chromeProfMatch[0] || '')
+        .replace(/\b(?:su|in|da|con|il|la|lo|l'|account|profilo|chrome)\b/gi, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (profName.length >= 2) {
+        const shouldPersist = /\b(quando|sempre|imposta|usa\s+sempre|di\s+default)\b/i.test(clean);
+        devices.enqueueCommand(db, 'desktop', { kind: 'open_chrome_profile', target: profName, args: shouldPersist ? 'persist' : '' }, nowMs);
+        return {
+          reply: `Apro Chrome sul PC con il profilo "${profName}"${shouldPersist ? ' e lo memorizzo come predefinito' : ''}, signore.`,
+          device: [], actions: ['pc_action'], touched: ['automazioni', 'tecnologia'], touchedLeaves: [],
+        };
       }
     }
 
