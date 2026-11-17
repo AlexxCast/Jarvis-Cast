@@ -232,6 +232,8 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
 
   const history = db.all('SELECT role, text FROM messages WHERE session = ? AND id > ? ORDER BY id DESC LIMIT 14', sessionId, sess.summarized_upto).reverse();
   const mods = memory.listModules(db);
+  const textFiles = fileList.filter(f => f.encoding !== 'base64');
+  const pdfBase64 = fileList.find(f => f.encoding === 'base64' && /\.pdf$/i.test(f.name))?.content || null;
   const parts = {
     core: CORE_PROMPT(diary.profile.name, nowHuman(ms, tz)) + '\n\n' + mood.MOOD_PROMPT(mood.current(db, ms)),
     brief: dietBrief(diary, today),
@@ -247,8 +249,9 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
     summary: sess.summary,
     history,
     userText: `[${nowHuman(ms, tz)}${source === 'voice' ? ', a voce' : ''}] ${userText}` +
-      (fileList.length ? '\n\nFILE ALLEGATI DALL\'UTENTE:\n' + fileList.map(f => `=== FILE: ${f.name} ===\n${f.content.slice(0, 24000)}`).join('\n\n') : ''),
+      (textFiles.length ? '\n\nFILE ALLEGATI DALL\'UTENTE:\n' + textFiles.map(f => `=== FILE: ${f.name} ===\n${f.content.slice(0, 24000)}`).join('\n\n') : ''),
     image,
+    pdfBase64,
   };
 
   const storedUserText = fileList.length ? `[📎 ${fileList.map(f => f.name).join(', ')}] ${userText}` : userText;
@@ -257,10 +260,10 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   let result;
   let remembered = [];
   let topicHits = { modules: [], leaves: [] };
-  const tier = router.classifyTier(userText, !!image);
+  const tier = router.classifyTier(userText, !!image || !!pdfBase64);
   try {
     let res = await router.chat(db, env, {
-      tier, needsVision: !!image, preferKey: sess.model, maxTokens: 2000,
+      tier, needsVision: !!image || !!pdfBase64, preferKey: sess.model, maxTokens: 2000,
       build: (model) => buildMessages(model, parts), fetchFn: deps.fetchFn, now: deps.now, tz,
     });
     let parsed = parseReply(res.text);

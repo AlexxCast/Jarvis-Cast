@@ -111,8 +111,11 @@ export function buildMessages(model, parts) {
     // L'ultimo turno deve essere quello nuovo: accoda il messaggio corrente al precedente dell'utente.
     parts = { ...parts, userText: turns.pop().content + '\n' + parts.userText };
   }
-  const user = parts.image
-    ? { role: 'user', content: [{ type: 'text', text: parts.userText }, { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${parts.image}` } }] }
+  const mediaParts = [];
+  if (parts.image) mediaParts.push({ type: 'image_url', image_url: { url: `data:image/jpeg;base64,${parts.image}` } });
+  if (parts.pdfBase64) mediaParts.push({ type: 'image_url', image_url: { url: `data:application/pdf;base64,${parts.pdfBase64}` } });
+  const user = mediaParts.length
+    ? { role: 'user', content: [{ type: 'text', text: parts.userText }, ...mediaParts] }
     : { role: 'user', content: parts.userText };
   return [{ role: 'system', content: sections.join('\n\n') }, ...turns, user];
 }

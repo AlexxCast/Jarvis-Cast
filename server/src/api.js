@@ -70,7 +70,8 @@ export async function handleApi(db, env, deps, request) {
       const image = typeof b.image === 'string' && b.image.length > 100 ? b.image.replace(/^data:image\/\w+;base64,/, '') : null;
       const files = Array.isArray(b.files) ? b.files.slice(0, 4).filter(f => f && f.name && typeof f.content === 'string').map(f => ({
         name: String(f.name).slice(0, 80),
-        content: String(f.content).slice(0, 60000),
+        encoding: f.encoding === 'base64' ? 'base64' : 'text',
+        content: String(f.content).slice(0, f.encoding === 'base64' ? 4_000_000 : 60000),
       })) : [];
       const out = await handleChat(db, env, chatDeps, { text: b.text, image, files, sessionId: String(b.session || 'main').slice(0, 40), source: b.source === 'voice' ? 'voice' : 'app' });
       const nextDue = agenda.fireDue(db, deps.now(), tz);

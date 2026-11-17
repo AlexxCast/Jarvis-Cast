@@ -321,8 +321,42 @@ async function send(text) {
   document.querySelector('.composer textarea')?.focus();
 }
 
+async function extractPdfContent(file) {
+  try {
+    const pdfjs = await import('https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.min.mjs');
+    pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs';
+    const buf = await file.arrayBuffer();
+    const doc = await pdfjs.getDocument({ data: buf }).promise;
+    const pages = [];
+    const maxPages = Math.min(doc.numPages, 40);
+    for (let p = 1; p <= maxPages; p++) {
+      const page = await doc.getPage(p);
+      const tc = await page.getTextContent();
+      const txt = tc.items.map(it => it.str || '').join(' ').replace(/\s+/g, ' ').trim();
+      if (txt) pages.push(`[Pagina ${p}]\n${txt}`);
+    }
+    const fullText = pages.join('\n\n').slice(0, 60000);
+    if (fullText.length >= 40) return { text: fullText, image: null };
+    // PDF scansionato (solo immagini): renderizza la prima pagina per leggerla con la Visione
+    const page1 = await doc.getPage(1);
+    const vp = page1.getViewport({ scale: 1.5 });
+    const canvas = h('canvas', { width: Math.round(vp.width), height: Math.round(vp.height) });
+    await page1.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+    return { text: '', image: canvas.toDataURL('image/jpeg', 0.85).split(',')[1] };
+  } catch {
+    // Riserva offline/CDN: invia i byte base64 al server per la lettura nativa con Gemini
+    const b64 = await new Promise((res, rej) => {
+      const r = new FileReader();
+      r.onload = () => res(String(r.result || '').split(',')[1] || '');
+      r.onerror = rej;
+      r.readAsDataURL(file);
+    });
+    return { base64: b64 };
+  }
+}
+
 function pickFile() {
-  const input = h('input', { type: 'file', multiple: true, accept: '.txt,.md,.json,.js,.ts,.jsx,.tsx,.py,.kt,.java,.html,.css,.csv,.log,.xml,.yml,.yaml,.sql,.sh,.bat,text/*,application/json,*/*' });
+  const input = h('input', { type: 'file', multiple: true, accept: '.pdf,application/pdf,.txt,.md,.json,.js,.ts,.jsx,.tsx,.py,.kt,.java,.html,.css,.csv,.log,.xml,.yml,.yaml,.sql,.sh,.bat,text/*,application/json,*/*' });
   input.addEventListener('change', async () => {
     const list = Array.from(input.files || []).slice(0, 4);
     for (const file of list) {
@@ -334,6 +368,19 @@ function pickFile() {
           canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height);
           store.pendingImage = canvas.toDataURL('image/jpeg', 0.82).split(',')[1];
         } catch { toast(`Impossibile leggere l'immagine ${file.name}.`); }
+      } else if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
+        toast(`Estraggo testo dal PDF ${file.name}…`);
+        const pdf = await extractPdfContent(file);
+        if (pdf.image) {
+          store.pendingImage = pdf.image;
+          store.pendingFiles = [...(store.pendingFiles || []).filter(x => x.name !== file.name), { name: file.name, size: file.size, content: '[PDF scansionato allegato come immagine]' }].slice(0, 4);
+        } else if (pdf.text) {
+          store.pendingFiles = [...(store.pendingFiles || []).filter(x => x.name !== file.name), { name: file.name, size: file.size, content: pdf.text }].slice(0, 4);
+        } else if (pdf.base64) {
+          store.pendingFiles = [...(store.pendingFiles || []).filter(x => x.name !== file.name), { name: file.name, size: file.size, encoding: 'base64', content: pdf.base64 }].slice(0, 4);
+        } else {
+          toast(`Impossibile leggere il PDF ${file.name}.`);
+        }
       } else {
         try {
           const content = (await file.text()).slice(0, 60000);
