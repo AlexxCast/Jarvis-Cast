@@ -66,7 +66,11 @@ export async function handleApi(db, env, deps, request) {
     if (path === '/api/chat' && method === 'POST') {
       const b = await body(request);
       const image = typeof b.image === 'string' && b.image.length > 100 ? b.image.replace(/^data:image\/\w+;base64,/, '') : null;
-      const out = await handleChat(db, env, chatDeps, { text: b.text, image, sessionId: String(b.session || 'main').slice(0, 40), source: b.source === 'voice' ? 'voice' : 'app' });
+      const files = Array.isArray(b.files) ? b.files.slice(0, 4).filter(f => f && f.name && typeof f.content === 'string').map(f => ({
+        name: String(f.name).slice(0, 80),
+        content: String(f.content).slice(0, 60000),
+      })) : [];
+      const out = await handleChat(db, env, chatDeps, { text: b.text, image, files, sessionId: String(b.session || 'main').slice(0, 40), source: b.source === 'voice' ? 'voice' : 'app' });
       const nextDue = agenda.fireDue(db, deps.now(), tz);
       if (nextDue) deps.schedule?.(nextDue);
       return json(out);

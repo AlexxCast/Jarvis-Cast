@@ -103,3 +103,7 @@ details > summary { cursor: pointer; color: var(--muted); }
 
 .caption:has(.visual) { max-height: 58%; }
 .caption .visual, .msg .visual { text-align: left; white-space: normal; margin-top: 10px; }
+.attachments { display: flex; flex-wrap: wrap; gap: 6px; padding: 0 16px 4px; flex: none; }
+.attach-chip { display: inline-flex; align-items: center; gap: 6px; background: #000; border: 1px solid var(--primary); color: var(--primary); }
+.attach-rm { background: none; border: 0; color: var(--error); cursor: pointer; font-weight: 700; padding: 0 2px; line-height: 1; }
+.project-card { border-color: var(--line); }

@@ -15,7 +15,7 @@ const nativeJson = (name, ...args) => { try { return JSON.parse(nativeCall(name,
 
 const store = {
   token: (nativeJson('getConfig') || {}).token || localStorage.getItem('jarvis_token') || '',
-  tab: 'chat', sub: 'storico', state: null, messages: [], sending: false, pendingImage: null,
+  tab: 'chat', sub: 'storico', state: null, messages: [], sending: false, pendingImage: null, pendingFiles: [],
   memory: null, models: null, inbox: [], openJob: null, error: '', chatOpen: false,
   voice: (nativeJson('getConfig') || {}).status || 'OFF', speakingUntil: 0,
 };
@@ -170,6 +170,7 @@ const ICONS = {
   attivita: 'M9 11l3 3 8-8|M20 12v7a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h9',
   altro: 'M4 6h16|M4 12h16|M4 18h16',
   gallery: 'M4 5h16v14H4z|M4 15l4-4 4 4 3-3 5 5|M15 9.5a1 1 0 1 0 0-.01',
+  file: 'M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48',
   send: 'M5 12h14|M13 6l6 6-6 6', photo: 'M4 8h3l2-3h6l2 3h3v11H4z|M12 10a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z', mic: 'M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z|M5 11a7 7 0 0 0 14 0|M12 18v3', trash: 'M4 7h16|M9 7V4h6v3|M6 7l1 13h10l1-13',
 };
 const fmt = (n) => Math.round(Number(n) || 0).toLocaleString('it-IT');
@@ -289,14 +290,16 @@ function scrollChat() { requestAnimationFrame(() => { const c = document.querySe
 async function send(text) {
   text = text.trim();
   const image = store.pendingImage;
-  if ((!text && !image) || store.sending) return;
-  store.sending = true; store.pendingImage = null;
-  store.messages.push({ role: 'user', text: text || 'Guarda questa foto.', image: !!image });
+  const files = store.pendingFiles || [];
+  if ((!text && !image && !files.length) || store.sending) return;
+  store.sending = true; store.pendingImage = null; store.pendingFiles = [];
+  const labelText = text || (image ? 'Guarda questa foto.' : `Analizza: ${files.map(f => f.name).join(', ')}`);
+  store.messages.push({ role: 'user', text: files.length ? `[📎 ${files.map(f => f.name).join(', ')}] ${labelText}` : labelText, image: !!image });
   store.speakingUntil = 0;
   render(); scrollChat();
   orb.highlight(guessTopics(text));
   try {
-    const out = await api('POST', '/chat', { text, image });
+    const out = await api('POST', '/chat', { text, image, files });
     store.mind = null; store.memory = null;
     // Prima la mappa aggiornata (possono essere nati rami e nodi nuovi), poi si accendono.
     loadGraph(false).then(() => orb.highlight(out.touched || [], out.touchedLeaves || []));
@@ -316,6 +319,31 @@ async function send(text) {
   store.sending = false;
   render(); scrollChat();
   document.querySelector('.composer textarea')?.focus();
+}
+
+function pickFile() {
+  const input = h('input', { type: 'file', multiple: true, accept: '.txt,.md,.json,.js,.ts,.jsx,.tsx,.py,.kt,.java,.html,.css,.csv,.log,.xml,.yml,.yaml,.sql,.sh,.bat,text/*,application/json,*/*' });
+  input.addEventListener('change', async () => {
+    const list = Array.from(input.files || []).slice(0, 4);
+    for (const file of list) {
+      if (file.type.startsWith('image/')) {
+        try {
+          const bmp = await createImageBitmap(file);
+          const scale = Math.min(1, 1024 / Math.max(bmp.width, bmp.height));
+          const canvas = h('canvas', { width: Math.round(bmp.width * scale), height: Math.round(bmp.height * scale) });
+          canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height);
+          store.pendingImage = canvas.toDataURL('image/jpeg', 0.82).split(',')[1];
+        } catch { toast(`Impossibile leggere l'immagine ${file.name}.`); }
+      } else {
+        try {
+          const content = (await file.text()).slice(0, 60000);
+          store.pendingFiles = [...(store.pendingFiles || []).filter(x => x.name !== file.name), { name: file.name, size: file.size, content }].slice(0, 4);
+        } catch { toast(`Impossibile leggere il file ${file.name}.`); }
+      }
+    }
+    render();
+  });
+  input.click();
 }
 
 function pickPhoto(camera = false) {
@@ -409,15 +437,27 @@ function viewChat() {
       m.model ? h('span', { class: 'meta' }, m.model.split(':').pop()) : null)),
     store.sending ? h('div', { class: 'msg assistant pending' }, 'Sto pensando…') : null);
   const ta = h('textarea', { rows: 1, placeholder: 'Scrivi a Jarvis…', 'aria-label': 'Messaggio', onkeydown: (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); const v = ta.value; ta.value = ''; send(v); } } });
+  const attachBar = (store.pendingFiles && store.pendingFiles.length)
+    ? h('div', { class: 'attachments' }, store.pendingFiles.map((f, idx) =>
+      h('span', { class: 'chip attach-chip' },
+        `📎 ${f.name} (${Math.max(1, Math.round((f.size || f.content.length) / 1024))} KB) `,
+        h('button', { type: 'button', class: 'attach-rm', 'aria-label': 'Rimuovi ' + f.name, onclick: () => { store.pendingFiles.splice(idx, 1); render(); } }, '×'))))
+    : null;
   const composer = h('div', { class: 'composer' },
     store.pendingImage ? h('img', { class: 'thumb', alt: 'Foto allegata', src: 'data:image/jpeg;base64,' + store.pendingImage, onclick: () => { store.pendingImage = null; render(); } }) : null,
+    h('button', { class: 'btn icon', title: 'Allega file', 'aria-label': 'Allega file', onclick: () => pickFile() }, icon(ICONS.file)),
     h('button', { class: 'btn icon', 'aria-label': native ? 'Scatta una foto' : 'Allega una foto', onclick: () => pickPhoto(!!native) }, icon(ICONS.photo)),
     native ? h('button', { class: 'btn icon', 'aria-label': 'Scegli dalla galleria', onclick: () => pickPhoto(false) }, icon(ICONS.gallery)) : null,
     native ? h('button', { class: 'btn icon', 'aria-label': 'Parla ora', onclick: () => nativeCall('listenNow') }, icon(ICONS.mic)) : null,
     h('button', { class: 'btn icon' + (store.chatOpen ? ' on' : ''), 'aria-label': store.chatOpen ? 'Chiudi la chat' : 'Apri la chat', 'aria-pressed': store.chatOpen ? 'true' : 'false', onclick: () => { store.chatOpen = !store.chatOpen; render(); if (store.chatOpen) scrollChat(); } }, icon(ICONS.chat)),
     ta,
     h('button', { class: 'btn primary icon', 'aria-label': 'Invia', disabled: store.sending, onclick: () => { const v = ta.value; ta.value = ''; send(v); } }, icon(ICONS.send)));
-  return store.chatOpen ? [orb.el, list, composer] : [codeBanner(), widgets('jarvis'), orb.el, caption, composer];
+  const activeProj = (store.state?.jobs || []).find(j => j.status === 'planning' || j.status === 'running');
+  const projBanner = activeProj && !store.chatOpen ? h('div', { class: 'codebar' }, h('div', { class: 'banner', style: 'cursor:pointer', onclick: () => go('attivita') },
+    h('div', { class: 'row' }, h('b', { class: 'grow clip' }, `⚙ Progetto: ${activeProj.title}`), h('span', { class: 'tag warn num' }, `${activeProj.stats?.pct || 0}%`)),
+    h('div', { class: 'bar' }, h('i', { style: `width:${activeProj.stats?.pct || 8}%` })),
+    h('span', { class: 'muted small' }, `${activeProj.stats?.done || 0}/${activeProj.stats?.total || '?'} nodi completati · tocca per dettagli`))) : null;
+  return store.chatOpen ? [orb.el, list, attachBar, composer] : [codeBanner(), projBanner, widgets('jarvis'), orb.el, caption, attachBar, composer];
 }
 
 // ------------------------------------------------------------------ oggi
@@ -537,21 +577,40 @@ function viewAttivita() {
         h('button', { class: 'btn icon ghost danger', 'aria-label': 'Elimina promemoria', onclick: guard(async () => { s.reminders = (await api('DELETE', '/reminders/' + r.id)).reminders; render(); }) }, icon(ICONS.trash)))))
         : h('p', { class: 'empty' }, 'Nessun promemoria. Può anche dire: "Jarvis, ricordami alle 18 di chiamare il dentista".')),
     viewLuoghi(s),
-    h('div', { class: 'card' }, h('h2', {}, 'Compiti in background'),
-      h('p', { class: 'muted' }, 'Jarvis divide il lavoro in passi, li svolge uno alla volta e avvisa quando ha finito.'),
+    h('div', { class: 'card' },
+      h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Progetti e Compiti Multi-Agente'),
+        s.jobs.some(j => j.status === 'planning' || j.status === 'running') ? h('span', { class: 'tag warn' }, '● In esecuzione') : null),
+      h('p', { class: 'muted' }, 'Jarvis divide i progetti complessi in nodi-agente, li esegue in autonomia e mostra qui avanzamento e statistiche.'),
       goal, h('button', { class: 'btn primary', onclick: guard(async () => {
         if (!goal.value.trim()) return;
-        s.jobs = (await api('POST', '/jobs', { goal: goal.value })).jobs; render(); toast('Compito avviato.');
-      }) }, 'Avvia'),
-      s.jobs.length ? h('div', { class: 'list' }, s.jobs.map(j => h('div', { class: 'item', style: 'align-items:flex-start' },
-        h('div', { class: 'grow' },
-          h('div', { class: 'row' }, h('span', { class: 'grow clip' }, j.title), jobTag(j)),
-          j.steps.length ? h('div', { class: 'muted small' }, j.steps.map(x => (x.status === 'done' ? '✓ ' : '○ ') + x.title).join('  ')) : null,
-          store.openJob === j.id && j.result ? h('p', { class: 'pre', style: 'margin-top:8px' }, j.result) : null,
-          h('div', { class: 'row', style: 'margin-top:6px' },
-            j.result ? h('button', { class: 'btn', onclick: () => { store.openJob = store.openJob === j.id ? null : j.id; render(); } }, store.openJob === j.id ? 'Chiudi' : 'Leggi il risultato') : null,
-            h('button', { class: 'btn ghost danger', onclick: guard(async () => { s.jobs = (await api('DELETE', '/jobs/' + j.id)).jobs; render(); }) }, 'Elimina'))))))
-        : null),
+        s.jobs = (await api('POST', '/jobs', { goal: goal.value })).jobs; goal.value = ''; render(); toast('Progetto avviato.');
+      }) }, 'Avvia Progetto')),
+    ...(s.jobs.length ? s.jobs.map(j => {
+      const st = j.stats || { total: j.steps.length, done: j.steps.filter(x => x.status === 'done').length, pct: 0, files: [], models: [] };
+      const pct = st.pct ?? (st.total ? Math.round((st.done / st.total) * 100) : 0);
+      if ((j.status === 'planning' || j.status === 'running') && !store.jobPoll) {
+        store.jobPoll = setTimeout(async () => { store.jobPoll = 0; try { await refresh(); render(); } catch {} }, 6000);
+      }
+      return h('div', { class: 'card project-card' },
+        h('div', { class: 'row' }, h('h3', { class: 'grow clip', style: 'color:var(--text)' }, j.title), jobTag(j)),
+        h('div', { class: 'row', style: 'gap:8px' },
+          h('div', { class: 'bar grow' }, h('i', { style: `width:${pct}%` })),
+          h('span', { class: 'num small', style: 'color:var(--primary);font-weight:700' }, `${pct}%`)),
+        h('div', { class: 'stats' },
+          h('div', { class: 'stat' }, h('span', { class: 'muted small' }, 'Nodi'), h('b', {}, `${st.done} / ${st.total || '—'}`)),
+          h('div', { class: 'stat' }, h('span', { class: 'muted small' }, 'File creati'), h('b', {}, st.files?.length ? String(st.files.length) : '0')),
+          h('div', { class: 'stat' }, h('span', { class: 'muted small' }, 'Aggiornato'), h('b', { class: 'small' }, (j.updated || j.created || '').slice(11, 16) || '—'))),
+        st.models?.length ? h('div', { class: 'chips' }, st.models.map(m => h('span', { class: 'chip' }, m))) : null,
+        st.files?.length ? h('div', { class: 'muted small' }, `File: ${st.files.join(', ')}`) : null,
+        j.steps.length ? h('div', { class: 'list' }, j.steps.map(x => h('div', { class: 'item', style: 'padding:5px 0' },
+          h('span', { style: `color:${x.status === 'done' ? 'var(--primary)' : 'var(--muted)'}` }, x.status === 'done' ? '✓' : '○'),
+          h('span', { class: 'grow small' }, (x.role ? `[${x.role}] ` : '') + x.title),
+          x.model ? h('span', { class: 'tag' }, x.model) : null))) : null,
+        store.openJob === j.id && j.result ? h('p', { class: 'pre small', style: 'margin-top:6px;border-top:1px solid var(--line);padding-top:8px' }, j.result) : null,
+        h('div', { class: 'row', style: 'margin-top:4px' },
+          j.result ? h('button', { class: 'btn', onclick: () => { store.openJob = store.openJob === j.id ? null : j.id; render(); } }, store.openJob === j.id ? 'Chiudi risultato' : 'Leggi risultato') : null,
+          h('button', { class: 'btn ghost danger', onclick: guard(async () => { s.jobs = (await api('DELETE', '/jobs/' + j.id)).jobs; render(); }) }, 'Elimina')));
+    }) : [h('p', { class: 'empty' }, 'Nessun progetto ancora. Chiedi a Jarvis in chat o avviane uno qui sopra.')]),
   ];
 }
 const jobTag = (j) => h('span', { class: 'tag ' + ({ done: 'ok', failed: 'bad' }[j.status] || 'warn') }, { planning: 'pianifico', running: 'in corso', done: 'completato', failed: 'non riuscito' }[j.status] || j.status);

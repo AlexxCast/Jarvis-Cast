@@ -167,12 +167,14 @@ export function applyActions(db, actions, ctx) {
  * Gestisce un messaggio dell'utente.
  * deps: { now, fetchFn, tz, defer(promise), startJob({title, goal}) }
  */
-export async function handleChat(db, env, deps, { text, image = null, sessionId = 'main', source = 'app' }) {
+export async function handleChat(db, env, deps, { text, image = null, files = [], sessionId = 'main', source = 'app' }) {
   const ms = deps.now();
   const tz = deps.tz;
   const today = todayOf(ms, tz);
   const nowIso = nowIsoOf(ms, tz);
-  const userText = String(text || '').trim().slice(0, 4000) || (image ? 'Guarda questa foto.' : '');
+  const fileList = Array.isArray(files) ? files.filter(f => f && f.name && typeof f.content === 'string') : [];
+  const rawText = String(text || '').trim().slice(0, 4000);
+  const userText = rawText || (image ? 'Guarda questa foto.' : (fileList.length ? `Analizza ${fileList.length === 1 ? 'questo file' : 'questi file'}: ${fileList.map(f => f.name).join(', ')}` : ''));
   if (!userText) return { reply: 'Non ho sentito nulla, signore.', expectReply: true, card: '', photoRequest: null };
 
   // Se l'utente chiede di ridurre, sistemare o pulire il grafo (es. "il grafo della dieta è troppo grande, riducilo"),
@@ -184,7 +186,7 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
   jarvisCore.selfInterrogate(db, env, ms, tz);
 
   // 1. JARVIS CORE (IA proprietaria interna): gestisce direttamente controllo multi-dispositivo (PC/Telefono), Antigravity, timer e diagnostica.
-  const coreHit = !image ? jarvisCore.handleCoreIntent(db, userText, ms, env) : null;
+  const coreHit = (!image && !fileList.length) ? jarvisCore.handleCoreIntent(db, userText, ms, env) : null;
   if (coreHit) {
     if (coreHit.scheduleAt) deps.schedule?.(coreHit.scheduleAt);
     if (coreHit.reply) {
@@ -203,7 +205,7 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
   }
 
   // 2. Gatekeeper procedurale locale: attività già fatte sul telefono vanno in automatico, zero modelli esterni.
-  const localHit = flows.gatekeepChat(db, userText, { hasImage: !!image, hasPendingPhone: !!phone.pendingContext(db, ms) });
+  const localHit = flows.gatekeepChat(db, userText, { hasImage: !!image || fileList.length > 0, hasPendingPhone: !!phone.pendingContext(db, ms) });
   if (localHit) {
     addMessage(db, sessionId, 'user', userText, nowIso, image ? { image: true } : null);
     addMessage(db, sessionId, 'assistant', localHit.reply, nowIso, { model: 'local-gatekeeper' });
@@ -243,11 +245,13 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
     web: web.WEB_WORDS.test(userText) && !WEATHER_WORDS.test(userText) ? web.webBlock(userText, await web.search(env, deps.fetchFn, userText, today)) : '',
     summary: sess.summary,
     history,
-    userText: `[${nowHuman(ms, tz)}${source === 'voice' ? ', a voce' : ''}] ${userText}`,
+    userText: `[${nowHuman(ms, tz)}${source === 'voice' ? ', a voce' : ''}] ${userText}` +
+      (fileList.length ? '\n\nFILE ALLEGATI DALL\'UTENTE:\n' + fileList.map(f => `=== FILE: ${f.name} ===\n${f.content.slice(0, 24000)}`).join('\n\n') : ''),
     image,
   };
 
-  addMessage(db, sessionId, 'user', userText, nowIso, image ? { image: true } : null);
+  const storedUserText = fileList.length ? `[📎 ${fileList.map(f => f.name).join(', ')}] ${userText}` : userText;
+  addMessage(db, sessionId, 'user', storedUserText, nowIso, image ? { image: true } : null);
 
   let result;
   let remembered = [];

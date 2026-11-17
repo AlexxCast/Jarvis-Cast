@@ -50,7 +50,15 @@ export function listJobs(db) {
   return db.all('SELECT id, title, goal, status, steps, result, created, updated FROM jobs ORDER BY created DESC LIMIT 30').map(j => {
     let steps = [];
     try { steps = JSON.parse(j.steps); } catch { /* vuoto */ }
-    return { ...j, result: j.result.startsWith('retry:') ? '' : j.result, steps: steps.map(s => ({ title: s.title, status: s.status })) };
+    const doneCount = steps.filter(s => s.status === 'done').length;
+    const files = [...new Set(steps.flatMap(s => extractProjectFiles(s.output || '').map(f => f.path)))];
+    const models = [...new Set(steps.map(s => String(s.model || '').split(':').pop()).filter(Boolean))];
+    return {
+      ...j,
+      result: j.result.startsWith('retry:') ? '' : j.result,
+      steps: steps.map(s => ({ id: s.id || '', role: s.role || '', title: s.title, status: s.status, model: String(s.model || '').split(':').pop() })),
+      stats: { total: steps.length, done: doneCount, pct: steps.length ? Math.round((doneCount / steps.length) * 100) : (j.status === 'done' ? 100 : 0), files, models },
+    };
   });
 }
 
