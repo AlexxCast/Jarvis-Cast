@@ -307,6 +307,14 @@ export async function handleApi(db, env, deps, request) {
     if (job && method === 'DELETE') { db.run('DELETE FROM jobs WHERE id = ?', job[1]); return json({ jobs: jobs.listJobs(db) }); }
 
     if (path === '/api/inbox' && method === 'GET') return json({ items: db.all('SELECT id, kind, text, at FROM inbox ORDER BY id DESC LIMIT 30') });
+    if (path === '/api/fix-latenti' && method === 'GET') {
+      if (url.searchParams.get('format') === 'json') return json({ items: jarvisCore.listFixLatenti(db) });
+      return new Response(jarvisCore.renderFixLatentiMarkdown(db), { status: 200, headers: { 'content-type': 'text/markdown; charset=utf-8', 'cache-control': 'no-store' } });
+    }
+    if (path === '/api/fix-latenti' && method === 'DELETE') {
+      db.run("DELETE FROM kv WHERE key = 'fixLatenti'");
+      return json({ ok: true });
+    }
     if (path === '/api/inbox/consume' && method === 'POST') {
       const nextDue = agenda.fireDue(db, ms, tz);
       if (nextDue) deps.schedule?.(nextDue);

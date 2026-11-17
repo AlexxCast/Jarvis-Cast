@@ -85,6 +85,93 @@ export function focusPromptLine(db, sessionId = 'main', nowMs = Date.now()) {
   return `CONTESTO ATTIVO (grafo): ${f.path} — se l'utente continua sullo stesso argomento/dispositivo senza specificarlo, resta in questo percorso; se chiede di cambiare dispositivo (es. telefono/pc), sposta lì l'azione sullo stesso oggetto.`;
 }
 
+// ------------------------------------------------------------------ Fix Latenti (registro automatico problemi ricorrenti)
+
+const FIX_LATENTI_KEY = 'fixLatenti';
+const ISSUE_HINT_RE = /\b(non\s+funzion\w*|non\s+parte|non\s+apre|non\s+va\b|non\s+sta\s+funzionando|non\s+riesc\w*|errore\s*\d*|ancora\s+niente|non\s+l'ha\s+(?:aperto|fatto)|non\s+hai\s+(?:aperto|fatto|selezionato)|vedo\s+solo\s+che|trovata\s+una\s+soluzione|non\s+va\s+bene|bloccato|si\s+blocca|non\s+risponde|perch[eé]\s+non)\b/i;
+
+export function listFixLatenti(db) {
+  return kvGet(db, FIX_LATENTI_KEY, []);
+}
+
+/**
+ * Rileva automaticamente quando qualcosa non funziona o l'utente insiste sullo stesso problema,
+ * e aggiorna il documento "fix latenti" raggruppando gli scambi sotto un titolo chiaro.
+ */
+export function maybeLogLatentIssue(db, sessionId = 'main', userText = '', nowMs = Date.now(), tz = 'Europe/Rome') {
+  const clean = String(userText || '').trim();
+  if (!clean) return false;
+  const focus = getFocus(db, sessionId, nowMs);
+  const recent = db.all('SELECT role, text, at, meta FROM messages WHERE session = ? ORDER BY id DESC LIMIT 8', sessionId).reverse();
+  const recentUsers = recent.filter(m => m.role === 'user').slice(-4);
+  const target = (focus?.target || '').trim();
+  const repeatedTarget = target.length >= 3 && recentUsers.filter(m => m.text.toLowerCase().includes(target.toLowerCase())).length >= 3;
+
+  if (!ISSUE_HINT_RE.test(clean) && !repeatedTarget) return false;
+
+  const atIso = nowIsoOf(nowMs, tz);
+  const topicKey = `${focus?.domain || 'generale'}:${(target || clean.slice(0, 32)).toLowerCase()}`;
+  const title = target
+    ? `Problema su: ${target}${focus?.device ? ` (${focus.device.toUpperCase()})` : ''}`
+    : `Problema: ${clean.slice(0, 60)}`;
+
+  const list = listFixLatenti(db);
+  const idx = list.findIndex(x => x.topicKey === topicKey && (nowMs - Number(x.updatedMs || 0)) < 45 * 60_000);
+  const existing = idx >= 0 ? list[idx] : {
+    id: `fix-${nowMs}`,
+    topicKey,
+    title,
+    createdAt: atIso,
+    messages: [],
+    errors: [],
+  };
+
+  const seen = new Set((existing.messages || []).map(m => `${m.role}|${m.at}|${m.text.slice(0, 80)}`));
+  const merged = [...(existing.messages || [])];
+  for (const m of recent) {
+    let model = '';
+    try { model = JSON.parse(m.meta || '{}').model || ''; } catch {}
+    const sig = `${m.role}|${m.at}|${String(m.text || '').slice(0, 80)}`;
+    if (!seen.has(sig)) {
+      seen.add(sig);
+      merged.push({ at: m.at, role: m.role, model, text: String(m.text || '').slice(0, 500) });
+    }
+  }
+
+  const recentErrs = db.all("SELECT at, text FROM events WHERE kind = 'error' ORDER BY id DESC LIMIT 3")
+    .map(e => `[${e.at}] ${String(e.text || '').slice(0, 180)}`);
+  const entry = {
+    ...existing,
+    title,
+    updatedAt: atIso,
+    updatedMs: nowMs,
+    messages: merged.slice(-24),
+    errors: [...new Set([...(existing.errors || []), ...recentErrs])].slice(-6),
+  };
+
+  const next = idx >= 0 ? [entry, ...list.filter((_, i) => i !== idx)] : [entry, ...list];
+  kvSet(db, FIX_LATENTI_KEY, next.slice(0, 40));
+  return true;
+}
+
+/** Genera il documento Markdown completo "fix latenti" pronto per analisi e correzioni. */
+export function renderFixLatentiMarkdown(db) {
+  const list = listFixLatenti(db);
+  if (!list.length) return '# Fix Latenti\n\nNessun problema aperto registrato.\n';
+  const blocks = list.map(item => {
+    const lines = [
+      `## ${item.title}`,
+      `- **Aggiornato:** ${item.updatedAt} (creato: ${item.createdAt})`,
+      ...(item.errors?.length ? ['- **Errori tecnici rilevati:**', ...item.errors.map(e => `  - ${e}`)] : []),
+      '',
+      '### Scambi messaggi',
+      ...(item.messages || []).map(m => `- **${m.at} [${m.role}${m.model ? ` · ${m.model}` : ''}]:** ${m.text.replace(/\n+/g, ' ')}`),
+    ];
+    return lines.join('\n');
+  });
+  return `# Fix Latenti — Registro Automatico Problemi\n\n${blocks.join('\n\n---\n\n')}\n`;
+}
+
 /** Gestisce le schede vive modulari (create dinamicamente da Jarvis Core o dall'IA). */
 export function applyLiveCard(db, a = {}, nowMs = Date.now()) {
   const op = String(a.op || 'set').toLowerCase();

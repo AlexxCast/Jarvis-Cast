@@ -317,3 +317,7 @@ Jarvis diceva "ho aggiornato il piano" o "chiamo Marcolino" senza farlo.
 ## Automatismi Modulari a Step Verificati (`modularSkills`, v2.23)
 - Le nuove azioni su PC/telefono/servizi generano una bozza in `pendingSkill:<sessionId>` e chiedono conferma all'utente (*"Ha funzionato?"*); solo dopo conferma esplicita vengono salvate in `modularSkills` con ogni singolo step separato e parametrizzato (`{account}`, `{media}` opzionale).
 - Alla riesecuzione (`findMatchingSkill` + `planSkillExecution`), Jarvis si ferma ai blocchi richiesti (es. sulla home di Prime se non è indicato un film), delega al modello solo gli eventuali step finali dinamici e fa autocontrollo quando cambia un solo dato (es. un altro account) senza chiedere nuova conferma.
+
+## Documento Automatico `fix latenti` (`maybeLogLatentIssue`, v2.24)
+- Quando l'utente segnala che qualcosa non funziona o insiste per più turni sullo stesso argomento (`ISSUE_HINT_RE` o ripetizione sul `focus.target`), `jarvis_core.js` raggruppa automaticamente gli scambi di messaggi e gli eventuali errori tecnici recenti sotto un titolo descrittivo in `fixLatenti`.
+- Il documento è sempre consultabile in formato Markdown (o JSON con `?format=json`) su `GET /api/fix-latenti`.

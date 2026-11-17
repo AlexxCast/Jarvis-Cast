@@ -193,6 +193,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
     if (coreHit.reply) {
       addMessage(db, sessionId, 'user', userText, nowIso, null);
       addMessage(db, sessionId, 'assistant', coreHit.reply, nowIso, { model: 'jarvis-core', visual: coreHit.visual || undefined });
+      jarvisCore.maybeLogLatentIssue(db, sessionId, userText, ms, tz);
     }
     if (coreHit.touched?.length) {
       kvSet(db, 'lastTouched', { at: nowIso + '#' + ms, touched: coreHit.touched, leaves: coreHit.touchedLeaves });
@@ -210,6 +211,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   if (localHit) {
     addMessage(db, sessionId, 'user', userText, nowIso, image ? { image: true } : null);
     addMessage(db, sessionId, 'assistant', localHit.reply, nowIso, { model: 'local-gatekeeper' });
+    jarvisCore.maybeLogLatentIssue(db, sessionId, userText, ms, tz);
     if (localHit.device.some(d => d.type === 'phone_task')) kvSet(db, 'phonePending', null);
     const { touched, touchedLeaves } = agents.onLocalHit(db, userText, localHit, nowIso, ms);
     return {
@@ -458,6 +460,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   }
 
   addMessage(db, sessionId, 'assistant', result.reply, nowIso, { model: result.model, card: result.card || undefined, visual: result.visual || undefined });
+  jarvisCore.maybeLogLatentIssue(db, sessionId, userText, ms, tz);
   // Cosa ha "acceso" questo scambio: la sfera illumina questi rami e foglie.
   const touched = new Set(recalled.active);
   if (dietOn) touched.add(SPORT_WORDS.test(userText) ? 'sport' : 'dieta');
