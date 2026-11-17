@@ -11,6 +11,7 @@ export const PROVIDERS = {
   gemini:     { env: 'GEMINI_API_KEY',      url: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', kind: 'openai' },
   groq:       { env: 'GROQ_API_KEY',        url: 'https://api.groq.com/openai/v1/chat/completions', kind: 'openai' },
   cerebras:   { env: 'CEREBRAS_API_KEY',    url: 'https://api.cerebras.ai/v1/chat/completions', kind: 'openai' },
+  sambanova:  { env: 'SAMBANOVA_API_KEY',   url: 'https://api.sambanova.ai/v1/chat/completions', kind: 'openai' },
   nvidia:     { env: 'NVIDIA_API_KEY',      url: 'https://integrate.api.nvidia.com/v1/chat/completions', kind: 'openai' },
   openrouter: { env: 'OPENROUTER_API_KEY',  url: 'https://openrouter.ai/api/v1/chat/completions', kind: 'openai' },
   mistral:    { env: 'MISTRAL_API_KEY',     url: 'https://api.mistral.ai/v1/chat/completions', kind: 'openai' },
@@ -43,21 +44,29 @@ export const DEFAULT_MODELS = [
   { provider: 'cerebras', model: 'qwen-3-32b',    tiers: ['fast', 'smart'], ctx: 64000, rpm: 30, rpd: 14400, tpm: 60000, tpd: 1000000, free: true, prio: 34 },
   { provider: 'cerebras', model: 'llama3.1-8b',   tiers: ['fast'],          ctx: 8000,  rpm: 30, rpd: 14400, tpm: 60000, tpd: 1000000, free: true, prio: 38 },
 
-  // --- Nvidia NIM (ottimi per codice, calcoli e architettura) ---
-  { provider: 'nvidia', model: 'meta/llama-3.1-405b-instruct',       tiers: ['smart'],         ctx: 128000, rpm: 40, free: true, prio: 40 },
-  { provider: 'nvidia', model: 'qwen/qwen-2.5-coder-32b-instruct',   tiers: ['fast', 'smart'], ctx: 128000, rpm: 40, free: true, prio: 41 },
-  { provider: 'nvidia', model: 'nvidia/llama-3.1-nemotron-70b-instruct', tiers: ['smart'],     ctx: 128000, rpm: 40, free: true, prio: 42 },
-  { provider: 'nvidia', model: 'meta/llama-3.1-70b-instruct',        tiers: ['fast', 'smart'], ctx: 128000, rpm: 40, free: true, prio: 43 },
-  { provider: 'nvidia', model: 'meta/llama-3.2-90b-vision-instruct', tiers: ['vision'],        ctx: 128000, rpm: 40, free: true, prio: 44 },
-  { provider: 'nvidia', model: 'mistralai/mistral-large-2-instruct', tiers: ['smart'],         ctx: 128000, rpm: 40, free: true, prio: 45 },
+  // --- SambaNova Cloud (gratuito con crediti/tier free, velocissimo su open-weights) ---
+  { provider: 'sambanova', model: 'Meta-Llama-3.3-70B-Instruct', tiers: ['fast', 'smart'], ctx: 128000, rpm: 30, free: true, prio: 39 },
+  { provider: 'sambanova', model: 'DeepSeek-R1-Distill-Llama-70B', tiers: ['smart'],       ctx: 128000, rpm: 20, free: true, prio: 39 },
 
-  // --- OpenRouter Free (aggregatore modelli gratuiti) ---
-  { provider: 'openrouter', model: 'openrouter/free',                                 tiers: ['fast', 'smart', 'vision'], ctx: 64000, rpm: 20, rpd: 200, free: true, prio: 50 },
-  { provider: 'openrouter', model: 'google/gemini-2.0-flash-exp:free',                tiers: ['fast', 'smart', 'vision'], ctx: 128000, rpm: 20, rpd: 200, free: true, prio: 51 },
+  // --- Nvidia NIM (ottimi per codice, calcoli, 1M context e architettura) ---
+  { provider: 'nvidia', model: 'nvidia/nemotron-3-super-120b-a12b',   tiers: ['fast', 'smart'], ctx: 256000, rpm: 40, free: true, prio: 40 },
+  { provider: 'nvidia', model: 'meta/llama-3.1-405b-instruct',        tiers: ['smart'],         ctx: 128000, rpm: 40, free: true, prio: 40 },
+  { provider: 'nvidia', model: 'qwen/qwen-2.5-coder-32b-instruct',    tiers: ['fast', 'smart'], ctx: 128000, rpm: 40, free: true, prio: 41 },
+  { provider: 'nvidia', model: 'nvidia/llama-3.1-nemotron-70b-instruct', tiers: ['smart'],      ctx: 128000, rpm: 40, free: true, prio: 42 },
+  { provider: 'nvidia', model: 'meta/llama-3.1-70b-instruct',         tiers: ['fast', 'smart'], ctx: 128000, rpm: 40, free: true, prio: 43 },
+  { provider: 'nvidia', model: 'meta/llama-3.2-90b-vision-instruct',  tiers: ['vision'],        ctx: 128000, rpm: 40, free: true, prio: 44 },
+  { provider: 'nvidia', model: 'mistralai/mistral-large-2-instruct',  tiers: ['smart'],         ctx: 128000, rpm: 40, free: true, prio: 45 },
+
+  // --- OpenRouter Free (aggregatore modelli gratuiti + meta-router openrouter/free) ---
+  { provider: 'openrouter', model: 'openrouter/free',                                 tiers: ['fast', 'smart', 'vision'], ctx: 64000,  rpm: 20, rpd: 200, free: true, prio: 50 },
+  { provider: 'openrouter', model: 'google/gemma-4-31b-it:free',                      tiers: ['fast', 'smart', 'vision'], ctx: 128000, rpm: 20, rpd: 200, free: true, prio: 51 },
+  { provider: 'openrouter', model: 'nvidia/nemotron-3-super-120b-a12b:free',          tiers: ['fast', 'smart'],           ctx: 128000, rpm: 20, rpd: 200, free: true, prio: 51 },
+  { provider: 'openrouter', model: 'google/gemini-2.0-flash-exp:free',                tiers: ['fast', 'smart', 'vision'], ctx: 128000, rpm: 20, rpd: 200, free: true, prio: 52 },
   { provider: 'openrouter', model: 'meta-llama/llama-4-maverick:free',                tiers: ['fast', 'smart', 'vision'], ctx: 128000, rpm: 20, rpd: 200, free: true, prio: 52 },
-  { provider: 'openrouter', model: 'qwen/qwen3-235b-a22b:free',                       tiers: ['smart'],                   ctx: 64000, rpm: 20, rpd: 200, free: true, prio: 53 },
-  { provider: 'openrouter', model: 'deepseek/deepseek-r1:free',                       tiers: ['smart'],                   ctx: 64000, rpm: 20, rpd: 200, free: true, prio: 54 },
-  { provider: 'openrouter', model: 'mistralai/mistral-small-3.1-24b-instruct:free',   tiers: ['fast', 'vision'],          ctx: 64000, rpm: 20, rpd: 200, free: true, prio: 55 },
+  { provider: 'openrouter', model: 'qwen/qwen3-coder:free',                           tiers: ['fast', 'smart'],           ctx: 128000, rpm: 20, rpd: 200, free: true, prio: 53 },
+  { provider: 'openrouter', model: 'qwen/qwen3-235b-a22b:free',                       tiers: ['smart'],                   ctx: 64000,  rpm: 20, rpd: 200, free: true, prio: 53 },
+  { provider: 'openrouter', model: 'deepseek/deepseek-r1:free',                       tiers: ['smart'],                   ctx: 64000,  rpm: 20, rpd: 200, free: true, prio: 54 },
+  { provider: 'openrouter', model: 'mistralai/mistral-small-3.1-24b-instruct:free',   tiers: ['fast', 'vision'],          ctx: 64000,  rpm: 20, rpd: 200, free: true, prio: 55 },
 
   // --- Mistral AI ---
   { provider: 'mistral', model: 'mistral-small-latest', tiers: ['fast', 'vision'], ctx: 128000, rpm: 60, tpm: 500000, free: true, prio: 60 },

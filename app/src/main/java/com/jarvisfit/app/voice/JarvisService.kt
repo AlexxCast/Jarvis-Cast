@@ -559,6 +559,31 @@ class JarvisService : LifecycleService(), SensorEventListener {
     /** True se quando l'utente ha chiamato Jarvis lo schermo del telefono era spento o bloccato. */
     private var wakeFromScreenOff = false
 
+    private var lastWakeGreetingIdx = -1
+    private val wakeGreetings = listOf(
+        "Eccomi, signore.",
+        "Mi dica.",
+        "Sono qui, signore.",
+        "A sua disposizione.",
+        "Comandi, signore.",
+        "La ascolto.",
+        "Dica pure, signore.",
+        "Pronto, signore.",
+        "Sì, signore?",
+        "Sempre operativo.",
+        "Ai suoi ordini.",
+        "Eccomi qui, dica pure.",
+        "Tutto orecchi, signore.",
+        "Mi dica tutto.",
+    )
+
+    private fun nextWakeGreeting(): String {
+        var idx = kotlin.random.Random.nextInt(wakeGreetings.size)
+        if (idx == lastWakeGreetingIdx) idx = (idx + 1) % wakeGreetings.size
+        lastWakeGreetingIdx = idx
+        return wakeGreetings[idx]
+    }
+
     private fun onWakeWordDetected(remainingCommand: String, openApp: Boolean = true) {
         if (busy) return
         // Ferma immediatamente qualsiasi discorso del TTS per non ascoltare se stesso
@@ -594,14 +619,23 @@ class JarvisService : LifecycleService(), SensorEventListener {
             runCatching { startActivity(openIntent) }
         }
 
-        // 3. Suono di conferma (beep)
-        tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 150)
-
-        // 4. Se ha già detto il comando (es. "Jarvis cosa mangio?"), elabora subito; altrimenti ascolta la richiesta
+        // 3. Se ha già detto il comando (es. "Jarvis cosa mangio?"), elabora subito;
+        //    altrimenti saluta a voce ("Eccomi, signore.", "Mi dica.", ecc.) invece del beep e poi ascolta la richiesta.
         if (remainingCommand.isNotBlank()) {
-            main.postDelayed({ process(remainingCommand) }, 300)
+            tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 90)
+            main.postDelayed({ process(remainingCommand) }, 250)
+        } else if (Settings.speakReplies) {
+            val greet = nextWakeGreeting()
+            lastSpokenText = greet
+            lastSpokenTime = System.currentTimeMillis()
+            JarvisState.status.value = JarvisState.Status.SPEAKING
+            Overlay.caption(this, greet)
+            Speaker.speak(greet) {
+                main.postDelayed({ listenForCommand() }, 150)
+            }
         } else {
-            main.postDelayed({ listenForCommand() }, 300)
+            tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 120)
+            main.postDelayed({ listenForCommand() }, 250)
         }
     }
 

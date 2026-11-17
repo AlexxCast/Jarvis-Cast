@@ -17,7 +17,9 @@ object VoiceText {
      */
     private val selfSignatureRegex = Regex(
         "^(?:certamente signore|subito signore|ricevuto signore|ottimo lavoro signore|ho avviato la riproduzione|" +
-            "signore ho riscontrato|parola d ordine|apro joytify|riprendo subito|fatto signore|eseguo subito)\\b"
+            "signore ho riscontrato|parola d ordine|apro joytify|riprendo subito|fatto signore|eseguo subito|" +
+            "eccomi signore|mi dica|sono qui signore|a sua disposizione|comandi signore|la ascolto|" +
+            "dica pure signore|pronto signore|sempre operativo|ai suoi ordini|tutto orecchi signore)\\b"
     )
 
     fun isSelfEcho(recognized: String, lastSpoken: String, msSinceSpoken: Long, windowMs: Long = 15_000L): Boolean {
