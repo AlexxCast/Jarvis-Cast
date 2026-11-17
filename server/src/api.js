@@ -46,6 +46,8 @@ function statePayload(db, ms, tz, env = {}) {
     balance: complete ? (({ dailyProgressList, ...rest }) => rest)(N.cumulativeBalance(d, today)) : null,
     diary: d, reminders: agenda.listReminders(db, tz), jobs: jobs.listJobs(db), places: places.listPlaces(db),
     liveCards: jarvisCore.listLiveCards(db, ms),
+    timedActions: kvGet(db, 'timedActions', []).filter(t => Number(t.dueMs) > ms),
+    skills: flows.listSkills(db),
     legacyImported: kvGet(db, 'legacyImported', null),
     layout: ui.loadLayout(db),
     mood: mood.current(db, ms),

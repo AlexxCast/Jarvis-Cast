@@ -122,3 +122,5 @@ details > summary { cursor: pointer; color: var(--muted); }
 .live-sub { position: absolute; left: 12px; right: 12px; bottom: 12px; background: rgba(0, 0, 0, .78); border: 1px solid #39ff1455; border-radius: 12px; padding: 10px 12px; color: #eaffea; font-size: .95rem; line-height: 1.35; backdrop-filter: blur(6px); }
 .live-controls { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; padding: 6px 0 10px; }
 .btn.danger { background: #dc2626; color: #fff; border-color: #ef4444; }
+.doc-stage { flex: 1; min-height: 0; border-radius: 14px; overflow: hidden; border: 1px solid #39ff1444; background: #faf6ee; }
+.doc-frame { width: 100%; height: 100%; border: 0; display: block; background: #faf6ee; }

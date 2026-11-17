@@ -573,11 +573,17 @@ function viewChat() {
     ta,
     h('button', { class: 'btn primary icon', 'aria-label': 'Invia', disabled: store.sending, onclick: () => { const v = ta.value; ta.value = ''; send(v); } }, icon(ICONS.send)));
   const activeProj = (store.state?.jobs || []).find(j => j.status === 'planning' || j.status === 'running');
+  const nextRem = (store.state?.reminders || [])[0];
+  const nextTimed = (store.state?.timedActions || [])[0];
+  const nextItem = nextTimed ? { title: nextTimed.command, when: new Date(nextTimed.dueMs).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) }
+    : (nextRem && (!nextRem.dueMs || (nextRem.dueMs - Date.now()) < 36 * 3600_000) ? { title: nextRem.text, when: reminderWhen(nextRem) } : null);
+  const upcomingBanner = nextItem && !store.chatOpen ? h('div', { class: 'codebar' }, h('div', { class: 'banner', style: 'cursor:pointer', onclick: () => go('attivita') },
+    h('div', { class: 'row' }, h('b', { class: 'grow clip' }, `📅 In arrivo: ${nextItem.title}`), h('span', { class: 'tag ok' }, nextItem.when)))) : null;
   const projBanner = activeProj && !store.chatOpen ? h('div', { class: 'codebar' }, h('div', { class: 'banner', style: 'cursor:pointer', onclick: () => go('attivita') },
     h('div', { class: 'row' }, h('b', { class: 'grow clip' }, `⚙ Progetto: ${activeProj.title}`), h('span', { class: 'tag warn num' }, `${activeProj.stats?.pct || 0}%`)),
     h('div', { class: 'bar' }, h('i', { style: `width:${activeProj.stats?.pct || 8}%` })),
     h('span', { class: 'muted small' }, `${activeProj.stats?.done || 0}/${activeProj.stats?.total || '?'} nodi completati · tocca per dettagli`))) : null;
-  return store.chatOpen ? [orb.el, list, attachBar, composer] : [codeBanner(), projBanner, renderLiveCards(true), widgets('jarvis'), orb.el, caption, attachBar, composer];
+  return store.chatOpen ? [orb.el, list, attachBar, composer] : [codeBanner(), upcomingBanner, projBanner, renderLiveCards(true), widgets('jarvis'), orb.el, caption, attachBar, composer];
 }
 
 // ------------------------------------------------------------------ oggi
@@ -681,12 +687,61 @@ function viewLuoghi(s) {
       : h('p', { class: 'empty' }, 'Nessun luogo. Quando è a casa può dire: "Jarvis, salva questo posto come casa".'));
 }
 
+function formatWait(ms) {
+  const diff = Math.max(0, Math.round((ms - Date.now()) / 60_000));
+  if (diff < 60) return `tra ${diff} min`;
+  const h = Math.floor(diff / 60), m = diff % 60;
+  return h >= 24 ? `tra ${Math.floor(h / 24)}g ${h % 24}h` : `tra ${h}h ${m}m`;
+}
+
+function viewUpcomingCard(s) {
+  const items = [
+    ...(s.timedActions || []).map(t => ({ id: t.id, kind: 'Azione programmata', title: t.command, when: new Date(t.dueMs).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }), wait: formatWait(t.dueMs), dueMs: Number(t.dueMs) })),
+    ...(s.reminders || []).map(r => ({ id: r.id, kind: 'Promemoria', title: r.text, when: reminderWhen(r), wait: r.dueMs ? formatWait(r.dueMs) : '', dueMs: Number(r.dueMs || 0), isRem: true })),
+  ].sort((a, b) => (a.dueMs || 0) - (b.dueMs || 0));
+
+  return h('div', { class: 'card' },
+    h('div', { class: 'row' }, h('h2', { class: 'grow' }, '📅 Attività Programmate (In anticipo)'), h('span', { class: 'tag ok num' }, String(items.length))),
+    h('p', { class: 'muted small' }, 'Finestra dedicata alle attività future, lezioni, sveglie e azioni automatiche in arrivo.'),
+    items.length ? h('div', { class: 'list' }, items.map(it => h('div', { class: 'item' },
+      h('div', { class: 'grow' },
+        h('div', {}, h('b', {}, it.title)),
+        h('div', { class: 'muted small num' }, `${it.kind} · ${it.when}${it.wait ? ` (${it.wait})` : ''}`)),
+      it.isRem ? h('button', { class: 'btn icon ghost danger', 'aria-label': 'Elimina', onclick: guard(async () => { s.reminders = (await api('DELETE', '/reminders/' + it.id)).reminders; render(); }) }, icon(ICONS.trash)) : null)))
+      : h('p', { class: 'empty' }, 'Nessuna attività programmata in anticipo. Puoi chiedere es. "ricordami stasera alle 21..." o "tra 10 minuti apri YouTube sul PC".'));
+}
+
+function openDocViewer(title, html) {
+  document.getElementById('doc-viewer-modal')?.remove();
+  const iframe = h('iframe', { class: 'doc-frame', srcdoc: html, title: title || 'Documento' });
+  const close = () => overlay.remove();
+  const download = () => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
+    a.download = (String(title || 'documento').toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 40) || 'documento') + '.html';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  };
+  const printDoc = () => {
+    try { iframe.contentWindow?.focus(); iframe.contentWindow?.print(); } catch { download(); }
+  };
+  const overlay = h('div', { id: 'doc-viewer-modal', class: 'live-overlay' },
+    h('div', { class: 'live-top' },
+      h('b', { class: 'grow clip', style: 'color:#39ff14' }, `📄 ${title || 'Documento'}`),
+      h('button', { class: 'btn primary', onclick: printDoc }, '🖨️ Stampa / PDF'),
+      h('button', { class: 'btn', onclick: download }, '⬇ Scarica'),
+      h('button', { class: 'btn danger', onclick: close }, '✕ Chiudi')),
+    h('div', { class: 'doc-stage' }, iframe));
+  document.body.append(overlay);
+}
+
 function viewAttivita() {
   const s = store.state;
   const text = h('input', { placeholder: 'Cosa devo ricordarle?', 'aria-label': 'Testo del promemoria' });
   const due = h('input', { type: 'datetime-local', 'aria-label': 'Data e ora', value: s.now, style: 'max-width:220px' });
   const goal = h('textarea', { rows: 2, placeholder: 'Es. Pianifica i pasti della settimana con lista della spesa', 'aria-label': 'Compito' });
   return [
+    viewUpcomingCard(s),
     (store.state?.liveCards || []).length ? h('div', { class: 'card' }, h('h2', {}, 'Attività vive in diretta'), renderLiveCards(false)) : null,
     h('div', { class: 'card' }, h('h2', {}, 'Promemoria'),
       h('div', { class: 'row wrap' }, text, due, h('button', { class: 'btn primary', onclick: guard(async () => {
@@ -732,9 +787,9 @@ function viewAttivita() {
           j.result ? h('button', { class: 'btn', onclick: () => { store.openJob = store.openJob === j.id ? null : j.id; render(); } }, store.openJob === j.id ? 'Chiudi risultato' : 'Leggi risultato') : null,
           j.status === 'done' ? h('button', { class: 'btn primary', onclick: guard(async () => {
             const res = await fetch('/api/jobs/' + j.id + '/document', { headers: { authorization: 'Bearer ' + store.token } });
+            if (!res.ok) throw new Error('Impossibile caricare il documento (' + res.status + ')');
             const html = await res.text();
-            const blobUrl = URL.createObjectURL(new Blob([html], { type: 'text/html;charset=utf-8' }));
-            window.open(blobUrl, '_blank', 'noopener');
+            openDocViewer(j.title, html);
           }) }, 'Apri Documento / PDF') : null,
           h('button', { class: 'btn ghost danger', onclick: guard(async () => { s.jobs = (await api('DELETE', '/jobs/' + j.id)).jobs; render(); }) }, 'Elimina')));
     }) : [h('p', { class: 'empty' }, 'Nessun progetto ancora. Chiedi a Jarvis in chat o avviane uno qui sopra.')]),
