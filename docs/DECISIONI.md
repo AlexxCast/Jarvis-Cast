@@ -321,3 +321,7 @@ Jarvis diceva "ho aggiornato il piano" o "chiamo Marcolino" senza farlo.
 ## Documento Automatico `fix latenti` (`maybeLogLatentIssue`, v2.24)
 - Quando l'utente segnala che qualcosa non funziona o insiste per più turni sullo stesso argomento (`ISSUE_HINT_RE` o ripetizione sul `focus.target`), `jarvis_core.js` raggruppa automaticamente gli scambi di messaggi e gli eventuali errori tecnici recenti sotto un titolo descrittivo in `fixLatenti`.
 - Il documento è sempre consultabile in formato Markdown (o JSON con `?format=json`) su `GET /api/fix-latenti`.
+
+## Gestione Account Salvati e Conferma Vocale (`pcAccounts`, v2.25)
+- `desktop/jarvis_desktop.py` invia nell'heartbeat i profili Chrome reali letti da `Local State`, uniti agli account salvati dall'utente (`pcAccounts` in `flows.js`).
+- Quando l'utente nomina un account non esatto o nuovo, Jarvis lo ripete chiedendo conferma (`resolvePendingAccount`); quando ci sono ≥ 2 account e non viene specificato nella richiesta di apertura browser/servizio, Jarvis chiede ogni volta quale utilizzare.

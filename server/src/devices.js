@@ -33,6 +33,7 @@ export function heartbeat(db, payload = {}, nowMs = Date.now()) {
     activeWindow: String(payload.metrics.activeWindow || '').slice(0, 120),
   } : {};
   const apps = Array.isArray(payload.apps) ? payload.apps.map(a => String(a || '').trim().slice(0, 50)).filter(Boolean).slice(0, 120) : undefined;
+  const profiles = Array.isArray(payload.profiles) ? payload.profiles.map(p => String(p || '').trim().slice(0, 60)).filter(Boolean).slice(0, 20) : undefined;
 
   const list = kvGet(db, DEVICES_KEY, []);
   const existing = list.find(d => d.id === id || (d.kind === kind && kind === 'desktop'));
@@ -43,6 +44,7 @@ export function heartbeat(db, payload = {}, nowMs = Date.now()) {
     platform,
     metrics: { ...(existing?.metrics || {}), ...metrics },
     apps: apps || existing?.apps || [],
+    profiles: profiles || existing?.profiles || [],
     lastSeen: nowMs,
   };
   const updated = [record, ...list.filter(d => d.id !== record.id)].slice(0, 12);

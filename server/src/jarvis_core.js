@@ -586,6 +586,25 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
     };
   }
 
+  // 1a-bis. Risposta a scelta o conferma account ("alexx cast", "1", "il secondo", "sì confermo")
+  const accReply = flows.resolvePendingAccount(db, sessionId, clean, nowMs);
+  if (accReply) {
+    if (accReply.askConfirm || accReply.cancelled) {
+      return { reply: accReply.reply, expectReply: !!accReply.askConfirm, device: [], actions: [], touched: ['automazioni'], touchedLeaves: [] };
+    }
+    if (accReply.confirmed && accReply.account) {
+      const p = accReply.pending || {};
+      const shouldPersist = !!p.persist;
+      devices.enqueueCommand(db, 'desktop', { kind: 'open_chrome_profile', target: accReply.account, args: shouldPersist ? 'persist' : '' }, nowMs);
+      if (p.openUrl) devices.enqueueCommand(db, 'desktop', { kind: 'open_url', target: p.openUrl }, nowMs);
+      setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target: p.service || 'chrome', profile: accReply.account, action: 'apri' }, nowMs);
+      return {
+        reply: `Perfetto, uso l'account "${accReply.account}"${p.service && p.service !== 'chrome' ? ` e apro ${p.service}` : ' su Chrome'}, signore.`,
+        device: [], actions: ['pc_action'], touched: ['automazioni', 'tecnologia'], touchedLeaves: [],
+      };
+    }
+  }
+
   // 1b. Timer o Cronometro esplicito ("metti un timer di 5 minuti", "avvia un cronometro")
   const timerMatch = TIMER_RE.exec(clean);
   if (timerMatch) {
@@ -692,6 +711,23 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
   if (matchedSkill) {
     const plan = flows.planSkillExecution(matchedSkill, clean);
     if (plan.steps.length && !plan.needsModelForFinalStep) {
+      const accounts = flows.listAccounts(db);
+      const usesAccount = (matchedSkill.steps || []).some(st => /\{account\}/i.test(String(st.target || '')));
+      if (usesAccount && !plan.overrides.account && accounts.length >= 2 && matchedSkill.device === 'pc') {
+        const urlStep = (matchedSkill.steps || []).find(st => st.kind === 'open_url');
+        flows.setPendingAccountPrompt(db, sessionId, {
+          mode: 'choose',
+          service: matchedSkill.service,
+          openUrl: urlStep ? urlStep.target : '',
+          accounts,
+        }, nowMs);
+        const listTxt = accounts.slice(0, 5).map((a, i) => `${i + 1}) ${a}`).join(', ');
+        return {
+          reply: `Quale account vuole utilizzare per ${matchedSkill.service}? Salvati: ${listTxt}.`,
+          expectReply: true,
+          device: [], actions: [], touched: ['automazioni'], touchedLeaves: [],
+        };
+      }
       const devList = [];
       for (const st of plan.steps) {
         if (matchedSkill.device === 'pc') {
@@ -771,14 +807,29 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
         .trim();
       if (profName.length >= 2) {
         const shouldPersist = /\b(quando|sempre|imposta|usa\s+sempre|di\s+default|cambia|dovrebbe\s+essere|invece)\b/i.test(clean);
-        devices.enqueueCommand(db, 'desktop', { kind: 'open_chrome_profile', target: profName, args: shouldPersist ? 'persist' : '' }, nowMs);
+        const accCheck = flows.matchAccount(db, profName);
+        if (!accCheck.exact) {
+          flows.setPendingAccountPrompt(db, sessionId, {
+            mode: 'confirm',
+            candidate: profName,
+            suggestion: accCheck.suggestion || profName,
+            service: 'chrome',
+            persist: shouldPersist,
+          }, nowMs);
+          const msg = accCheck.suggestion
+            ? `Non ho trovato esattamente "${profName}": intendeva l'account "${accCheck.suggestion}"? Me lo conferma?`
+            : `Ho sentito il nuovo account "${profName}". Conferma che vuole salvarlo e usarlo su Chrome?`;
+          return { reply: msg, expectReply: true, device: [], actions: [], touched: ['automazioni'], touchedLeaves: [] };
+        }
+        flows.saveAccount(db, accCheck.exact);
+        devices.enqueueCommand(db, 'desktop', { kind: 'open_chrome_profile', target: accCheck.exact, args: shouldPersist ? 'persist' : '' }, nowMs);
         if (shouldPersist) {
-          const skills = flows.listSkills(db).map(sk => sk.device === 'pc' ? { ...sk, defaults: { ...(sk.defaults || {}), account: profName }, updatedAt: nowMs } : sk);
+          const skills = flows.listSkills(db).map(sk => sk.device === 'pc' ? { ...sk, defaults: { ...(sk.defaults || {}), account: accCheck.exact }, updatedAt: nowMs } : sk);
           kvSet(db, 'modularSkills', skills);
         }
-        setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target: 'chrome', profile: profName, action: 'profilo' }, nowMs);
+        setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target: 'chrome', profile: accCheck.exact, action: 'profilo' }, nowMs);
         return {
-          reply: `Apro Chrome sul PC con il profilo "${profName}"${shouldPersist ? ' e lo memorizzo come predefinito negli automatismi' : ''}, signore.`,
+          reply: `Apro Chrome sul PC con l'account "${accCheck.exact}"${shouldPersist ? ' e lo salvo tra i suoi account predefiniti' : ''}, signore.`,
           device: [], actions: ['pc_action'], touched: ['automazioni', 'tecnologia'], touchedLeaves: [],
         };
       }
@@ -916,6 +967,23 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
     const openMatch = /^(?:per\s+favore\s+)?(?:mi\s+)?(?:apri|aprire|avvia|avviare|lancia|lanciare|esegui|eseguire|vai\s+su)\s+(?:il\s+|la\s+|l'|lo\s+)?(?:programma\s+|app\s+|sito\s+(?:di\s+|della\s+)?)?(.+)$/i.exec(withoutPc);
     if (openMatch) {
       const targetName = openMatch[1].replace(/[.!?]+$/, '').trim();
+      const lowT = targetName.toLowerCase();
+      const webUrl = WEB_SERVICES[lowT];
+      const accounts = flows.listAccounts(db);
+      if ((lowT === 'chrome' || webUrl) && accounts.length >= 2) {
+        flows.setPendingAccountPrompt(db, sessionId, {
+          mode: 'choose',
+          service: lowT,
+          openUrl: webUrl || '',
+          accounts,
+        }, nowMs);
+        const listTxt = accounts.slice(0, 5).map((a, i) => `${i + 1}) ${a}`).join(', ');
+        return {
+          reply: `Quale account vuole utilizzare per ${targetName}? Salvati: ${listTxt}.`,
+          expectReply: true,
+          device: [], actions: [], touched: ['automazioni'], touchedLeaves: [],
+        };
+      }
       const res = dispatchPcOpen(db, targetName, nowMs);
       if (res) {
         setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target: targetName, action: 'apri' }, nowMs);

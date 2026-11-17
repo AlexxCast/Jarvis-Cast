@@ -552,3 +552,125 @@ export function planSkillExecution(skill, userText = '') {
     needsModelForFinalStep,
   };
 }
+
+// ------------------------------------------------------------------ Registro Account Salvati & Conferma
+
+const ACCOUNTS_KEY = 'pcAccounts';
+const PENDING_ACC_TTL_MS = 3 * 60_000;
+
+function strSim(a, b) {
+  const x = norm(a), y = norm(b);
+  if (!x || !y) return 0;
+  if (x === y) return 1;
+  if (x.includes(y) || y.includes(x)) return Math.min(x.length, y.length) / Math.max(x.length, y.length) + 0.15;
+  const n = x.length, m = y.length;
+  let prev = Array.from({ length: m + 1 }, (_, i) => i);
+  for (let i = 1; i <= n; i++) {
+    const cur = [i];
+    for (let j = 1; j <= m; j++) cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (x[i - 1] === y[j - 1] ? 0 : 1));
+    prev = cur;
+  }
+  return 1 - prev[m] / Math.max(n, m);
+}
+
+export function listAccounts(db) {
+  const saved = kvGet(db, ACCOUNTS_KEY, []);
+  const devs = kvGet(db, 'devicesRegistry', []);
+  const pcProfiles = devs.find(d => d.kind === 'desktop')?.profiles || [];
+  const merged = [...saved];
+  const seen = new Set(merged.map(a => norm(a)));
+  for (const p of pcProfiles) {
+    const clean = String(p || '').trim();
+    if (clean && !seen.has(norm(clean))) {
+      seen.add(norm(clean));
+      merged.push(clean);
+    }
+  }
+  return merged;
+}
+
+export function saveAccount(db, name) {
+  const clean = String(name || '').trim().slice(0, 60);
+  if (clean.length < 2) return null;
+  const saved = kvGet(db, ACCOUNTS_KEY, []);
+  const exists = saved.find(a => norm(a) === norm(clean));
+  if (exists) return exists;
+  kvSet(db, ACCOUNTS_KEY, [clean, ...saved].slice(0, 20));
+  return clean;
+}
+
+export function matchAccount(db, candidate) {
+  const known = listAccounts(db);
+  const c = norm(candidate);
+  if (!c) return { exact: null, suggestion: null, known };
+  const exact = known.find(k => norm(k) === c || norm(k).split(/\s+/).includes(c));
+  if (exact) return { exact, suggestion: exact, known };
+  let best = null, bestScore = 0;
+  for (const k of known) {
+    const sc = strSim(c, k);
+    if (sc > bestScore) { bestScore = sc; best = k; }
+  }
+  return { exact: null, suggestion: bestScore >= 0.45 ? best : null, known };
+}
+
+export function setPendingAccountPrompt(db, sessionId = 'main', payload = {}, nowMs = Date.now()) {
+  kvSet(db, `pendingAccount:${sessionId}`, { ...payload, createdAt: nowMs });
+}
+
+export function resolvePendingAccount(db, sessionId = 'main', userText = '', nowMs = Date.now()) {
+  const key = `pendingAccount:${sessionId}`;
+  const pending = kvGet(db, key, null);
+  if (!pending || (nowMs - Number(pending.createdAt || 0)) > PENDING_ACC_TTL_MS) return null;
+  const clean = String(userText || '').trim();
+  if (!clean) return null;
+
+  if (pending.mode === 'confirm') {
+    if (CONFIRM_YES_RE.test(clean) || /\b(quello|esatto|s[iì]\s+questo)\b/i.test(clean)) {
+      const chosen = pending.suggestion || pending.candidate;
+      saveAccount(db, chosen);
+      kvSet(db, key, null);
+      return { confirmed: true, account: chosen, pending };
+    }
+    if (CONFIRM_NO_RE.test(clean)) {
+      kvSet(db, key, null);
+      return { cancelled: true, reply: 'Va bene, signore. Mi dica pure il nome esatto dell\'account da usare.' };
+    }
+  }
+
+  // Scelta da lista ("1", "il primo", "2", "il secondo", oppure il nome dell'account)
+  const ordMap = { '1': 0, primo: 0, prima: 0, '2': 1, secondo: 1, seconda: 1, '3': 2, terzo: 2, terza: 2, '4': 3, quarto: 3 };
+  const ordM = /\b(?:il\s+|la\s+)?([1-4]|prim[oa]|second[oa]|terz[oa]|quart[oa])\b/i.exec(clean);
+  const accounts = pending.accounts || listAccounts(db);
+  if (ordM) {
+    const idx = ordMap[ordM[1].toLowerCase()];
+    if (idx != null && accounts[idx]) {
+      kvSet(db, key, null);
+      return { confirmed: true, account: accounts[idx], pending };
+    }
+  }
+
+  const m = matchAccount(db, clean);
+  if (m.exact) {
+    saveAccount(db, m.exact);
+    kvSet(db, key, null);
+    return { confirmed: true, account: m.exact, pending };
+  }
+  if (m.suggestion) {
+    // Non sicuro al 100%: ripete l'account e chiede conferma!
+    setPendingAccountPrompt(db, sessionId, { ...pending, mode: 'confirm', candidate: clean, suggestion: m.suggestion }, nowMs);
+    return {
+      askConfirm: true,
+      reply: `Ho sentito "${clean}", intendeva l'account "${m.suggestion}"? Me lo conferma?`,
+    };
+  }
+  // Account completamente nuovo dettato dall'utente: chiede conferma ripetendo il nome!
+  if (clean.length >= 2 && clean.length <= 45 && !/\b(annulla|basta|stop|lascia\s+stare)\b/i.test(clean)) {
+    setPendingAccountPrompt(db, sessionId, { ...pending, mode: 'confirm', candidate: clean, suggestion: clean }, nowMs);
+    return {
+      askConfirm: true,
+      reply: `Non trovo "${clean}" tra gli account salvati. Conferma che vuole salvare e usare il nuovo account "${clean}"?`,
+    };
+  }
+  kvSet(db, key, null);
+  return { cancelled: true, reply: 'Operazione account annullata, signore.' };
+}

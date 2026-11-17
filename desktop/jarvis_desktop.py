@@ -318,6 +318,26 @@ def find_chrome_profile(hint: str) -> str:
         return ""
 
 
+def list_chrome_profiles() -> list:
+    """Restituisce l'elenco dei nomi profilo/account Chrome trovati in Local State."""
+    if os.name != "nt":
+        return []
+    local_state = os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\User Data\Local State")
+    if not os.path.exists(local_state):
+        return []
+    try:
+        data = json.loads(Path(local_state).read_text(encoding="utf-8", errors="ignore"))
+        cache = data.get("profile", {}).get("info_cache", {})
+        out = []
+        for info in cache.values():
+            lbl = (info.get("gaia_name") or info.get("name") or info.get("shortcut_name") or "").strip()
+            if lbl and lbl not in out:
+                out.append(lbl)
+        return out[:12]
+    except Exception:
+        return []
+
+
 def open_in_chrome(url: str, cfg: dict, log_fn, profile_hint: str = "") -> bool:
     chrome = find_chrome_exe()
     if not chrome:
@@ -761,6 +781,7 @@ class JarvisDesktopApp:
                     "platform": plat,
                     "poll": not is_bg_running(),
                     "metrics": get_pc_metrics(),
+                    "profiles": list_chrome_profiles(),
                     "apps": ["Chrome", "Edge", "VS Code", "Esplora File", "PowerShell", "Blocco Note", "Calcolatrice", "Spotify"],
                 },
             )
@@ -819,6 +840,7 @@ class JarvisDesktopApp:
                             "platform": plat,
                             "poll": not is_bg_running(),
                             "metrics": metrics,
+                            "profiles": list_chrome_profiles(),
                             "apps": apps,
                         },
                     )
@@ -907,6 +929,7 @@ def run_background_daemon() -> None:
                         "platform": plat,
                         "poll": True,
                         "metrics": get_pc_metrics(),
+                        "profiles": list_chrome_profiles(),
                         "apps": apps,
                     },
                 )
