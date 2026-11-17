@@ -59,6 +59,9 @@ function saveState(db, s, ms) {
     s.model_key, s.blocked_until, s.fails, String(s.last_error || '').slice(0, 300), s.low_until, ms);
 }
 
+/** Modelli ad alta capacità (70B–405B, Pro, Coder, R1): preferiti sui compiti architetturali e multi-agente complessi. */
+export const isHeavyModel = (m) => /(2\.5-pro|405b|235b|120b|large|deepseek-r1|coder|codestral|gpt-4\.1$)/i.test(m.model);
+
 /**
  * Ordina i candidati per una richiesta.
  * Ritorna [{ model, key, status: 'ok' | 'near' , load }] dal migliore al peggiore; esclude i bloccati.
@@ -70,6 +73,7 @@ export function rank(db, env, { tier, needsVision = false, promptTokens = 0, pre
     if (!p || !env[p.env]) continue;
     if (needsVision ? !m.tiers.includes('vision') : !m.tiers.includes(tier)) continue;
     if (promptTokens > m.ctx * 0.9) continue; // il contesto non entra in questo modello
+    if (m.tpm && promptTokens > m.tpm * 0.65) continue; // evita di bruciare il TPM al primo colpo con prompt troppo grandi
     const key = modelKey(m);
     const st = stateOf(db, key);
     if (st.blocked_until > ms) continue;
@@ -78,8 +82,8 @@ export function rank(db, env, { tier, needsVision = false, promptTokens = 0, pre
     const near = load >= SWITCH_AT || st.low_until > ms;
     out.push({ model: m, key, status: near ? 'near' : 'ok', load });
   }
-  const score = (c) => (c.status === 'near' ? 1000 : 0) + (c.model.free ? 0 : 500) + (c.key === preferKey ? -1.5 : 0) + c.model.prio / 10;
-  // Tra i modelli sani preferisce quello già in uso nella sessione (coerenza), poi la priorità.
+  const score = (c) => (c.status === 'near' ? 1000 : 0) + (c.model.free ? 0 : 500) + (c.key === preferKey ? -1.5 : 0) + (tier === 'smart' && isHeavyModel(c.model) ? -1.2 : 0) + c.model.prio / 10;
+  // Tra i modelli sani preferisce quello già in uso nella sessione (coerenza) e i modelli ad alta capacità su smart.
   return out.sort((a, b) => score(a) - score(b));
 }
 

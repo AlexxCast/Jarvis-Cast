@@ -12,6 +12,20 @@ import { today as todayOf, nowIso as nowIsoOf, nowHuman } from './clock.js';
 
 const MAX_STEPS = 10;
 
+/**
+ * Comprime l'output di un nodo-agente nel suo "contratto" essenziale (firme, file creati, conclusioni)
+ * così i nodi successivi ricevono solo ciò che serve senza mai bruciare i token dei modelli gratuiti.
+ */
+export function compactNodeContract(output, maxChars = 700) {
+  const s = String(output || '').trim();
+  if (s.length <= maxChars) return s;
+  const files = extractProjectFiles(s).map(f => {
+    const defs = f.content.split('\n').filter(l => /^\s*(export\s+|function\s+|class\s+|def\s+|const\s+\w+\s*=)/.test(l)).slice(0, 6).join(' | ');
+    return `File ${f.path}${defs ? ` [${defs.slice(0, 140)}]` : ''}`;
+  });
+  if (files.length) return (files.join('\n') + '\n' + s.slice(0, 260)).slice(0, maxChars);
+  return s.slice(0, maxChars - 3) + '…';
+}
 /** Estrae eventuali file di codice multi-file ("=== FILE: nome.ext ===" o ```lang:nome.ext) generati dallo Sviluppatore. */
 export function extractProjectFiles(text) {
   const files = [];
@@ -73,25 +87,40 @@ export async function advance(db, env, deps) {
     const ctx = background(db, job.goal, ms, tz);
     if (job.status === 'planning') {
       const res = await call('smart',
-        `Sei il pianificatore multi-agente di Jarvis. L'utente è l'orchestratore: dividi il compito complesso in passi specializzati e concreti (da 1 a ${MAX_STEPS}, es. Architetto, Calcolatore Logico/Matematico, Sviluppatore Multi-File/GUI, Revisore); ogni passo deve poter essere svolto da solo conoscendo i risultati dei precedenti. Se il compito richiede di programmare un progetto multi-file o un'interfaccia grafica, prevedi i passi per scrivere i file completi. Rispondi SOLO con JSON: {"reply": "ok", "steps": [{"title": "...", "instruction": "...", "tier": "fast|smart"}]}`,
-        `${ctx}\n\nCOMPITO: ${job.goal}`, 1100);
+        `Sei il pianificatore a grafo multi-agente di Jarvis. L'utente è l'orchestratore: trasforma il compito complesso in un grafo di nodi-agente piccoli e indipendenti (da 1 a ${MAX_STEPS}, ciascuno con un ruolo preciso: Architetto, Logico, Sviluppatore, Revisore). Ogni nodo deve indicare SOLO gli id dei nodi genitori da cui dipende ("dependsOn") per evitare di sprecare token. Se serve programmare multi-file o GUI, dedica un nodo a ciascun modulo/file. Rispondi SOLO con JSON: {"reply": "ok", "steps": [{"id": "n1", "role": "Architetto", "title": "...", "dependsOn": [], "instruction": "...", "tier": "fast|smart"}]}`,
+        `${ctx.slice(0, 3000)}\n\nCOMPITO: ${job.goal}`, 1100);
       const obj = extractObject(res.text);
       let steps = Array.isArray(obj?.steps) ? obj.steps.filter(s => s && s.instruction).slice(0, MAX_STEPS) : [];
-      if (!steps.length) steps = [{ title: job.title, instruction: job.goal, tier: 'smart' }];
-      steps = steps.map(s => ({ title: String(s.title || 'Passo').slice(0, 80), instruction: String(s.instruction).slice(0, 1500), tier: s.tier === 'fast' ? 'fast' : 'smart', status: 'pending', output: '' }));
+      if (!steps.length) steps = [{ id: 'n1', role: 'Esecutore', title: job.title, dependsOn: [], instruction: job.goal, tier: 'smart' }];
+      steps = steps.map((s, idx) => ({
+        id: String(s.id || `n${idx + 1}`).slice(0, 20),
+        role: String(s.role || 'Agente').slice(0, 30),
+        title: String(s.title || 'Passo').slice(0, 80),
+        dependsOn: Array.isArray(s.dependsOn) ? s.dependsOn.map(x => String(x)).slice(0, 4) : [],
+        instruction: String(s.instruction).slice(0, 1500),
+        tier: s.tier === 'fast' ? 'fast' : 'smart',
+        status: 'pending',
+        output: '',
+      }));
       db.run("UPDATE jobs SET status = 'running', steps = ?, result = '', updated = ? WHERE id = ?", JSON.stringify(steps), at, job.id);
       return 1000;
     }
 
     const steps = JSON.parse(job.steps);
-    const i = steps.findIndex(s => s.status === 'pending');
+    // Esegue il primo nodo-agente pronto (i cui genitori dependsOn nel grafo sono già completati)
+    const doneIds = new Set(steps.filter(s => s.status === 'done' && s.id).map(s => s.id));
+    let i = steps.findIndex(s => s.status === 'pending' && (!(s.dependsOn?.length) || s.dependsOn.every(d => doneIds.has(d))));
+    if (i < 0) i = steps.findIndex(s => s.status === 'pending');
     if (i >= 0) {
-      const prior = steps.slice(0, i).map((s, k) => `Passo ${k + 1} — ${s.title}:\n${s.output.slice(0, 1800)}`).join('\n\n');
-      const isCodeGoal = /\b(programm\w*|progett\w*|multi[\s-]*file|interfaccia|gui|app|script|calcol\w*|codice|html|python)\b/i.test(job.goal);
+      const depsList = steps[i].dependsOn?.length
+        ? steps.filter(s => s.status === 'done' && steps[i].dependsOn.includes(s.id))
+        : steps.slice(0, i).filter(s => s.status === 'done').slice(-2);
+      const prior = depsList.map((s, k) => `Nodo ${s.id || k + 1} (${s.role || 'Agente'}) — ${s.title}:\n${compactNodeContract(s.output, 900)}`).join('\n\n');
+      const isCodeGoal = /\b(programm\w*|progett\w*|multi[\s-]*file|interfaccia|gui|app|script|calcol\w*|codice|html|python|graf[io])\b/i.test(job.goal);
       const codeHint = isCodeGoal ? ' Se devi scrivere file di codice o interfacce grafiche, scrivi il codice completo preceduto da "=== FILE: nomefile.ext ===" così il sistema li creerà davvero sul PC.' : '';
       const res = await call(steps[i].tier,
-        'Sei un agente specializzato di Jarvis e stai svolgendo un passo di un compito più grande per il tuo utente. Svolgi SOLO questo passo, in italiano, applicando logiche, calcoli o codice completo e funzionante senza introduzioni.' + codeHint,
-        `${ctx}\n\nCOMPITO COMPLESSIVO: ${job.goal}\n\n${prior ? 'RISULTATI DEI PASSI PRECEDENTI:\n' + prior + '\n\n' : ''}PASSO DA SVOLGERE ORA (${i + 1} di ${steps.length}) — ${steps[i].title}: ${steps[i].instruction}`, 2400);
+        `Sei il nodo-agente "${steps[i].role || 'Specialista'}" di Jarvis. Lavori con contesto chirurgico per risparmiare token: svolgi SOLO il tuo nodo in italiano, applicando logiche, calcoli o codice completo senza introduzioni.${codeHint}`,
+        `${ctx.slice(0, 2000)}\n\nCOMPITO COMPLESSIVO: ${job.goal}\n\n${prior ? 'RISULTATI DEI PASSI PRECEDENTI:\n' + prior + '\n\n' : ''}PASSO DA SVOLGERE ORA (${i + 1} di ${steps.length}) — ${steps[i].title}: ${steps[i].instruction}`, 2200);
       steps[i].status = 'done';
       steps[i].output = res.text.trim().slice(0, 10000);
       steps[i].model = res.key;
