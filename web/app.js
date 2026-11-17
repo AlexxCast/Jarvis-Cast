@@ -324,9 +324,8 @@ async function send(text) {
 async function extractPdfContent(file) {
   try {
     const pdfjs = await import('https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.min.mjs');
-    pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs';
     const buf = await file.arrayBuffer();
-    const doc = await pdfjs.getDocument({ data: buf }).promise;
+    const doc = await pdfjs.getDocument({ data: buf, disableWorker: true, useWorkerFetch: false, isEvalSupported: false }).promise;
     const pages = [];
     const maxPages = Math.min(doc.numPages, 40);
     for (let p = 1; p <= maxPages; p++) {
@@ -336,12 +335,16 @@ async function extractPdfContent(file) {
       if (txt) pages.push(`[Pagina ${p}]\n${txt}`);
     }
     const fullText = pages.join('\n\n').slice(0, 60000);
-    if (fullText.length >= 40) return { text: fullText, image: null };
+    if (fullText.length >= 40) {
+      toast(`PDF letto: ${pages.length} pagine estratte.`);
+      return { text: fullText, image: null };
+    }
     // PDF scansionato (solo immagini): renderizza la prima pagina per leggerla con la Visione
     const page1 = await doc.getPage(1);
     const vp = page1.getViewport({ scale: 1.5 });
     const canvas = h('canvas', { width: Math.round(vp.width), height: Math.round(vp.height) });
     await page1.render({ canvasContext: canvas.getContext('2d'), viewport: vp }).promise;
+    toast('PDF scansionato: convertito in immagine per la lettura.');
     return { text: '', image: canvas.toDataURL('image/jpeg', 0.85).split(',')[1] };
   } catch {
     // Riserva offline/CDN: invia i byte base64 al server per la lettura nativa con Gemini
@@ -351,6 +354,7 @@ async function extractPdfContent(file) {
       r.onerror = rej;
       r.readAsDataURL(file);
     });
+    toast('PDF allegato (lettura diretta sul server).');
     return { base64: b64 };
   }
 }

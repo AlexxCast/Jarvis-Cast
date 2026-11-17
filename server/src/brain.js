@@ -233,7 +233,15 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   const history = db.all('SELECT role, text FROM messages WHERE session = ? AND id > ? ORDER BY id DESC LIMIT 14', sessionId, sess.summarized_upto).reverse();
   const mods = memory.listModules(db);
   const textFiles = fileList.filter(f => f.encoding !== 'base64');
-  const pdfBase64 = fileList.find(f => f.encoding === 'base64' && /\.pdf$/i.test(f.name))?.content || null;
+  let pdfBase64 = fileList.find(f => f.encoding === 'base64' && /\.pdf$/i.test(f.name))?.content || null;
+  let pdfExtractedText = '';
+  if (pdfBase64) {
+    const extracted = await router.readPdfWithGemini(env, deps.fetchFn, pdfBase64, `Estrai fedelmente tutto il testo contenuto in questo PDF (${userText}).`);
+    if (extracted) {
+      pdfExtractedText = extracted.slice(0, 32000);
+      pdfBase64 = null; // testo estratto: ora può leggerlo qualsiasi modello!
+    }
+  }
   const parts = {
     core: CORE_PROMPT(diary.profile.name, nowHuman(ms, tz)) + '\n\n' + mood.MOOD_PROMPT(mood.current(db, ms)),
     brief: dietBrief(diary, today),
@@ -249,7 +257,8 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
     summary: sess.summary,
     history,
     userText: `[${nowHuman(ms, tz)}${source === 'voice' ? ', a voce' : ''}] ${userText}` +
-      (textFiles.length ? '\n\nFILE ALLEGATI DALL\'UTENTE:\n' + textFiles.map(f => `=== FILE: ${f.name} ===\n${f.content.slice(0, 24000)}`).join('\n\n') : ''),
+      (textFiles.length ? '\n\nFILE ALLEGATI DALL\'UTENTE:\n' + textFiles.map(f => `=== FILE: ${f.name} ===\n${f.content.slice(0, 24000)}`).join('\n\n') : '') +
+      (pdfExtractedText ? `\n\nCONTENUTO ESTRATTO DAL PDF:\n${pdfExtractedText}` : ''),
     image,
     pdfBase64,
   };

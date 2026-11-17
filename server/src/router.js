@@ -62,6 +62,35 @@ function saveState(db, s, ms) {
 /** Modelli ad alta capacità (70B–405B, Pro, Coder, R1): preferiti sui compiti architetturali e multi-agente complessi. */
 export const isHeavyModel = (m) => /(2\.5-pro|405b|235b|120b|large|deepseek-r1|coder|codestral|gpt-4\.1$)/i.test(m.model);
 
+/** Legge un PDF nativamente tramite Gemini generateContent (supporta sia PDF testuali sia scansioni). */
+export async function readPdfWithGemini(env, fetchFn, pdfBase64, promptText) {
+  if (!env.GEMINI_API_KEY || !pdfBase64) return null;
+  const models = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.0-flash'];
+  for (const model of models) {
+    try {
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`;
+      const res = await fetchFn(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          contents: [{
+            role: 'user',
+            parts: [
+              { inline_data: { mime_type: 'application/pdf', data: pdfBase64 } },
+              { text: promptText || 'Estrai e trascrivi tutto il testo e i dati principali di questo PDF in italiano.' },
+            ],
+          }],
+        }),
+      });
+      if (!res.ok) continue;
+      const data = await res.json();
+      const text = (data?.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('\n').trim();
+      if (text) return text;
+    } catch { /* prova il modello Gemini successivo */ }
+  }
+  return null;
+}
+
 /**
  * Ordina i candidati per una richiesta.
  * Ritorna [{ model, key, status: 'ok' | 'near' , load }] dal migliore al peggiore; esclude i bloccati.
