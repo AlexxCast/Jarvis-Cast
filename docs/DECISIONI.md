@@ -325,3 +325,7 @@ Jarvis diceva "ho aggiornato il piano" o "chiamo Marcolino" senza farlo.
 ## Gestione Account Salvati e Conferma Vocale (`pcAccounts`, v2.25)
 - `desktop/jarvis_desktop.py` invia nell'heartbeat i profili Chrome reali letti da `Local State`, uniti agli account salvati dall'utente (`pcAccounts` in `flows.js`).
 - Quando l'utente nomina un account non esatto o nuovo, Jarvis lo ripete chiedendo conferma (`resolvePendingAccount`); quando ci sono ≥ 2 account e non viene specificato nella richiesta di apertura browser/servizio, Jarvis chiede ogni volta quale utilizzare.
+
+## Modulo Interno di Auto-Diagnostica e Apprendimento (`self_heal.js`, v2.26)
+- `server/src/self_heal.js` esegue periodicamente in `selfInterrogate` (e su richiesta vocale *"auto-diagnosi"* / *"sistema i problemi"*, oppure via `POST /api/self-heal`) la pulizia automatica di flussi errati, consolidamento degli automatismi doppi, rimozione di comandi PC scaduti e apprendimento di `learnedAliases` dalle correzioni dell'utente e da `fixLatenti`.
+- Su richiesta esplicita `POST /api/self-heal` può anche invocare `diagnoseWithModel` per estrarre nuovi alias e un riepilogo dalle voci aperte in `fixLatenti`.

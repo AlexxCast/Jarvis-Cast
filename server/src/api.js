@@ -9,6 +9,7 @@ import * as phone from './phone.js';
 import * as flows from './flows.js';
 import * as devices from './devices.js';
 import * as jarvisCore from './jarvis_core.js';
+import * as selfHeal from './self_heal.js';
 import * as places from './places.js';
 import * as agenda from './agenda.js';
 import * as ui from './ui.js';
@@ -344,6 +345,17 @@ export async function handleApi(db, env, deps, request) {
     if (path === '/api/fix-latenti' && method === 'DELETE') {
       db.run("DELETE FROM kv WHERE key = 'fixLatenti'");
       return json({ ok: true });
+    }
+    if (path === '/api/self-heal' && method === 'GET') {
+      return json({
+        aliases: selfHeal.listLearnedAliases(db),
+        lastHeal: kvGet(db, 'lastSelfHeal', null),
+        openIssues: jarvisCore.listFixLatenti(db).length,
+      });
+    }
+    if (path === '/api/self-heal' && method === 'POST') {
+      const report = await selfHeal.diagnoseWithModel(db, env, deps.fetchFn, ms, tz);
+      return json(report);
     }
     if (path === '/api/inbox/consume' && method === 'POST') {
       const nextDue = agenda.fireDue(db, ms, tz);

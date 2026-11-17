@@ -12,11 +12,13 @@ import * as devices from './devices.js';
 import * as memory from './memory.js';
 import * as router from './router.js';
 import * as agents from './agents.js';
+import * as selfHeal from './self_heal.js';
 import { nowIso as nowIsoOf } from './clock.js';
 
 const BASE_PC_RE = /\b(pc|computer|desktop|portatile|windows|gh?ideon|antigravit\w*|chrome|profilo\s+chrome|account\s+chrome)\b/i;
 const DIAGNOSTIC_RE = /\b(diagnostic\w*|stato\s+del\s+(?:pc|computer|sistema|gh?ideon|jarvis)|dispositiv[io]\s+conness\w*|come\s+sta\s+il\s+(?:pc|sistema)|quanta\s+ram|cpu\s+del\s+pc|controllo\s+sistema|report\s+sistema)\b/i;
 const PC_SCREEN_RE = /\b(mostra(?:mi)?\s+lo\s+schermo|fa(?:mmi|i)\s+vedere\s+lo\s+schermo|screenshot\s+(?:del\s+)?(?:pc|computer|gh?ideon)|schermo\s+del\s+(?:pc|computer|gh?ideon)|cosa\s+c'[eè]\s+sullo\s+schermo)\b/i;
+const SELF_HEAL_RE = /\b(auto[\s-]*(?:diagnos\w*|corregg\w*|ripar\w*|heal\w*)|sistema\s+i\s+problemi|impara\s+dagli\s+errori|analizza\s+(?:i\s+)?fix\s+latenti|stato\s+apprendimento)\b/i;
 const LIVE_CALL_RE = /\b(video\s*chiamat\w*|video\s*call|modalit[aà]\s+live|live\s+vision|in\s+diretta|dal\s+vivo|ti\s+devo\s+far\s+vedere|devo\s+farti\s+vedere|guarda\s+con\s+la\s+(?:tele)?camera)\b/i;
 const ANTIGRAVITY_RE = /\b(?:antigravit\w*|anti\s+gravit\w*)\b/i;
 const TIMED_ACTION_RE = /^\W*(?:ehi\s+|ciao\s+|ok\s+)?(?:jarvis\s+)?tra\s+(\d{1,3})\s*(second\w*|minut\w*|or[ae])\s+(.{2,240})$/i;
@@ -346,6 +348,12 @@ export function selfInterrogate(db, env = {}, nowMs = Date.now(), tz = 'Europe/R
     }
   }
 
+  // 3. Auto-diagnostica, pulizia doppioni e apprendimento alias in background (zero token LLM)
+  try {
+    const heal = selfHeal.runDeterministicHeal(db, nowMs, tz);
+    if (heal.actions?.length) actionsTaken.push(...heal.actions);
+  } catch { /* non bloccare selfInterrogate */ }
+
   // 3. Igiene periodica del grafo e delle automazioni (ogni 10 minuti, zero crediti):
   const lastTidy = Number(kvGet(db, 'lastAutoTidyMs', 0));
   if (nowMs - lastTidy > 10 * 60_000) {
@@ -656,6 +664,39 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
   // 2. Diagnostica completa del sistema / stato PC / stato modelli (con grafica in sovraimpressione!)
   if (DIAGNOSTIC_RE.test(clean)) {
     return buildDiagnosticReport(db, env, nowMs);
+  }
+
+  // 2b. Auto-Diagnostica, Auto-Correzione e Apprendimento interno (SelfHeal)
+  if (SELF_HEAL_RE.test(clean)) {
+    const heal = selfHeal.runDeterministicHeal(db, nowMs, tz);
+    const items = [
+      { label: `Alias appresi (${heal.learnedTotal})`, value: Math.min(100, heal.learnedTotal * 15) },
+      { label: `Automatismi puliti (${heal.skillsTotal})`, value: Math.min(100, heal.skillsTotal * 20) },
+      { label: `Problemi aperti in fixLatenti (${heal.openIssues})`, value: Math.min(100, heal.openIssues * 25) },
+    ];
+    const visual = {
+      kind: 'bars',
+      title: 'Modulo Interno Self-Heal • Jarvis',
+      unit: '',
+      seconds: 18,
+      items,
+      text: heal.actions.length ? heal.actions.join(' · ') : 'Sistema pulito: nessun doppione o coda stantia rilevata.',
+    };
+    const msg = heal.actions.length
+      ? `Auto-riparazione completata, signore: ${heal.actions.join('; ')}. Ho in memoria ${heal.learnedTotal} correzioni apprese.`
+      : `Auto-diagnosi completata, signore: flussi e code sono già puliti (${heal.learnedTotal} alias appresi, ${heal.openIssues} voci in fix latenti).`;
+    return { reply: msg, visual, device: [{ type: 'visual', data: visual }], actions: ['self_heal', 'show'], touched: ['automazioni'], touchedLeaves: [] };
+  }
+
+  // 2c. Risoluzione immediata tramite alias appresi da errori/correzioni passate
+  const learnedHit = selfHeal.resolveLearnedAlias(db, clean);
+  if (learnedHit && learnedHit.device === 'pc') {
+    devices.enqueueCommand(db, 'desktop', { kind: learnedHit.kind, target: learnedHit.target }, nowMs);
+    setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target: learnedHit.target, action: learnedHit.kind }, nowMs);
+    return {
+      reply: `Eseguo (${learnedHit.kind}: ${learnedHit.target}) sul PC tramite regola appresa, signore.`,
+      device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [],
+    };
   }
 
   // 3. Richiesta di vedere lo schermo del PC in sovraimpressione
