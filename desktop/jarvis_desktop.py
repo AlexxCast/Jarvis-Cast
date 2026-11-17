@@ -454,10 +454,16 @@ class JarvisDesktopApp:
         # Log attività e risposte
         self.log_box = tk.Text(root, bg="#000000", fg="#39ff14", font=("Consolas", 9), relief="solid", bd=1, height=14, wrap="word")
         self.log_box.pack(fill="both", expand=True, padx=14, pady=(0, 12))
-        self.log("Jarvis Desktop pronto. Inserisci URL e Token se è il primo avvio, oppure scrivi un comando.")
+        self.log("Jarvis Desktop pronto. Chiudendo questa finestra il servizio continua in background.")
 
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
         self.thread = threading.Thread(target=self.heartbeat_loop, daemon=True)
         self.thread.start()
+
+    def on_close(self) -> None:
+        self.running = False
+        ensure_bg_daemon()
+        self.root.destroy()
 
     def log(self, msg: str) -> None:
         ts = time.strftime("%H:%M:%S")
@@ -549,7 +555,8 @@ class JarvisDesktopApp:
                         self.root.after(0, lambda: self.status_lbl.configure(text="● CONNESSO A JARVIS CLOUD", fg="#39ff14"))
                         self.log("PC registrato e connesso al sistema multi-dispositivo di Jarvis.")
                     for cmd in res.get("commands") or []:
-                        execute_pc_command(cmd, self.log)
+                        if not is_bg_running():
+                            execute_pc_command(cmd, self.log, self.cfg)
                 except Exception:
                     if self.online:
                         self.online = False
@@ -557,7 +564,91 @@ class JarvisDesktopApp:
             time.sleep(2)
 
 
+DAEMON_PORT = 47621
+LOG_PATH = DIR / "jarvis_bg.log"
+
+
+def is_bg_running() -> bool:
+    try:
+        with socket.create_connection(("127.0.0.1", DAEMON_PORT), timeout=0.25):
+            return True
+    except Exception:
+        return False
+
+
+def ensure_bg_daemon() -> None:
+    if is_bg_running():
+        return
+    pyw = Path(sys.executable).with_name("pythonw.exe")
+    exe = str(pyw) if pyw.exists() else sys.executable
+    flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        subprocess.Popen([exe, str(Path(__file__).resolve()), "--bg"], cwd=str(DIR), creationflags=flags)
+    except Exception:
+        pass
+
+
+def bg_log(msg: str) -> None:
+    try:
+        ts = time.strftime("%Y-%m-%d %H:%M:%S")
+        with open(LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(f"[{ts}] {msg}\n")
+    except Exception:
+        pass
+
+
+def run_background_daemon() -> None:
+    """Demone silenzioso in background: tiene il PC connesso anche ad app chiusa e dopo il riavvio."""
+    lock_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        lock_sock.bind(("127.0.0.1", DAEMON_PORT))
+        lock_sock.listen(1)
+    except OSError:
+        return  # già attivo in background
+
+    def accept_loop():
+        while True:
+            try:
+                conn, _ = lock_sock.accept()
+                conn.close()
+            except Exception:
+                break
+
+    threading.Thread(target=accept_loop, daemon=True).start()
+    bg_log("Demone Jarvis Desktop avviato in background.")
+    pc_name = f"PC {socket.gethostname()}"
+    plat = f"{platform.system()} {platform.release()}"
+    apps = ["Chrome", "Edge", "VS Code", "Esplora File", "PowerShell", "Blocco Note", "Calcolatrice", "Spotify"]
+
+    while True:
+        cfg = load_config()
+        if cfg.get("server_url") and cfg.get("server_token"):
+            try:
+                res = api_call(
+                    cfg,
+                    "POST",
+                    "/devices/heartbeat",
+                    {
+                        "id": f"desktop-{socket.gethostname().lower()}",
+                        "kind": "desktop",
+                        "name": pc_name,
+                        "platform": plat,
+                        "metrics": get_pc_metrics(),
+                        "apps": apps,
+                    },
+                )
+                for cmd in res.get("commands") or []:
+                    execute_pc_command(cmd, bg_log, cfg)
+            except Exception:
+                pass
+        time.sleep(2)
+
+
 if __name__ == "__main__":
-    root = tk.Tk()
-    app = JarvisDesktopApp(root)
-    root.mainloop()
+    if "--bg" in sys.argv:
+        run_background_daemon()
+    else:
+        ensure_bg_daemon()
+        root = tk.Tk()
+        app = JarvisDesktopApp(root)
+        root.mainloop()
