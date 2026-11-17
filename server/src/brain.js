@@ -183,9 +183,10 @@ export async function handleChat(db, env, deps, { text, image = null, sessionId 
   // 0. Auto-interrogazione autonoma a zero crediti (salvaguardia modelli, sorveglianza dispositivi, pulizia grafo).
   jarvisCore.selfInterrogate(db, env, ms, tz);
 
-  // 1. JARVIS CORE (IA proprietaria interna): gestisce direttamente controllo multi-dispositivo (PC/Telefono), Antigravity e diagnostica.
+  // 1. JARVIS CORE (IA proprietaria interna): gestisce direttamente controllo multi-dispositivo (PC/Telefono), Antigravity, timer e diagnostica.
   const coreHit = !image ? jarvisCore.handleCoreIntent(db, userText, ms, env) : null;
   if (coreHit) {
+    if (coreHit.scheduleAt) deps.schedule?.(coreHit.scheduleAt);
     if (coreHit.reply) {
       addMessage(db, sessionId, 'user', userText, nowIso, null);
       addMessage(db, sessionId, 'assistant', coreHit.reply, nowIso, { model: 'jarvis-core', visual: coreHit.visual || undefined });

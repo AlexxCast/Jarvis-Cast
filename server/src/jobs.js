@@ -6,10 +6,24 @@ import * as router from './router.js';
 import { loadDiary, dietContext, DIET_KEYWORDS, newId } from './diet.js';
 import * as memory from './memory.js';
 import * as mood from './mood.js';
+import * as devices from './devices.js';
 import { pushInbox, logEvent } from './db.js';
 import { today as todayOf, nowIso as nowIsoOf, nowHuman } from './clock.js';
 
-const MAX_STEPS = 6;
+const MAX_STEPS = 10;
+
+/** Estrae eventuali file di codice multi-file ("=== FILE: nome.ext ===" o ```lang:nome.ext) generati dallo Sviluppatore. */
+export function extractProjectFiles(text) {
+  const files = [];
+  const re = /(?:===\s*FILE:\s*([^\n=]+?)\s*===\n([\s\S]*?)(?====\s*FILE:|$)|```[a-z0-9_-]*:([^\n`]+)\n([\s\S]*?)```)/gi;
+  let m;
+  while ((m = re.exec(String(text || ''))) !== null) {
+    const path = String(m[1] || m[3] || '').trim().replace(/^[/\\]+/, '');
+    const content = String(m[2] ?? m[4] ?? '').replace(/```\s*$/, '').trim();
+    if (path && content && !path.includes('..')) files.push({ path: path.slice(0, 80), content: content.slice(0, 25000) });
+  }
+  return files;
+}
 
 export function createJob(db, { title, goal }, ms, tz) {
   const id = newId('j', ms);
@@ -59,8 +73,8 @@ export async function advance(db, env, deps) {
     const ctx = background(db, job.goal, ms, tz);
     if (job.status === 'planning') {
       const res = await call('smart',
-        `Sei il pianificatore di Jarvis. Dividi il compito in passi indipendenti e concreti (da 1 a ${MAX_STEPS}); ogni passo deve poter essere svolto da solo conoscendo i risultati dei precedenti. Rispondi SOLO con JSON: {"reply": "ok", "steps": [{"title": "...", "instruction": "...", "tier": "fast|smart"}]}`,
-        `${ctx}\n\nCOMPITO: ${job.goal}`, 900);
+        `Sei il pianificatore multi-agente di Jarvis. L'utente è l'orchestratore: dividi il compito complesso in passi specializzati e concreti (da 1 a ${MAX_STEPS}, es. Architetto, Calcolatore Logico/Matematico, Sviluppatore Multi-File/GUI, Revisore); ogni passo deve poter essere svolto da solo conoscendo i risultati dei precedenti. Se il compito richiede di programmare un progetto multi-file o un'interfaccia grafica, prevedi i passi per scrivere i file completi. Rispondi SOLO con JSON: {"reply": "ok", "steps": [{"title": "...", "instruction": "...", "tier": "fast|smart"}]}`,
+        `${ctx}\n\nCOMPITO: ${job.goal}`, 1100);
       const obj = extractObject(res.text);
       let steps = Array.isArray(obj?.steps) ? obj.steps.filter(s => s && s.instruction).slice(0, MAX_STEPS) : [];
       if (!steps.length) steps = [{ title: job.title, instruction: job.goal, tier: 'smart' }];
@@ -72,13 +86,23 @@ export async function advance(db, env, deps) {
     const steps = JSON.parse(job.steps);
     const i = steps.findIndex(s => s.status === 'pending');
     if (i >= 0) {
-      const prior = steps.slice(0, i).map((s, k) => `Passo ${k + 1} — ${s.title}:\n${s.output.slice(0, 1500)}`).join('\n\n');
+      const prior = steps.slice(0, i).map((s, k) => `Passo ${k + 1} — ${s.title}:\n${s.output.slice(0, 1800)}`).join('\n\n');
+      const isCodeGoal = /\b(programm\w*|progett\w*|multi[\s-]*file|interfaccia|gui|app|script|calcol\w*|codice|html|python)\b/i.test(job.goal);
+      const codeHint = isCodeGoal ? ' Se devi scrivere file di codice o interfacce grafiche, scrivi il codice completo preceduto da "=== FILE: nomefile.ext ===" così il sistema li creerà davvero sul PC.' : '';
       const res = await call(steps[i].tier,
-        'Sei Jarvis e stai svolgendo un passo di un compito più grande per il tuo utente. Svolgi SOLO questo passo, in italiano, in modo concreto e completo, senza introduzioni.',
-        `${ctx}\n\nCOMPITO COMPLESSIVO: ${job.goal}\n\n${prior ? 'RISULTATI DEI PASSI PRECEDENTI:\n' + prior + '\n\n' : ''}PASSO DA SVOLGERE ORA (${i + 1} di ${steps.length}) — ${steps[i].title}: ${steps[i].instruction}`);
+        'Sei un agente specializzato di Jarvis e stai svolgendo un passo di un compito più grande per il tuo utente. Svolgi SOLO questo passo, in italiano, applicando logiche, calcoli o codice completo e funzionante senza introduzioni.' + codeHint,
+        `${ctx}\n\nCOMPITO COMPLESSIVO: ${job.goal}\n\n${prior ? 'RISULTATI DEI PASSI PRECEDENTI:\n' + prior + '\n\n' : ''}PASSO DA SVOLGERE ORA (${i + 1} di ${steps.length}) — ${steps[i].title}: ${steps[i].instruction}`, 2400);
       steps[i].status = 'done';
-      steps[i].output = res.text.trim().slice(0, 6000);
+      steps[i].output = res.text.trim().slice(0, 10000);
       steps[i].model = res.key;
+      const extractedFiles = extractProjectFiles(steps[i].output);
+      if (extractedFiles.length) {
+        devices.enqueueCommand(db, 'desktop', {
+          kind: 'write_project',
+          target: job.title,
+          args: JSON.stringify({ files: extractedFiles }),
+        }, ms);
+      }
       db.run("UPDATE jobs SET steps = ?, result = '', updated = ? WHERE id = ?", JSON.stringify(steps), at, job.id);
       return 1000;
     }

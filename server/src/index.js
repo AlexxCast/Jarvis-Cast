@@ -44,10 +44,10 @@ export class JarvisDO extends DurableObject {
 
   async alarm() {
     const deps = this.deps();
-    jarvisCore.selfInterrogate(this.db, this.env, Date.now(), deps.tz);
+    const pulse = jarvisCore.selfInterrogate(this.db, this.env, Date.now(), deps.tz);
     const nextDue = agenda.fireDue(this.db, Date.now(), deps.tz);
     const delay = await jobs.advance(this.db, this.env, deps);
-    const candidates = [nextDue, delay != null ? Date.now() + delay : null].filter(x => x != null);
+    const candidates = [nextDue, pulse?.nextTimed, delay != null ? Date.now() + delay : null].filter(x => x != null);
     if (candidates.length) await this.ctx.storage.setAlarm(Math.max(Math.min(...candidates), Date.now() + 100));
   }
 }

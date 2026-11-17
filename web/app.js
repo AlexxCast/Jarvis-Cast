@@ -223,6 +223,19 @@ async function boot() {
     await Promise.all([refresh(), loadHistory(), loadGraph(false)]);
     await importLegacyIfNeeded();
     syncSteps();
+    // Timer interno di ~1.5 minuti (90s): controlla attività in corso, messaggi in arrivo e stato generale.
+    setInterval(async () => {
+      if (!store.token || store.sending) return;
+      try {
+        const inb = await api('POST', '/inbox/consume');
+        for (const it of (inb.items || [])) {
+          const txt = String(it.text || '').replace(/\[(?:PHONE_TASK|OPEN_APP):[^\]]+\]\s*/g, '').trim();
+          if (txt) { toast(txt); if ((nativeJson('getConfig') || {}).speakReplies) nativeCall('speak', txt); }
+        }
+        await refresh();
+        await loadGraph(true);
+      } catch {}
+    }, 90_000);
   } catch (e) { store.error = e.message; }
   render();
   scrollChat();
@@ -757,9 +770,9 @@ function viewImpostazioni() {
             h('p', { class: 'grow' }, 'Per vedere Jarvis e le sue grafiche sopra le altre app, senza che si apra la sua app, attivi "Mostra sopra altre app".'),
             h('button', { class: 'btn', onclick: () => { nativeCall('openOverlaySettings'); setTimeout(render, 3000); } }, 'Attiva'))) : null,
       typeof native.setPhonePassword === 'function' || typeof native.enrollVoice === 'function' ? h('div', {},
-        h('div', { class: 'small' }, 'Parola d\'ordine per le attività sul telefono'),
-        h('p', { class: 'muted' }, 'Jarvis non chiede più conferme intermedie mentre usa il telefono: chiede solo la parola d\'ordine (predefinita: "niente più fili", valida per 15 minuti). Può anche dirla direttamente dentro il comando vocale.'),
-        h('div', { class: 'row wrap' },
+        h('div', { class: 'small' }, 'Parola d\'ordine opzionale ("niente più fili")'),
+        toggle('Attiva richiesta parola d\'ordine ("niente più fili") per le attività sul telefono (disattivata di default)', 'voiceLock', 'setVoiceLock'),
+        cfg.voiceLock ? h('div', { class: 'row wrap', style: 'margin-top:6px' },
           h('input', { id: 'phonePwdInput', type: 'text', placeholder: 'Parola d\'ordine (predefinita: niente più fili)', style: 'flex:1;min-width:180px' }),
           h('button', { class: 'btn primary', onclick: () => {
             const el = document.getElementById('phonePwdInput');
@@ -768,9 +781,7 @@ function viewImpostazioni() {
             if (el) el.value = '';
             toast(`Parola d'ordine impostata: "${val}"`);
             setTimeout(render, 200);
-          } }, 'Salva parola d\'ordine'),
-          h('button', { class: 'btn', onclick: () => { nativeCall('setPhonePassword', 'niente più fili'); toast('Ripristinata: "niente più fili"'); setTimeout(render, 200); } }, 'Usa "niente più fili"')),
-        toggle('Richiedi la parola d\'ordine ("niente più fili") per le attività sul telefono', 'voiceLock', 'setVoiceLock')) : null,
+          } }, 'Salva parola d\'ordine')) : null) : null,
       typeof native.callPermission === 'function' ? h('div', { class: 'row wrap' },
         h('p', { class: 'grow' }, nativeCall('callPermission') === true ? 'Jarvis può telefonare ai contatti della rubrica ("chiama Marco").' : 'Per le telefonate ("chiama Marco") Jarvis ha bisogno dei permessi Contatti e Telefono.'),
         nativeCall('callPermission') === true ? null : h('button', { class: 'btn', onclick: () => { nativeCall('requestCallPermission'); setTimeout(render, 2500); } }, 'Concedi')) : null,

@@ -18,6 +18,7 @@ const BASE_PC_RE = /\b(pc|computer|desktop|portatile|windows|gh?ideon|antigravit
 const DIAGNOSTIC_RE = /\b(diagnostic\w*|stato\s+del\s+(?:pc|computer|sistema|gh?ideon|jarvis)|dispositiv[io]\s+conness\w*|come\s+sta\s+il\s+(?:pc|sistema)|quanta\s+ram|cpu\s+del\s+pc|controllo\s+sistema|report\s+sistema)\b/i;
 const PC_SCREEN_RE = /\b(mostra(?:mi)?\s+lo\s+schermo|fa(?:mmi|i)\s+vedere\s+lo\s+schermo|screenshot\s+(?:del\s+)?(?:pc|computer|gh?ideon)|schermo\s+del\s+(?:pc|computer|gh?ideon)|cosa\s+c'[eè]\s+sullo\s+schermo)\b/i;
 const ANTIGRAVITY_RE = /\b(?:antigravit\w*|anti\s+gravit\w*)\b/i;
+const TIMED_ACTION_RE = /^\W*(?:ehi\s+|ciao\s+|ok\s+)?(?:jarvis\s+)?tra\s+(\d{1,3})\s*(second\w*|minut\w*|or[ae])\s+(.{4,240})$/i;
 const PASSPHRASE_RE = /^\W*(?:la\s+parola\s+d'ordine\s+[eè]\s+|parola\s+d'ordine\s+)?niente\s+pi[uù]\s+fili\W*$/i;
 const SELF_PROMPT_ECHO_RE = /^\W*(?:parola\s+d'ordine(?:\s+non\s+corretta.*)?|certamente\s+signore.*|subito\s+signore.*|ricevuto\s+signore.*|ottimo\s+lavoro\s+signore.*|ho\s+avviato\s+la\s+riproduzione.*|signore\s+ho\s+riscontrato.*)\W*$/i;
 
@@ -35,17 +36,56 @@ const WEB_SERVICES = {
 };
 
 /**
- * Meccanismo di Auto-Interrogazione e Iniziativa Autonoma (Zero Crediti LLM).
- * Gira in background su timer e heartbeat: ripara i modelli bloccati da errori transitori,
- * isola i modelli ritirati (404/410), sorveglia le risorse del PC/Telefono e mantiene ordinato il grafo.
+ * Esegue le attività temporizzate scadute ("tra X minuti apri...", "tra X minuti fai partire...").
+ * Ritorna la scadenza (ms) della prossima attività temporizzata in coda, oppure null.
+ */
+export function fireDueTimedActions(db, env = {}, nowMs = Date.now(), tz = 'Europe/Rome') {
+  const list = kvGet(db, 'timedActions', []);
+  if (!list.length) return null;
+  const atIso = nowIsoOf(nowMs, tz);
+  const remaining = [];
+  for (const item of list) {
+    if (Number(item.dueMs) <= nowMs) {
+      const cmd = String(item.command || '').trim();
+      if (isPcTarget(db, cmd) || ANTIGRAVITY_RE.test(cmd)) {
+        handleCoreIntent(db, cmd, nowMs, env);
+        pushInbox(db, atIso, 'timed', `Signore, come programmato ho eseguito sul PC: "${cmd}".`);
+      } else {
+        pushInbox(db, atIso, 'timed', `[PHONE_TASK:${cmd}] Signore, avvio l'attività programmata: "${cmd}".`);
+      }
+    } else {
+      remaining.push(item);
+    }
+  }
+  if (remaining.length !== list.length) kvSet(db, 'timedActions', remaining);
+  return remaining.length ? Math.min(...remaining.map(x => Number(x.dueMs))) : null;
+}
+
+/**
+ * Meccanismo di Auto-Interrogazione e Iniziativa Autonoma (Timer interno ~1.5 min, Zero Crediti LLM).
+ * Gira in background su timer e heartbeat: esegue attività temporizzate scadute, controlla compiti/messaggi
+ * in sospeso, ripara i modelli bloccati da errori transitori, isola i modelli ritirati (404/410),
+ * sorveglia le risorse del PC/Telefono e mantiene ordinato il grafo.
  */
 export function selfInterrogate(db, env = {}, nowMs = Date.now(), tz = 'Europe/Rome') {
+  const nextTimed = fireDueTimedActions(db, env, nowMs, tz);
   const lastRun = Number(kvGet(db, 'lastSelfInterrogateMs', 0));
-  if (nowMs - lastRun < 45_000) return { ran: false };
+  if (nowMs - lastRun < 45_000) return { ran: false, nextTimed };
   kvSet(db, 'lastSelfInterrogateMs', nowMs);
 
   const actionsTaken = [];
   const atIso = nowIsoOf(nowMs, tz);
+
+  // 0. Controllo attività sul telefono rimaste in sospeso (phonePending):
+  const pendingPhone = kvGet(db, 'phonePending', null);
+  if (pendingPhone && pendingPhone.goal && nowMs - Number(pendingPhone.at || 0) > 90_000 && nowMs - Number(pendingPhone.at || 0) < 10 * 60_000) {
+    const alerted = kvGet(db, 'phonePendingAlerted', 0);
+    if (Number(alerted) !== Number(pendingPhone.at)) {
+      kvSet(db, 'phonePendingAlerted', pendingPhone.at);
+      pushInbox(db, atIso, 'admin', `Signore, ho ancora in sospeso l'attività "${pendingPhone.goal}". Vuole che proceda?`);
+      actionsTaken.push(`notificato compito in sospeso: ${pendingPhone.goal}`);
+    }
+  }
 
   // 1. Auto-guarigione dei modelli e salvaguardia crediti:
   // - Sblocca i modelli principali (es. Gemini) se erano in pausa per un picco 503/timeout ormai passato (> 90s);
@@ -88,7 +128,7 @@ export function selfInterrogate(db, env = {}, nowMs = Date.now(), tz = 'Europe/R
     if (merged > 0 || pruned > 0) actionsTaken.push(`grafo ottimizzato (${merged} uniti, ${pruned} flow potati)`);
   }
 
-  return { ran: true, actionsTaken };
+  return { ran: true, actionsTaken, nextTimed };
 }
 
 /** Costruisce il rapporto diagnostico completo con grafica in sovraimpressione (visual). */
@@ -306,6 +346,27 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}) {
   const clean = raw.replace(/^\W*(ehi|ciao|ok)?\W*jarvis\W*/i, '').replace(/\bniente\s+pi[uù]\s+fili\b/gi, '').trim();
   if (!clean) return null;
 
+  // 1b. Attività temporizzate ("tra 2 minuti apri YouTube sul PC", "tra 5 minuti metti musica rilassante"):
+  const timedMatch = TIMED_ACTION_RE.exec(clean);
+  if (timedMatch && !/\b(ricordami|promemoria|sveglia)\b/i.test(timedMatch[3])) {
+    const amount = Math.max(1, Number(timedMatch[1]) || 1);
+    const unit = timedMatch[2].toLowerCase();
+    const delayMs = unit.startsWith('second') ? amount * 1000 : unit.startsWith('or') ? amount * 3600_000 : amount * 60_000;
+    const innerCmd = timedMatch[3].trim();
+    const dueMs = nowMs + delayMs;
+    const list = kvGet(db, 'timedActions', []);
+    const entry = { id: `ta-${nowMs}`, dueMs, command: innerCmd, createdAt: nowMs };
+    kvSet(db, 'timedActions', [...list.slice(-20), entry]);
+    const reg = flows.registerAutoGoal(db, `Timer: ${innerCmd}`, nowMs);
+    return {
+      reply: `Ricevuto, signore: tra ${amount} ${timedMatch[2]} eseguirò in automatico "${innerCmd}".`,
+      device: [], actions: ['timed_action'],
+      touched: ['automazioni', 'agenda'],
+      touchedLeaves: reg ? ['f:' + reg.id] : [],
+      scheduleAt: dueMs,
+    };
+  }
+
   // 2. Diagnostica completa del sistema / stato PC / stato modelli (con grafica in sovraimpressione!)
   if (DIAGNOSTIC_RE.test(clean)) {
     return buildDiagnosticReport(db, env, nowMs);
@@ -393,9 +454,9 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}) {
  */
 export function detectComplexProject(userText) {
   const s = String(userText || '').trim();
-  if (s.length < 25) return null;
-  const m = /\b(?:avvia\s+un\s+progetto|gestisci\s+nel\s+tempo|pianifica\s+in\s+pi[uù]\s+fasi|studia\s+a\s+fondo|prepara\s+un\s+piano\s+completo\s+(?:per|di|su))\s+(.{10,300})/i.exec(s);
+  if (s.length < 22) return null;
+  const m = /\b(?:avvia\s+un\s+progetto|crea\s+un\s+progetto|programma\s+(?:un\s+progetto|un'app|un'interfaccia|una\s+gui)|sviluppa\s+in\s+multi[\s-]*file|gestisci\s+nel\s+tempo|pianifica\s+in\s+pi[uù]\s+fasi|studia\s+a\s+fondo|prepara\s+un\s+piano\s+completo\s+(?:per|di|su))\s+(.{8,400})/i.exec(s);
   if (!m) return null;
   const goal = m[1].trim();
-  return { title: goal.slice(0, 60), goal: s.slice(0, 1500) };
+  return { title: goal.slice(0, 60), goal: s.slice(0, 2000) };
 }

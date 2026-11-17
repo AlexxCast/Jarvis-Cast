@@ -70,7 +70,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
         const val ACTION_ANSWER = "answer"     // ascolta la risposta a una domanda, senza portare Jarvis in primo piano
         private const val NOTIF_ID = 1
         private const val PHOTO_NOTIF_ID = 2
-        private const val INBOX_POLL_MS = 5 * 60_000L
+        private const val INBOX_POLL_MS = 90_000L // Timer interno di 1 minuto e mezzo per controllare attività, messaggi e stato
 
         fun start(ctx: Context) {
             Settings.listeningEnabled = true
@@ -382,10 +382,11 @@ class JarvisService : LifecycleService(), SensorEventListener {
                     override fun onPartialResults(partialResults: Bundle?) {
                         lastRecognizerActivityMs = System.currentTimeMillis()
                         if (Speaker.isSpeaking() || busy || yielded) return
-                        val text = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull().orEmpty()
+                        val list = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
+                        val text = list.firstOrNull { VoiceText.containsWake(it, Settings.sensitivity) } ?: list.firstOrNull().orEmpty()
                         if (text.isBlank()) return
                         JarvisState.partial.value = text
-                        // Sentito "Jarvis": aspetta una breve pausa e chiude subito la sessione senza aspettare 15s.
+                        // Sentito "Jarvis" (anche a voce bassa tra le alternative parziali): chiude rapido senza dover gridare.
                         if (wakeHeard || VoiceText.containsWake(text, Settings.sensitivity)) {
                             lastWakePartial = text
                             if (!wakeHeard) {
@@ -394,7 +395,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
                                 updateNotification("Ti ascolto…")
                             }
                             main.removeCallbacks(wakeStopRunnable)
-                            main.postDelayed(wakeStopRunnable, 1100L)
+                            main.postDelayed(wakeStopRunnable, 850L)
                         }
                     }
                     override fun onResults(results: Bundle?) {
@@ -462,10 +463,11 @@ class JarvisService : LifecycleService(), SensorEventListener {
         putExtra(RecognizerIntent.EXTRA_LANGUAGE, "it-IT")
         putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
         putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 5)
-        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1_100L)
-        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 800L)
+        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 5_000L)
+        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1_800L)
+        putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1_200L)
         if (Build.VERSION.SDK_INT >= 33) {
-            putStringArrayListExtra(RecognizerIntent.EXTRA_BIASING_STRINGS, arrayListOf("Jarvis", "Ehi Jarvis", "Ciao Jarvis", "Ok Jarvis"))
+            putStringArrayListExtra(RecognizerIntent.EXTRA_BIASING_STRINGS, arrayListOf("Jarvis", "Ehi Jarvis", "Ciao Jarvis", "Ok Jarvis", "Giarvis", "Jervis"))
         }
     }
 
@@ -731,12 +733,10 @@ class JarvisService : LifecycleService(), SensorEventListener {
         if (inConversationMode) {
             val elapsed = System.currentTimeMillis() - lastConversationActivityTime
             if (elapsed > CONVERSATION_TIMEOUT_MS) {
-                // Timeout di 1 minuto e mezzo superato: chiudi la conversazione
+                // Silenzio prolungato: torna discretamente in ascolto della parola chiave senza interrompere l'utente.
                 inConversationMode = false
                 busy = false
-                Speaker.speak("Nessuna risposta da oltre un minuto e mezzo. Torno in stand-by, signore.") {
-                    main.post { backToWaiting() }
-                }
+                backToWaiting()
             } else {
                 // Ancora dentro i 90 secondi: continua ad ascoltare l'utente
                 busy = false
@@ -793,6 +793,12 @@ class JarvisService : LifecycleService(), SensorEventListener {
             Speaker.speak("Ai suoi ordini, signore. Resto a disposizione.") {
                 main.post { backToWaiting() }
             }
+            return
+        }
+        // Se l'utente sta chiaramente parlando con altre persone nella stanza, mette in pausa la conversazione attiva senza disturbare.
+        if (inConversationMode && !awaitingPassphrase && VoiceText.isTalkingToOthers(text)) {
+            inConversationMode = false
+            backToWaiting()
             return
         }
 
@@ -906,11 +912,11 @@ class JarvisService : LifecycleService(), SensorEventListener {
                         return@post
                     }
                     if (yielded) return@post
-                    if (inConversationMode && reply.expectReply && reply.photoRequest == null) {
+                    if (inConversationMode && reply.photoRequest == null) {
                         busy = false
                         lastConversationActivityTime = System.currentTimeMillis()
-                        tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 100)
-                        // Continua la conversazione ascoltando senza dover ridire "Jarvis"
+                        tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 80)
+                        // Conversazione flessibile: resta in ascolto finché l'utente non dice "grazie Jarvis", parla con altri o resta in silenzio.
                         listenForCommand()
                     } else {
                         inConversationMode = false
@@ -969,10 +975,15 @@ class JarvisService : LifecycleService(), SensorEventListener {
                     val items = inbox.items
                     // Se un promemoria scade prima del prossimo giro, si torna a chiedere proprio a quell'ora.
                     inbox.nextInMs?.let { if (it < INBOX_POLL_MS) scheduleInbox(it + 2_000) }
-                    items.forEachIndexed { i, text ->
-                        notifyInfoPopup(text, 20 + i)
+                    items.forEachIndexed { i, rawText ->
+                        val taskMatch = Regex("\\[PHONE_TASK:([^\\]]+)\\]").find(rawText)
+                        val appMatch = Regex("\\[OPEN_APP:([^\\]]+)\\]").find(rawText)
+                        val text = rawText.replace(Regex("\\[(?:PHONE_TASK|OPEN_APP):[^\\]]+\\]\\s*"), "").trim()
+                        if (text.isNotBlank()) notifyInfoPopup(text, 20 + i)
+                        if (appMatch != null) AppLauncher.open(this@JarvisService, appMatch.groupValues[1].trim())
+                        if (taskMatch != null) PhoneAgent.start(this@JarvisService, taskMatch.groupValues[1].trim())
                     }
-                    val first = items.firstOrNull()
+                    val first = items.firstOrNull()?.replace(Regex("\\[(?:PHONE_TASK|OPEN_APP):[^\\]]+\\]\\s*"), "")?.trim()
                     val micFree = guard?.busyElsewhere(sessionActive) != true
                     if (first != null && Settings.speakReplies && !busy && !yielded && micFree) {
                         lastSpokenText = first

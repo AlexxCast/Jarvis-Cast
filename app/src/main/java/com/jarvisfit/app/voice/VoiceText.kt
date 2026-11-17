@@ -41,13 +41,26 @@ object VoiceText {
      * o "grazie, quante calorie mi restano?" non devono chiudere la sessione.
      */
     private val cancelRegex = Regex(
-        "^(?:ok |okay |va bene |perfetto )?(?:basta|grazie(?: mille| tante)?|a posto(?: così)?|stop|annulla|niente|chiudi|" +
-            "lascia stare|arrivederci|ciao|ok basta|perfetto grazie|ho finito|finito|va bene così|può bastare|sono a posto)" +
-            "(?: (?:così|jarvis|grazie|ciao))*$",
+        "^(?:ok |okay |va bene |perfetto |tutto )?(?:basta(?: così)?|grazie(?: mille| tante| jarvis| giarvis)?|a posto(?: così)?|stop|annulla|chiudi|" +
+            "lascia stare|arrivederci|ciao(?: jarvis| giarvis)?|ok basta|perfetto grazie|ho finito|finito|va bene così|può bastare|sono a posto|tutto chiaro)" +
+            "(?: (?:così|jarvis|giarvis|grazie|ciao|signore))*$",
         RegexOption.IGNORE_CASE,
     )
 
     fun isCancelPhrase(text: String): Boolean = cancelRegex.matches(normalize(text))
+
+    private val talkingToOthersRegex = Regex(
+        "\\b(?:ragazzi|amore|mamma|papà|papa|tesoro|scusa un attimo|aspetta un secondo|stavo dicendo a|parlavo con|" +
+            "passami|vieni qui|venite|senti un po|dimmi pure caro|dimmi cara)\\b",
+        RegexOption.IGNORE_CASE,
+    )
+
+    /** Vero se l'utente ha chiaramente iniziato a parlare con altre persone nella stanza (senza nominare Jarvis). */
+    fun isTalkingToOthers(text: String): Boolean {
+        val norm = normalize(text)
+        if (containsWake(norm, 0.85f)) return false
+        return talkingToOthersRegex.containsMatchIn(norm)
+    }
 
     // ---------------------------------------------------------------- parola di attivazione
 
@@ -66,9 +79,9 @@ object VoiceText {
      * "giarvis", "jarvi", "garvis"... Tutte queste valgono già con la sensibilità media; il contesto
      * (nome all'inizio, alla fine o giudicato dal server) evita le false chiamate.
      */
-    private val wakeToken = Regex("\\b(jarvis|jarvi|giarvis|jervis|gervis|jarvys|jarviss|jarbis|giarvi|garvis|charvis|jarvas|giarviz|jarviz|jarves|giarves|giarbis|jervi|giervis)\\b")
-    /** Sensibilità alta: accetta anche come il riconoscimento vocale storpia spesso il nome. */
-    private val wakeTokenLoose = Regex("\\b(jarvis|jarvi|giarvis|jervis|gervis|jarvys|jarviss|jarbis|giarvi|garvis|charvis|jarvas|giarviz|jarviz|jarves|giarves|giarbis|jervi|giervis|harvis|giorvis|jarvees|travis|davis|chavis|service|servis|ciarvis|sarvis|harvey|garbis|darvis|carvis)\\b")
+    private val wakeToken = Regex("\\b(jarvis|jarvi|giarvis|jervis|gervis|jarvys|jarviss|jarbis|giarvi|garvis|charvis|jarvas|giarviz|jarviz|jarves|giarves|giarbis|jervi|giervis|harvis|giorvis|jarvees|ciarvis|sarvis|garbis|darvis|carvis|zarvis|iarvis|arvis|giardi|giarri|ciardi)\\b")
+    /** Sensibilità alta: accetta anche come il riconoscimento vocale storpia spesso il nome detto a voce bassa o da lontano. */
+    private val wakeTokenLoose = Regex("\\b(jarvis|jarvi|giarvis|jervis|gervis|jarvys|jarviss|jarbis|giarvi|garvis|charvis|jarvas|giarviz|jarviz|jarves|giarves|giarbis|jervi|giervis|harvis|giorvis|jarvees|travis|davis|chavis|service|servis|ciarvis|sarvis|harvey|garbis|darvis|carvis|zarvis|iarvis|arvis|giardi|giarri|ciardi|giar|jarv|giarv|sciarvis|cervi|servi|chavez)\\b")
 
     /** Parole che possono precedere il nome quando lo si chiama ("ehi Jarvis", "senti Jarvis"). */
     private val callWords = setOf(

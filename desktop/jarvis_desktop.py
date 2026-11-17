@@ -239,11 +239,51 @@ def run_antigravity_task(project: str, task_prompt: str, cfg: dict, log_fn) -> N
     capture_and_upload_screen(cfg, log_fn, title=f"Antigravity • {proj_path.name}")
 
 
+def write_and_run_project(project_name: str, args_json: str, cfg: dict, log_fn) -> None:
+    """Scrive su disco sul PC i file generati dal sistema Multi-Agente di Jarvis (progetti multi-file e GUI) e li avvia."""
+    slug = re.sub(r"[^a-zA-Z0-9_-]+", "-", (project_name or "progetto").strip()).strip("-") or "progetto"
+    base_dir = Path("G:/Progetti_Jarvis") / slug
+    base_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        data = json.loads(args_json or "{}")
+        files = data.get("files") or []
+        entry_html = None
+        entry_py = None
+        for f in files:
+            rel = (f.get("path") or "").strip().lstrip("/\\")
+            content = f.get("content") or ""
+            if not rel or ".." in rel:
+                continue
+            dest = base_dir / rel
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(content, encoding="utf-8")
+            log_fn(f"Creato file: {dest}")
+            if rel.endswith(".html") and entry_html is None:
+                entry_html = dest
+            elif rel.endswith(".py") and entry_py is None:
+                entry_py = dest
+        if entry_html is not None:
+            webbrowser.open(str(entry_html))
+        elif entry_py is not None:
+            subprocess.Popen([sys.executable, str(entry_py)], cwd=str(base_dir))
+        else:
+            os.startfile(str(base_dir))
+        time.sleep(2.0)
+        capture_and_upload_screen(cfg, log_fn, title=f"Progetto {slug}")
+    except Exception as e:
+        log_fn(f"Errore scrittura progetto: {e}")
+
+
 def execute_pc_command(cmd: dict, log_fn, cfg: dict = None) -> None:
     kind = (cmd.get("kind") or "open_app").lower()
     target = (cmd.get("target") or "").strip()
     args = (cmd.get("args") or "").strip()
     log_fn(f"Eseguo comando [{kind}]: {target}")
+
+    if kind == "write_project":
+        if cfg:
+            threading.Thread(target=write_and_run_project, args=(target, args, cfg, log_fn), daemon=True).start()
+        return
 
     if kind == "capture_screen":
         if cfg:

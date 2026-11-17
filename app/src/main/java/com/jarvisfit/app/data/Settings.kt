@@ -28,8 +28,8 @@ object Settings {
         set(v) = prefs.edit().putString("model", v.trim()).apply()
 
     var sensitivity: Float
-        get() = prefs.getFloat("sensitivity", 0.65f)
-        set(v) = prefs.edit().putFloat("sensitivity", v).apply()
+        get() = prefs.getFloat("sensitivity_v2", 0.88f)
+        set(v) = prefs.edit().putFloat("sensitivity_v2", v).putFloat("sensitivity", v).apply()
 
     var speakReplies: Boolean
         get() = prefs.getBoolean("speak", true)
@@ -68,8 +68,8 @@ object Settings {
         get() = prefs.getString("voice_model", "") ?: ""
         set(v) = prefs.edit().putString("voice_model", v).apply()
     var voiceLock: Boolean
-        get() = prefs.getBoolean("voice_lock", true)
-        set(v) = prefs.edit().putBoolean("voice_lock", v).apply()
+        get() = prefs.getBoolean("passphrase_lock_on", false)
+        set(v) = prefs.edit().putBoolean("passphrase_lock_on", v).putBoolean("voice_lock", v).apply()
     /** Da 0 (permissivo) a 1 (severo). */
     var voiceStrictness: Float
         get() = prefs.getFloat("voice_strictness", 0.5f)

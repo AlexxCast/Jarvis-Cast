@@ -267,12 +267,20 @@ Jarvis diceva "ho aggiornato il piano" o "chiamo Marcolino" senza farlo.
   - Diagnostiche e notizie generano sempre una scheda grafica in sovraimpressione (`visual` / `Overlay.showVisual`).
   - Lo sfondo di web app, overlay, WebView Android e app Desktop è ora nero puro (`#000000`) con soli dettagli verdi (`#39ff14`).
 
+### Sensibilità ascolto alta, conversazione continua flessibile, password su flag opzionale, timer interno 90s, 31 modelli e Multi-Agente Progetti/GUI (17/11/2026)
+
+- **Ascolto reattivo senza gridare e conversazione continua (`JarvisService.kt`, `VoiceText.kt`, `Settings.kt`):** sensibilità predefinita a `0.88`, controllo di tutte le alternative parziali per cogliere `"Jarvis"` anche a voce bassa, e conversazione che resta aperta dopo ogni risposta finché l'utente non dice *"grazie Jarvis"* / *"basta"*, non parla chiaramente con altri nella stanza (`isTalkingToOthers`) o non resta in silenzio per 90s.
+- **Password disattivata di default (`Settings.voiceLock = false`):** la parola d'ordine `"niente più fili"` non viene chiesta a meno che l'utente non attivi esplicitamente il flag in `Altro → Impostazioni`.
+- **Task sul dispositivo migliorati (`JarvisAccessibility.kt`):** esclusi i contenitori vuoti dallo snapshot (che prima saturavano i 120 elementi) e aggiunto l'invio automatico `ACTION_IME_ENTER` dopo la scrittura nei campi di ricerca.
+- **Timer interno di 90 secondi e attività temporizzate (`jarvis_core.js`, `index.js`, `JarvisService.kt`, `app.js`):** ogni 1,5 minuti Jarvis controlla compiti in sospeso, stato dispositivi e scadenze, ed esegue azioni temporizzate (*"tra X minuti apri/fai partire..."*).
+- **Catalogo espanso a 31 modelli (`models.js`) e Sviluppatore Multi-Agente Multi-File/GUI (`jobs.js` + `jarvis_desktop.py`):** fino a 10 passi multi-agente con estrazione automatica di file (`=== FILE: ... ===`) scritti ed eseguiti direttamente sul PC in `G:\Progetti_Jarvis\<progetto>`.
+
 ---
 
-## 5. Stato attuale (16/11/2026)
+## 5. Stato attuale (17/11/2026)
 
-- **Pubblicato:** tutto fino alla versione 2.20 (`jarvis-shell-v24`).
-- **APK:** l'ultimo è il 2.20 (`versionCode = 22`).
+- **Pubblicato:** tutto fino alla versione 2.21 (`jarvis-shell-v25`).
+- **APK:** l'ultimo è il 2.21 (`versionCode = 23`).
 - **Mai verificato da noi sul telefono vero:**
   - l'Accessibilità sbloccata;
   - l'affidabilità della parola chiave;

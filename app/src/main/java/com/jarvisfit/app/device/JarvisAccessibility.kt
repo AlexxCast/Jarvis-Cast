@@ -71,7 +71,7 @@ class JarvisAccessibility : AccessibilityService() {
                 else -> "testo"
             }
             val text = (if (node.isPassword) "(password)" else label(node)) + if (node.isEditable && node.isFocused) " [cursore qui]" else ""
-            if (kind != "testo" || text.isNotEmpty()) {
+            if (text.isNotEmpty() || kind == "campo") {
                 val n = items.size + 1
                 items += Item(n, kind, text.take(160))
                 map[n] = node
@@ -106,17 +106,30 @@ class JarvisAccessibility : AccessibilityService() {
     }
 
     fun type(n: Int, text: String): String? {
-        val node = nodes[n] ?: return "elemento $n non trovato"
+        var node = nodes[n] ?: return "elemento $n non trovato"
         if (node.isPassword) return "è un campo password: non lo compilo"
-        if (!node.isEditable) return "l'elemento $n non è un campo di testo"
+        if (!node.isEditable) {
+            // Se l'elemento toccato era il contenitore della barra di ricerca, cerca il vero campo editabile attivo sullo schermo.
+            node = nodes.values.firstOrNull { it.isEditable && it.isFocused }
+                ?: nodes.values.firstOrNull { it.isEditable }
+                ?: return "l'elemento $n non è un campo di testo"
+        }
         node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
         node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
         val args = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, text) }
-        if (node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) return null
-        // Alcune app non accettano il testo diretto: lo incolliamo dagli appunti.
-        val cm = getSystemService(android.content.ClipboardManager::class.java)
-        cm?.setPrimaryClip(android.content.ClipData.newPlainText("jarvis", text))
-        return if (node.performAction(AccessibilityNodeInfo.ACTION_PASTE)) null else "non riesco a scrivere nel campo $n"
+        val ok = if (node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) {
+            true
+        } else {
+            val cm = getSystemService(android.content.ClipboardManager::class.java)
+            cm?.setPrimaryClip(android.content.ClipData.newPlainText("jarvis", text))
+            node.performAction(AccessibilityNodeInfo.ACTION_PASTE)
+        }
+        if (!ok) return "non riesco a scrivere nel campo $n"
+        // Invia anche l'azione "Cerca / Invio" della tastiera (IME_ENTER) così le app avviano subito la ricerca.
+        if (android.os.Build.VERSION.SDK_INT >= 30) {
+            runCatching { node.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id) }
+        }
+        return null
     }
 
     fun scroll(n: Int?, down: Boolean): String? {
