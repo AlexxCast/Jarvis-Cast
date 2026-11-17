@@ -112,6 +112,7 @@ export function applyActions(db, actions, ctx) {
       else if (coder.CODE_ACTIONS.has(a.type)) out.code.push({ type: a.type, id: String(a.id || ''), request: String(a.request || '').trim().slice(0, 2000) });
       else if (ui.UI_ACTIONS.has(a.type)) { if (!ui.applyUiAction(db, a, ctx.nowIso)) { out.failed.push(a.type); continue; } out.ui = true; }
       else if (a.type === 'start_job') { if (String(a.goal || '').trim()) out.jobs.push({ title: String(a.title || 'Compito').slice(0, 80), goal: String(a.goal).slice(0, 2000) }); }
+      else if (a.type === 'live_card') { if (!jarvisCore.applyLiveCard(db, a, ctx.ms)) { out.failed.push(a.type); continue; } }
       else if (a.type === 'pc_action') {
         const target = String(a.target || a.name || a.url || '').trim();
         if (!target) { out.failed.push(a.type); continue; }

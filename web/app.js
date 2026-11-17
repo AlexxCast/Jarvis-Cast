@@ -386,6 +386,71 @@ function widgetData(w) {
     default: return null;
   }
 }
+function fmtClock(ms) {
+  const s = Math.max(0, Math.floor(ms / 1000));
+  const h2 = Math.floor(s / 3600), m2 = Math.floor((s % 3600) / 60), s2 = s % 60;
+  const pad = (n) => String(n).padStart(2, '0');
+  return h2 > 0 ? `${h2}:${pad(m2)}:${pad(s2)}` : `${pad(m2)}:${pad(s2)}`;
+}
+
+// Ticker locale da 1 secondo per aggiornare in diretta timer, cronometri e schede vive senza ridisegnare la pagina.
+if (!window.__jarvisLiveTick) {
+  window.__jarvisLiveTick = setInterval(() => {
+    const now = Date.now();
+    for (const el of document.querySelectorAll('[data-countdown]')) {
+      const rem = Number(el.getAttribute('data-countdown')) - now;
+      el.textContent = rem > 0 ? fmtClock(rem) : '00:00';
+      if (rem <= 0 && !el.dataset.done) {
+        el.dataset.done = '1';
+        setTimeout(() => { if (store.token && !store.sending) refresh().then(render).catch(() => {}); }, 1500);
+      }
+    }
+    for (const el of document.querySelectorAll('[data-stopwatch]')) {
+      const start = Number(el.getAttribute('data-stopwatch'));
+      el.textContent = fmtClock(Math.max(0, now - start));
+    }
+  }, 1000);
+}
+
+/** Renderer modulare per tutte le attività vive (timer, cronometri, contatori, barre, checklist, dispositivi). */
+function renderLiveCards(compact = false) {
+  const cards = store.state?.liveCards || [];
+  if (!cards.length) return null;
+  const now = Date.now();
+  return h('div', { class: 'live-cards' + (compact ? ' compact' : '') }, cards.map(c => {
+    let body = null;
+    if (c.kind === 'countdown' && c.targetMs) {
+      body = h('b', { class: 'num live-big', 'data-countdown': String(c.targetMs) }, fmtClock(c.targetMs - now));
+    } else if (c.kind === 'stopwatch' && c.startMs) {
+      body = h('b', { class: 'num live-big', 'data-stopwatch': String(c.startMs) }, fmtClock(now - c.startMs));
+    } else if (c.kind === 'progress') {
+      const pct = c.max ? Math.min(100, Math.max(0, Math.round((Number(c.value || 0) / c.max) * 100))) : 0;
+      body = h('div', { style: 'display:flex;flex-direction:column;gap:4px' },
+        h('div', { class: 'row' }, h('b', { class: 'num' }, `${c.value ?? 0}${c.unit ? ' ' + c.unit : ''}`), c.max ? h('span', { class: 'muted small grow', style: 'text-align:right' }, `/ ${c.max}`) : null),
+        h('div', { class: 'bar' }, h('i', { style: `width:${pct}%` })));
+    } else if (c.kind === 'counter') {
+      body = h('div', { class: 'row', style: 'gap:6px' },
+        h('button', { class: 'btn', style: 'min-height:30px;padding:2px 10px', onclick: guard(() => act({ type: 'live_card', op: 'bump', id: c.id, delta: -1 })) }, '−'),
+        h('b', { class: 'num live-big grow', style: 'text-align:center' }, `${c.value ?? 0}${c.unit ? ' ' + c.unit : ''}`),
+        h('button', { class: 'btn primary', style: 'min-height:30px;padding:2px 10px', onclick: guard(() => act({ type: 'live_card', op: 'bump', id: c.id, delta: 1 })) }, '+'));
+    } else if (c.kind === 'checklist' && Array.isArray(c.items)) {
+      body = h('div', { style: 'display:flex;flex-direction:column;gap:4px' }, c.items.map((it, idx) =>
+        h('label', { class: 'check small', style: 'cursor:pointer' },
+          h('input', { type: 'checkbox', checked: !!it.done, onchange: guard(() => act({ type: 'live_card', op: 'toggle', id: c.id, index: idx })) }),
+          h('span', { style: it.done ? 'text-decoration:line-through;color:var(--muted)' : '' }, it.label))));
+    } else {
+      body = h('b', { class: 'num live-big' }, `${c.value ?? '—'}${c.unit ? ' ' + c.unit : ''}`);
+    }
+    return h('div', { class: 'live-card' },
+      h('div', { class: 'row', style: 'gap:6px' },
+        h('span', { class: 'wt grow clip' }, c.title),
+        c.badge ? h('span', { class: 'tag ok' }, c.badge) : null,
+        !c.system ? h('button', { class: 'wx', style: 'position:static;width:20px;height:20px', 'aria-label': 'Chiudi ' + c.title, onclick: guard(() => act({ type: 'live_card', op: 'remove', id: c.id })) }, '×') : null),
+      body,
+      c.subtitle ? h('span', { class: 'muted small clip' }, c.subtitle) : null);
+  }));
+}
+
 function widgets(place) {
   const list = (store.state?.layout?.[place] || []).map(w => [w, widgetData(w)]).filter(([, d]) => d);
   if (!list.length) return null;
@@ -457,7 +522,7 @@ function viewChat() {
     h('div', { class: 'row' }, h('b', { class: 'grow clip' }, `⚙ Progetto: ${activeProj.title}`), h('span', { class: 'tag warn num' }, `${activeProj.stats?.pct || 0}%`)),
     h('div', { class: 'bar' }, h('i', { style: `width:${activeProj.stats?.pct || 8}%` })),
     h('span', { class: 'muted small' }, `${activeProj.stats?.done || 0}/${activeProj.stats?.total || '?'} nodi completati · tocca per dettagli`))) : null;
-  return store.chatOpen ? [orb.el, list, attachBar, composer] : [codeBanner(), projBanner, widgets('jarvis'), orb.el, caption, attachBar, composer];
+  return store.chatOpen ? [orb.el, list, attachBar, composer] : [codeBanner(), projBanner, renderLiveCards(true), widgets('jarvis'), orb.el, caption, attachBar, composer];
 }
 
 // ------------------------------------------------------------------ oggi
@@ -567,6 +632,7 @@ function viewAttivita() {
   const due = h('input', { type: 'datetime-local', 'aria-label': 'Data e ora', value: s.now, style: 'max-width:220px' });
   const goal = h('textarea', { rows: 2, placeholder: 'Es. Pianifica i pasti della settimana con lista della spesa', 'aria-label': 'Compito' });
   return [
+    (store.state?.liveCards || []).length ? h('div', { class: 'card' }, h('h2', {}, 'Attività vive in diretta'), renderLiveCards(false)) : null,
     h('div', { class: 'card' }, h('h2', {}, 'Promemoria'),
       h('div', { class: 'row wrap' }, text, due, h('button', { class: 'btn primary', onclick: guard(async () => {
         if (!text.value.trim() || !due.value) return toast('Servono testo e orario.');

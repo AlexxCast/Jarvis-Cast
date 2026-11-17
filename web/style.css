@@ -107,3 +107,9 @@ details > summary { cursor: pointer; color: var(--muted); }
 .attach-chip { display: inline-flex; align-items: center; gap: 6px; background: #000; border: 1px solid var(--primary); color: var(--primary); }
 .attach-rm { background: none; border: 0; color: var(--error); cursor: pointer; font-weight: 700; padding: 0 2px; line-height: 1; }
 .project-card { border-color: var(--line); }
+.live-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(175px, 1fr)); gap: 8px; }
+.live-cards.compact { display: flex; overflow-x: auto; padding: 2px 16px 0; flex: none; scrollbar-width: none; }
+.live-cards.compact .live-card { flex: 0 0 210px; }
+.live-card { background: #000; border: 1px solid var(--primary); border-radius: 12px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; min-width: 0; box-shadow: 0 0 12px rgba(57,255,20,.12); }
+.live-card .wt { font-size: .74rem; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); }
+.live-big { font-size: 1.35rem; color: var(--primary); letter-spacing: .04em; }
