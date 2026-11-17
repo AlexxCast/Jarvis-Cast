@@ -576,6 +576,7 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
   // 1a. Conferma salvataggio automatismo a step appena eseguito ("sì, ha funzionato" / "no")
   const skillConfirm = flows.confirmPendingSkill(db, sessionId, clean, nowMs);
   if (skillConfirm) {
+    if (!skillConfirm.saved) maybeLogLatentIssue(db, sessionId, raw, nowMs, tz);
     return {
       reply: skillConfirm.reply,
       device: [],
@@ -721,7 +722,7 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
   }
 
   // 5. Comandi verso il PC Desktop (espliciti oppure ereditati dal contesto attivo "dispositivo(pc(...))")
-  const PC_CONTINUATION_RE = /^(?:per\s+favore\s+)?(?:s[iì]\s+|ok\s+|ora\s+|adesso\s+|poi\s+|invece\s+)?(?:apri|aprire|aprilo|aprila|avvia|avviare|lancia|chiudi|chiudere|chiudilo|chiudila|termina|cerca|cercare|trova|vai\s+su|scrivi|digita|nuova\s+scheda|chiudi\s+(?:la\s+)?scheda|ricarica|aggiorna|schermo\s+intero|scorri|cambia\s+finestra|mostra\s+desktop|minimizza|alza\s+il\s+volume|abbassa\s+il\s+volume|muto|pausa|play|prossim[ao]|precedente|blocca|fallo|falla|seleziona\s+(?:il\s+)?(?:profilo|account)|usa\s+(?:il\s+|l')?(?:profilo|account))\b/i;
+  const PC_CONTINUATION_RE = /^(?:per\s+favore\s+)?(?:(?:ok|no|s[iì]|ora|adesso|poi|invece)\s+){0,2}(?:apri|aprire|aprilo|aprila|avvia|avviare|lancia|chiudi|chiudere|chiudilo|chiudila|termina|cerca|cercare|trova|vai\s+su|scrivi|digita|nuova\s+scheda|chiudi\s+(?:la\s+)?(?:scheda|pagina)|ricarica|aggiorna|schermo\s+intero|scorri|cambia\s+finestra|mostra\s+desktop|minimizza|alza\s+il\s+volume|abbassa\s+il\s+volume|muto|pausa|play|prossim[ao]|precedente|blocca|fallo|falla|seleziona\s+(?:il\s+)?(?:profilo|account)|usa\s+(?:il\s+|l')?(?:profilo|account))\b/i;
   const inheritPc = !isPcTarget(db, clean) && !PHONE_REF_RE.test(clean) && focus?.domain === 'dispositivo' && focus?.device === 'pc' && PC_CONTINUATION_RE.test(clean);
 
   if (isPcTarget(db, clean) || inheritPc) {
@@ -826,7 +827,7 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
       devices.enqueueCommand(db, 'desktop', { kind: 'hotkey', target: 'ctrl+t' }, nowMs);
       return { reply: 'Apro una nuova scheda sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
-    if (/\b(chiudi\s+(?:la\s+)?scheda|chiudi\s+tab)\b/i.test(withoutPc)) {
+    if (/\b(chiudi\s+(?:la\s+)?(?:scheda|pagina)|chiudi\s+tab)\b/i.test(withoutPc)) {
       devices.enqueueCommand(db, 'desktop', { kind: 'hotkey', target: 'ctrl+w' }, nowMs);
       return { reply: 'Chiudo la scheda corrente sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }

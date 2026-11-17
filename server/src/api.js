@@ -88,9 +88,37 @@ export async function handleApi(db, env, deps, request) {
       return json({ count: apps.length });
     }
     if (path === '/api/phone/step' && method === 'POST') return json(await phone.step(db, env, deps, await body(request)));
-    if (path === '/api/flows' && method === 'GET') return json({ flows: flows.listFlows(db) });
+    if (path === '/api/flows' && method === 'GET') return json({ flows: flows.listFlows(db), skills: flows.listSkills(db) });
     const flowDel = /^\/api\/flows\/([^/]+)$/.exec(path);
     if (flowDel && method === 'DELETE') return json({ flows: flows.deleteFlow(db, decodeURIComponent(flowDel[1])) });
+    if (path === '/api/skills/run' && method === 'POST') {
+      const b = await body(request);
+      const skill = flows.listSkills(db).find(s => s.id === b.id);
+      if (!skill) return bad('automatismo non trovato', 404);
+      const overrideText = [
+        b.account ? `con account ${b.account}` : '',
+        b.media ? `metti ${b.media}` : '',
+      ].filter(Boolean).join(' ');
+      const plan = flows.planSkillExecution(skill, overrideText);
+      const devList = [];
+      for (const st of plan.steps) {
+        if (skill.device === 'pc') {
+          devices.enqueueCommand(db, 'desktop', { kind: st.kind, target: st.target, args: st.args || '' }, ms);
+        } else if (st.kind === 'open_url') {
+          devList.push({ type: 'open_url', url: st.target });
+        } else if (st.kind === 'open_app') {
+          devList.push({ type: 'open_app', name: st.target });
+        }
+      }
+      return json({ ok: true, executed: plan.steps.length, device: devList, skill: skill.name });
+    }
+    const skillDel = /^\/api\/skills\/([^/]+)$/.exec(path);
+    if (skillDel && method === 'DELETE') {
+      const id = decodeURIComponent(skillDel[1]);
+      const next = flows.listSkills(db).filter(s => s.id !== id);
+      kvSet(db, 'modularSkills', next);
+      return json({ skills: next });
+    }
     if (path === '/api/devices' && method === 'GET') return json({ devices: devices.listDevices(db, ms), history: devices.listCommandHistory(db) });
     if (path === '/api/devices/heartbeat' && method === 'POST') return json(devices.heartbeat(db, await body(request), ms));
     if (path === '/api/devices/command' && method === 'POST') {

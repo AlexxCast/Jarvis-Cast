@@ -554,6 +554,10 @@ def execute_pc_command(cmd: dict, log_fn, cfg: dict = None) -> None:
         t = target.lower()
         if t == "lock" and os.name == "nt":
             ctypes.windll.user32.LockWorkStation()
+        elif t in ("close", "close_tab"):
+            press_hotkey("ctrl+w")
+        elif t == "close_window":
+            press_hotkey("alt+f4")
         elif t == "play_pause":
             press_media_key(0xB3)  # VK_MEDIA_PLAY_PAUSE
         elif t == "next_track":

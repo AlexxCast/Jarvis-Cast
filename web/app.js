@@ -735,6 +735,36 @@ function openDocViewer(title, html) {
   document.body.append(overlay);
 }
 
+function viewManualAutomationCard(s) {
+  const skills = s.skills || [];
+  const forcePc = guard(async (kind, target, label) => {
+    await api('POST', '/devices/command', { targetDevice: 'desktop', kind, target });
+    toast(`Forzato sul PC: ${label || target}`);
+  });
+  const accIn = h('input', { placeholder: 'Profilo/account (opz. es. Ale)', style: 'max-width:170px' });
+  const mediaIn = h('input', { placeholder: 'Titolo/ricerca (opz.)', style: 'max-width:170px' });
+  return h('div', { class: 'card' },
+    h('div', { class: 'row' }, h('h2', { class: 'grow' }, '⚡ Automatismi & Forza Esecuzione'), h('span', { class: 'tag ok num' }, String(skills.length))),
+    h('p', { class: 'muted small' }, 'Accesso manuale per forzare subito gli automatismi salvati o le azioni dirette sul PC senza passare dalla voce.'),
+    h('div', { class: 'row wrap', style: 'margin-bottom:8px' },
+      [['Chrome', 'open_app', 'chrome'], ['YouTube', 'open_url', 'https://www.youtube.com'], ['Prime Video', 'open_url', 'https://www.primevideo.com'], ['Chiudi Scheda', 'hotkey', 'ctrl+w'], ['Chiudi Chrome', 'close_app', 'chrome'], ['Play/Pausa', 'system', 'play_pause'], ['Screenshot PC', 'capture_screen', 'screen']].map(([lbl, k, t]) =>
+        h('button', { class: 'btn', onclick: () => forcePc(k, t, lbl) }, lbl))),
+    skills.length ? h('div', { class: 'row wrap', style: 'margin-bottom:6px' }, accIn, mediaIn) : null,
+    skills.length ? h('div', { class: 'list' }, skills.map(sk => h('div', { class: 'item' },
+      h('div', { class: 'grow' },
+        h('div', {}, h('b', {}, sk.name), ' ', h('span', { class: 'tag' }, sk.device)),
+        h('div', { class: 'muted small' }, (sk.steps || []).map(st => st.optional ? `[opz: ${st.param}]` : `${st.kind}:${st.target}`).join(' → '))),
+      h('button', { class: 'btn primary', onclick: guard(async () => {
+        const out = await api('POST', '/skills/run', { id: sk.id, account: accIn.value.trim(), media: mediaIn.value.trim() });
+        runDeviceActions(out.device);
+        toast(`Forzato: ${sk.name} (${out.executed} step)`);
+      }) }, '▶ Forza'),
+      h('button', { class: 'btn icon ghost danger', 'aria-label': 'Elimina automatismo', onclick: guard(async () => {
+        s.skills = (await api('DELETE', '/skills/' + encodeURIComponent(sk.id))).skills; render();
+      }) }, icon(ICONS.trash)))))
+      : h('p', { class: 'empty' }, 'Nessun automatismo modulare salvato ancora. Quando confermi "ha funzionato", apparirà qui.'));
+}
+
 function viewAttivita() {
   const s = store.state;
   const text = h('input', { placeholder: 'Cosa devo ricordarle?', 'aria-label': 'Testo del promemoria' });
@@ -742,6 +772,7 @@ function viewAttivita() {
   const goal = h('textarea', { rows: 2, placeholder: 'Es. Pianifica i pasti della settimana con lista della spesa', 'aria-label': 'Compito' });
   return [
     viewUpcomingCard(s),
+    viewManualAutomationCard(s),
     (store.state?.liveCards || []).length ? h('div', { class: 'card' }, h('h2', {}, 'Attività vive in diretta'), renderLiveCards(false)) : null,
     h('div', { class: 'card' }, h('h2', {}, 'Promemoria'),
       h('div', { class: 'row wrap' }, text, due, h('button', { class: 'btn primary', onclick: guard(async () => {

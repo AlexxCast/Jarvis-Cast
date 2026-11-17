@@ -43,3 +43,34 @@
 [2026-11-17 16:40:44] Chrome avviato (Default)
 [2026-11-17 16:44:50] Demone Jarvis Desktop avviato in background.
 [2026-11-17 16:52:58] Demone Jarvis Desktop avviato in background.
+[2026-11-17 16:53:48] Eseguo comando [open_app]: Prime Video
+[2026-11-17 16:53:48] Chrome avviato (Default): https://www.primevideo.com
+[2026-11-17 16:54:23] Eseguo comando [open_app]: Prime Video
+[2026-11-17 16:54:23] Chrome avviato (Default): https://www.primevideo.com
+[2026-11-17 16:54:23] Eseguo comando [type_text]: Alessio Cast
+[2026-11-17 16:57:17] Eseguo comando [open_chrome_profile]: Alessio cast
+[2026-11-17 16:57:17] Chrome avviato (Default)
+[2026-11-17 16:57:50] Eseguo comando [open_app]: Chrome
+[2026-11-17 16:57:50] Chrome avviato (Default)
+[2026-11-17 16:58:15] Eseguo comando [open_app]: Chrome --profile-directory="Alex Cast"
+[2026-11-17 16:58:16] App 'Chrome --profile-directory="Alex Cast"' non trovata sul PC (nessun popup aperto).
+[2026-11-17 16:58:54] Eseguo comando [open_app]: Chrome
+[2026-11-17 16:58:54] Chrome avviato (Default)
+[2026-11-17 16:59:54] Eseguo comando [open_app]: Chrome
+[2026-11-17 16:59:54] Chrome avviato (Default)
+[2026-11-17 17:02:13] Eseguo comando [open_app]: Alex Castle su Chrome
+[2026-11-17 17:02:13] App 'Alex Castle su Chrome' non trovata sul PC (nessun popup aperto).
+[2026-11-17 17:02:28] Eseguo comando [close_app]: Chrome
+[2026-11-17 17:02:29] Chiuso processo: chrome.exe
+[2026-11-17 17:02:57] Eseguo comando [close_app]: Chrome
+[2026-11-17 17:02:58] Chiuso processo: chrome.exe
+[2026-11-17 17:03:32] Eseguo comando [open_app]: Chrome
+[2026-11-17 17:03:32] Chrome avviato (Default)
+[2026-11-17 17:03:32] Eseguo comando [open_app]: Chrome
+[2026-11-17 17:03:32] Chrome avviato (Default)
+[2026-11-17 17:04:23] Eseguo comando [open_app]: Chrome
+[2026-11-17 17:04:23] Chrome avviato (Default)
+[2026-11-17 17:05:46] Eseguo comando [system]: close
+[2026-11-17 17:06:14] Eseguo comando [open_url]: https://www.youtube.com
+[2026-11-17 17:06:14] Chrome avviato (Default): https://www.youtube.com
+[2026-11-17 17:08:49] Demone Jarvis Desktop avviato in background.
