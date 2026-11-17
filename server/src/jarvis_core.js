@@ -455,7 +455,7 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}) {
 export function detectComplexProject(userText) {
   const s = String(userText || '').trim();
   if (s.length < 22) return null;
-  const m = /\b(?:avvia\s+un\s+progetto|crea\s+un\s+progetto|programma\s+(?:un\s+progetto|un'app|un'interfaccia|una\s+gui)|sviluppa\s+in\s+multi[\s-]*file|gestisci\s+nel\s+tempo|pianifica\s+in\s+pi[uù]\s+fasi|studia\s+a\s+fondo|prepara\s+un\s+piano\s+completo\s+(?:per|di|su))\s+(.{8,400})/i.exec(s);
+  const m = /\b(?:avvia\s+un\s+progetto|crea\s+un\s+progetto|progetta\s+(?:un|una|il|la)|sviluppa\s+(?:un|una|in\s+multi[\s-]*file)|costruisci\s+(?:un|una)|programma\s+(?:un\s+progetto|un'app|un'interfaccia|una\s+gui|un\s+gestionale|un\s+sito)|gestisci\s+nel\s+tempo|pianifica\s+in\s+pi[uù]\s+fasi|studia\s+a\s+fondo|prepara\s+un\s+piano\s+completo\s+(?:per|di|su))\s+(.{8,400})/i.exec(s);
   if (!m) return null;
   const goal = m[1].trim();
   return { title: goal.slice(0, 60), goal: s.slice(0, 2000) };

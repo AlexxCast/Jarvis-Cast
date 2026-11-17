@@ -10,7 +10,7 @@ import * as devices from './devices.js';
 import { pushInbox, logEvent } from './db.js';
 import { today as todayOf, nowIso as nowIsoOf, nowHuman } from './clock.js';
 
-const MAX_STEPS = 10;
+const MAX_STEPS = 14;
 
 /**
  * Comprime l'output di un nodo-agente nel suo "contratto" essenziale (firme, file creati, conclusioni)
@@ -115,12 +115,14 @@ export async function advance(db, env, deps) {
       const depsList = steps[i].dependsOn?.length
         ? steps.filter(s => s.status === 'done' && steps[i].dependsOn.includes(s.id))
         : steps.slice(0, i).filter(s => s.status === 'done').slice(-2);
+      const createdFiles = steps.slice(0, i).filter(s => s.status === 'done').flatMap(s => extractProjectFiles(s.output).map(f => f.path));
+      const manifest = createdFiles.length ? `FILE GIÀ CREATI NEL PROGETTO: ${[...new Set(createdFiles)].join(', ')}\n\n` : '';
       const prior = depsList.map((s, k) => `Nodo ${s.id || k + 1} (${s.role || 'Agente'}) — ${s.title}:\n${compactNodeContract(s.output, 900)}`).join('\n\n');
-      const isCodeGoal = /\b(programm\w*|progett\w*|multi[\s-]*file|interfaccia|gui|app|script|calcol\w*|codice|html|python|graf[io])\b/i.test(job.goal);
+      const isCodeGoal = /\b(programm\w*|progett\w*|multi[\s-]*file|interfaccia|gui|app|script|calcol\w*|codice|html|python|graf[io]|sito|gestionale|sistema)\b/i.test(job.goal);
       const codeHint = isCodeGoal ? ' Se devi scrivere file di codice o interfacce grafiche, scrivi il codice completo preceduto da "=== FILE: nomefile.ext ===" così il sistema li creerà davvero sul PC.' : '';
       const res = await call(steps[i].tier,
         `Sei il nodo-agente "${steps[i].role || 'Specialista'}" di Jarvis. Lavori con contesto chirurgico per risparmiare token: svolgi SOLO il tuo nodo in italiano, applicando logiche, calcoli o codice completo senza introduzioni.${codeHint}`,
-        `${ctx.slice(0, 2000)}\n\nCOMPITO COMPLESSIVO: ${job.goal}\n\n${prior ? 'RISULTATI DEI PASSI PRECEDENTI:\n' + prior + '\n\n' : ''}PASSO DA SVOLGERE ORA (${i + 1} di ${steps.length}) — ${steps[i].title}: ${steps[i].instruction}`, 2200);
+        `${ctx.slice(0, 2000)}\n\nCOMPITO COMPLESSIVO: ${job.goal}\n\n${manifest}${prior ? 'RISULTATI DEI PASSI PRECEDENTI:\n' + prior + '\n\n' : ''}PASSO DA SVOLGERE ORA (${i + 1} di ${steps.length}) — ${steps[i].title}: ${steps[i].instruction}`, 2400);
       steps[i].status = 'done';
       steps[i].output = res.text.trim().slice(0, 10000);
       steps[i].model = res.key;
