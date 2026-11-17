@@ -61,9 +61,60 @@ COMMON_APPS = {
     "chatgpt": "https://chatgpt.com",
     "maps": "https://maps.google.com",
     "google": "https://www.google.com",
+    "amazon": "https://www.amazon.it",
+    "wikipedia": "https://it.wikipedia.org",
+    "drive": "https://drive.google.com",
+    "docs": "https://docs.google.com",
+    "gemini": "https://gemini.google.com",
+    "facebook": "https://www.facebook.com",
+    "linkedin": "https://www.linkedin.com",
+    "reddit": "https://www.reddit.com",
+    "word": "winword",
+    "excel": "excel",
+    "powerpoint": "powerpnt",
+    "paint": "mspaint",
+    "vlc": "vlc",
     "gestione attivita": "taskmgr",
     "task manager": "taskmgr",
     "impostazioni": "ms-settings:",
+}
+
+CLOSE_EXE_MAP = {
+    "chrome": "chrome.exe",
+    "google chrome": "chrome.exe",
+    "edge": "msedge.exe",
+    "microsoft edge": "msedge.exe",
+    "firefox": "firefox.exe",
+    "vscode": "Code.exe",
+    "vs code": "Code.exe",
+    "visual studio code": "Code.exe",
+    "code": "Code.exe",
+    "spotify": "Spotify.exe",
+    "discord": "Discord.exe",
+    "telegram": "Telegram.exe",
+    "blocco note": "notepad.exe",
+    "notepad": "notepad.exe",
+    "calcolatrice": "CalculatorApp.exe",
+    "calc": "CalculatorApp.exe",
+    "vlc": "vlc.exe",
+    "word": "WINWORD.EXE",
+    "excel": "EXCEL.EXE",
+    "powerpoint": "POWERPNT.EXE",
+    "paint": "mspaint.exe",
+    "cmd": "cmd.exe",
+    "powershell": "powershell.exe",
+    "esplora file": "explorer.exe",
+    "task manager": "Taskmgr.exe",
+    "gestione attivita": "Taskmgr.exe",
+}
+
+VK_MAP = {
+    "ctrl": 0x11, "alt": 0x12, "shift": 0x10, "win": 0x5B,
+    "tab": 0x09, "enter": 0x0D, "esc": 0x1B, "space": 0x20,
+    "left": 0x25, "up": 0x26, "right": 0x27, "down": 0x28,
+    "pageup": 0x21, "pagedown": 0x22,
+    "f4": 0x73, "f5": 0x74, "f11": 0x7A,
+    "c": 0x43, "d": 0x44, "t": 0x54, "v": 0x56, "w": 0x57, "x": 0x58, "z": 0x5A,
 }
 
 
@@ -138,6 +189,86 @@ def press_media_key(vk_code: int) -> None:
             ctypes.windll.user32.keybd_event(vk_code, 0, 2, 0)
         except Exception:
             pass
+
+
+def press_hotkey(combo: str) -> None:
+    if os.name != "nt" or not combo:
+        return
+    parts = [p.strip().lower() for p in combo.split("+") if p.strip()]
+    codes = [VK_MAP[p] for p in parts if p in VK_MAP]
+    if not codes:
+        return
+    try:
+        for c in codes:
+            ctypes.windll.user32.keybd_event(c, 0, 0, 0)
+        time.sleep(0.05)
+        for c in reversed(codes):
+            ctypes.windll.user32.keybd_event(c, 0, 2, 0)
+    except Exception:
+        pass
+
+
+def close_app_target(target: str, log_fn) -> None:
+    t = (target or "").strip().lower()
+    if not t:
+        return
+    if t in ("tab", "scheda"):
+        press_hotkey("ctrl+w")
+        return
+    if t in ("window", "finestra"):
+        press_hotkey("alt+f4")
+        return
+    if os.name != "nt":
+        return
+    if t == "all":
+        for exe in ("chrome.exe", "msedge.exe", "Spotify.exe", "notepad.exe", "vlc.exe", "Code.exe"):
+            subprocess.run(["taskkill", "/IM", exe, "/F"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        log_fn("Chiuse le applicazioni principali.")
+        return
+    exe = CLOSE_EXE_MAP.get(t)
+    if exe:
+        subprocess.run(["taskkill", "/IM", exe, "/F"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        log_fn(f"Chiuso processo: {exe}")
+        return
+    # Cerca prima una finestra con titolo corrispondente (es. YouTube, Netflix) e la chiude gentilmente; altrimenti termina il processo
+    safe = t.replace('"', "").replace("'", "")
+    ps = (
+        f"$p = Get-Process | Where-Object {{ $_.MainWindowTitle -like '*{safe}*' -or $_.ProcessName -like '*{safe}*' }}; "
+        "foreach ($x in $p) { if (-not $x.CloseMainWindow()) { Stop-Process -Id $x.Id -Force -ErrorAction SilentlyContinue } }"
+    )
+    subprocess.Popen(["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+    log_fn(f"Chiusura richiesta per: {target}")
+
+
+def search_web_target(query: str, log_fn) -> None:
+    q = (query or "").strip()
+    if not q:
+        return
+    low = q.lower()
+    m_site = re.match(r"^(?:il\s+sito\s+(?:di\s+|della\s+)?|il\s+portale\s+)?([a-z0-9_-]+)$", low)
+    if m_site and m_site.group(1) in COMMON_APPS:
+        url = COMMON_APPS[m_site.group(1)]
+        if url.startswith("http"):
+            log_fn(f"Apro sito: {url}")
+            webbrowser.open(url)
+            return
+    if re.search(r"\bsu\s+amazon\b", low):
+        clean = re.sub(r"\bsu\s+amazon\b", "", q, flags=re.I).strip()
+        url = f"https://www.amazon.it/s?k={urllib.parse.quote(clean)}"
+    elif re.search(r"\bsu\s+wikipedia\b", low):
+        clean = re.sub(r"\bsu\s+wikipedia\b", "", q, flags=re.I).strip()
+        url = f"https://it.wikipedia.org/w/index.php?search={urllib.parse.quote(clean)}"
+    elif re.search(r"\bsu\s+(?:google\s+)?maps\b", low):
+        clean = re.sub(r"\bsu\s+(?:google\s+)?maps\b", "", q, flags=re.I).strip()
+        url = f"https://www.google.com/maps/search/{urllib.parse.quote(clean)}"
+    elif re.search(r"\bsu\s+github\b", low):
+        clean = re.sub(r"\bsu\s+github\b", "", q, flags=re.I).strip()
+        url = f"https://github.com/search?q={urllib.parse.quote(clean)}"
+    else:
+        clean = re.sub(r"\bsu\s+(?:google|internet|web|bing)\b", "", q, flags=re.I).strip()
+        url = f"https://www.google.com/search?q={urllib.parse.quote(clean)}"
+    log_fn(f"Ricerca web: {url}")
+    webbrowser.open(url)
 
 
 def play_youtube_first_video(query: str, log_fn) -> None:
@@ -304,12 +435,51 @@ def execute_pc_command(cmd: dict, log_fn, cfg: dict = None) -> None:
         webbrowser.open(url)
         return
 
+    if kind == "search_web" and target:
+        search_web_target(target, log_fn)
+        return
+
+    if kind == "close_app" and target:
+        close_app_target(target, log_fn)
+        return
+
+    if kind == "search_files" and target and os.name == "nt":
+        q = urllib.parse.quote(target)
+        os.startfile(f"search-ms:displayname=Ricerca%20{q}&crumb=System.Generic.String%3A{q}")
+        return
+
+    if kind == "type_text" and target and os.name == "nt":
+        try:
+            subprocess.run(["clip"], input=target.encode("utf-16le"), check=False)
+            time.sleep(0.08)
+            press_hotkey("ctrl+v")
+        except Exception as e:
+            log_fn(f"Errore scrittura testo: {e}")
+        return
+
+    if kind == "hotkey" and target:
+        press_hotkey(target)
+        return
+
+    if kind == "shell" and target:
+        try:
+            subprocess.Popen(target, shell=True)
+        except Exception as e:
+            log_fn(f"Errore comando shell: {e}")
+        return
+
     if kind == "system":
         t = target.lower()
         if t == "lock" and os.name == "nt":
             ctypes.windll.user32.LockWorkStation()
         elif t == "play_pause":
             press_media_key(0xB3)  # VK_MEDIA_PLAY_PAUSE
+        elif t == "next_track":
+            press_media_key(0xB0)  # VK_MEDIA_NEXT_TRACK
+        elif t == "prev_track":
+            press_media_key(0xB1)  # VK_MEDIA_PREV_TRACK
+        elif t == "media_stop":
+            press_media_key(0xB2)  # VK_MEDIA_STOP
         elif t == "vol_up":
             for _ in range(3):
                 press_media_key(0xAF)  # VK_VOLUME_UP
@@ -318,6 +488,12 @@ def execute_pc_command(cmd: dict, log_fn, cfg: dict = None) -> None:
                 press_media_key(0xAE)  # VK_VOLUME_DOWN
         elif t == "mute":
             press_media_key(0xAD)  # VK_VOLUME_MUTE
+        elif t == "shutdown" and os.name == "nt":
+            subprocess.Popen(["shutdown", "/s", "/t", "10"], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        elif t == "restart" and os.name == "nt":
+            subprocess.Popen(["shutdown", "/r", "/t", "10"], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
+        elif t == "sleep" and os.name == "nt":
+            subprocess.Popen(["rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0"], creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
         return
 
     if kind == "notify" and target:
@@ -489,6 +665,7 @@ class JarvisDesktopApp:
                     "kind": "desktop",
                     "name": pc_name,
                     "platform": plat,
+                    "poll": not is_bg_running(),
                     "metrics": get_pc_metrics(),
                     "apps": ["Chrome", "Edge", "VS Code", "Esplora File", "PowerShell", "Blocco Note", "Calcolatrice", "Spotify"],
                 },
@@ -546,6 +723,7 @@ class JarvisDesktopApp:
                             "kind": "desktop",
                             "name": pc_name,
                             "platform": plat,
+                            "poll": not is_bg_running(),
                             "metrics": metrics,
                             "apps": apps,
                         },
@@ -555,8 +733,7 @@ class JarvisDesktopApp:
                         self.root.after(0, lambda: self.status_lbl.configure(text="● CONNESSO A JARVIS CLOUD", fg="#39ff14"))
                         self.log("PC registrato e connesso al sistema multi-dispositivo di Jarvis.")
                     for cmd in res.get("commands") or []:
-                        if not is_bg_running():
-                            execute_pc_command(cmd, self.log, self.cfg)
+                        execute_pc_command(cmd, self.log, self.cfg)
                 except Exception:
                     if self.online:
                         self.online = False
@@ -620,6 +797,7 @@ def run_background_daemon() -> None:
     plat = f"{platform.system()} {platform.release()}"
     apps = ["Chrome", "Edge", "VS Code", "Esplora File", "PowerShell", "Blocco Note", "Calcolatrice", "Spotify"]
 
+    last_err = ""
     while True:
         cfg = load_config()
         if cfg.get("server_url") and cfg.get("server_token"):
@@ -633,14 +811,19 @@ def run_background_daemon() -> None:
                         "kind": "desktop",
                         "name": pc_name,
                         "platform": plat,
+                        "poll": True,
                         "metrics": get_pc_metrics(),
                         "apps": apps,
                     },
                 )
+                last_err = ""
                 for cmd in res.get("commands") or []:
                     execute_pc_command(cmd, bg_log, cfg)
-            except Exception:
-                pass
+            except Exception as e:
+                err_s = str(e)
+                if err_s != last_err:
+                    last_err = err_s
+                    bg_log(f"Errore heartbeat: {err_s}")
         time.sleep(2)
 
 

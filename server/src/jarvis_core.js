@@ -17,6 +17,7 @@ import { nowIso as nowIsoOf } from './clock.js';
 const BASE_PC_RE = /\b(pc|computer|desktop|portatile|windows|gh?ideon|antigravit\w*)\b/i;
 const DIAGNOSTIC_RE = /\b(diagnostic\w*|stato\s+del\s+(?:pc|computer|sistema|gh?ideon|jarvis)|dispositiv[io]\s+conness\w*|come\s+sta\s+il\s+(?:pc|sistema)|quanta\s+ram|cpu\s+del\s+pc|controllo\s+sistema|report\s+sistema)\b/i;
 const PC_SCREEN_RE = /\b(mostra(?:mi)?\s+lo\s+schermo|fa(?:mmi|i)\s+vedere\s+lo\s+schermo|screenshot\s+(?:del\s+)?(?:pc|computer|gh?ideon)|schermo\s+del\s+(?:pc|computer|gh?ideon)|cosa\s+c'[eè]\s+sullo\s+schermo)\b/i;
+const LIVE_CALL_RE = /\b(video\s*chiamat\w*|video\s*call|modalit[aà]\s+live|live\s+vision|in\s+diretta|dal\s+vivo|ti\s+devo\s+far\s+vedere|devo\s+farti\s+vedere|guarda\s+con\s+la\s+(?:tele)?camera)\b/i;
 const ANTIGRAVITY_RE = /\b(?:antigravit\w*|anti\s+gravit\w*)\b/i;
 const TIMED_ACTION_RE = /^\W*(?:ehi\s+|ciao\s+|ok\s+)?(?:jarvis\s+)?tra\s+(\d{1,3})\s*(second\w*|minut\w*|or[ae])\s+(.{2,240})$/i;
 const TIMER_RE = /^\W*(?:ehi\s+|ciao\s+|ok\s+)?(?:jarvis\s+)?(?:metti|imposta|avvia|fai\s+partire|crea)\s+(?:un\s+)?(timer|conto\s+alla\s+rovescia|cronometro)\s*(?:di|da)?\s*(?:(\d{1,3})\s*(second\w*|minut\w*|or[ae]))?(?:\s+(?:per|di|chiamato)\s+(.{2,100}))?\W*$/i;
@@ -34,6 +35,15 @@ const WEB_SERVICES = {
   chatgpt: 'https://chatgpt.com',
   maps: 'https://maps.google.com',
   google: 'https://www.google.com',
+  amazon: 'https://www.amazon.it',
+  wikipedia: 'https://it.wikipedia.org',
+  spotify: 'https://open.spotify.com',
+  drive: 'https://drive.google.com',
+  docs: 'https://docs.google.com',
+  gemini: 'https://gemini.google.com',
+  facebook: 'https://www.facebook.com',
+  linkedin: 'https://www.linkedin.com',
+  reddit: 'https://www.reddit.com',
 };
 
 const LIVE_CARDS_KEY = 'liveCards';
@@ -498,6 +508,17 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}) {
     return dispatchPcScreenView(db, nowMs);
   }
 
+  // 3b. Modalità Video Call / Live Vision ("attiva videochiamata", "ti devo far vedere una cosa dal vivo")
+  if (LIVE_CALL_RE.test(clean) && !isPcTarget(db, clean)) {
+    return {
+      reply: 'Attivo subito la videochiamata live, signore. Mi inquadri pure cosa vuole mostrarmi.',
+      device: [{ type: 'start_live_call' }],
+      actions: ['live_call'],
+      touched: ['automazioni'],
+      touchedLeaves: [],
+    };
+  }
+
   // 4. Task autonomo su Antigravity ("fai partire un task a Antigravity sul progetto X")
   if (ANTIGRAVITY_RE.test(clean)) {
     return dispatchAntigravityTask(db, clean, nowMs);
@@ -521,10 +542,34 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}) {
       }
     }
 
-    // Controlli di sistema sul PC (volume, pausa, blocco schermo)
+    // Controlli completi di sistema, media e browser sul PC
     if (/\b(blocca|lock)\b/i.test(clean)) {
       const cmd = devices.enqueueCommand(db, 'desktop', { kind: 'system', target: 'lock', say: 'Blocco lo schermo del PC.' }, nowMs);
       return { reply: 'Blocco subito lo schermo del PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: ['f:' + cmd.id] };
+    }
+    if (/\b(sospendi|metti\s+in\s+standby|sleep)\b/i.test(withoutPc)) {
+      devices.enqueueCommand(db, 'desktop', { kind: 'system', target: 'sleep' }, nowMs);
+      return { reply: 'Metto il PC in sospensione, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+    }
+    if (/\b(riavvia|reboot)\b/i.test(withoutPc)) {
+      devices.enqueueCommand(db, 'desktop', { kind: 'system', target: 'restart' }, nowMs);
+      return { reply: 'Riavvio il PC tra 10 secondi, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+    }
+    if (/\b(spegni\s+il|spegni|shutdown)\b/i.test(withoutPc) && !/\b(monitor|schermo|app|programma)\b/i.test(withoutPc)) {
+      devices.enqueueCommand(db, 'desktop', { kind: 'system', target: 'shutdown' }, nowMs);
+      return { reply: 'Spengo il PC tra 10 secondi, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+    }
+    if (/\b(muto|togli\s+l'audio|togli\s+audio|riattiva\s+audio|smuta)\b/i.test(withoutPc)) {
+      devices.enqueueCommand(db, 'desktop', { kind: 'system', target: 'mute' }, nowMs);
+      return { reply: 'Attivo/disattivo il muto sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+    }
+    if (/\b(prossim[ao]\s+(?:video|brano|canzone|traccia)|avanti\s+canzone|salta\s+canzone)\b/i.test(withoutPc)) {
+      devices.enqueueCommand(db, 'desktop', { kind: 'system', target: 'next_track' }, nowMs);
+      return { reply: 'Passo alla traccia successiva sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+    }
+    if (/\b(precedente\s+(?:video|brano|canzone|traccia)|torna\s+alla\s+canzone\s+prima)\b/i.test(withoutPc)) {
+      devices.enqueueCommand(db, 'desktop', { kind: 'system', target: 'prev_track' }, nowMs);
+      return { reply: 'Torno alla traccia precedente sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
     if (/\b(pausa|play|ferma\s+la\s+musica|riprendi\s+la\s+musica)\b/i.test(clean) && !/\b(video|film|youtube|canzone)\b/i.test(clean)) {
       const cmd = devices.enqueueCommand(db, 'desktop', { kind: 'system', target: 'play_pause', say: 'Play/Pausa sul PC.' }, nowMs);
@@ -539,30 +584,111 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}) {
       return { reply: 'Abbasso il volume sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
 
+    // Scorciatoie browser e finestre sul PC
+    if (/\b(nuova\s+scheda|apri\s+una\s+scheda)\b/i.test(withoutPc)) {
+      devices.enqueueCommand(db, 'desktop', { kind: 'hotkey', target: 'ctrl+t' }, nowMs);
+      return { reply: 'Apro una nuova scheda sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+    }
+    if (/\b(chiudi\s+(?:la\s+)?scheda|chiudi\s+tab)\b/i.test(withoutPc)) {
+      devices.enqueueCommand(db, 'desktop', { kind: 'hotkey', target: 'ctrl+w' }, nowMs);
+      return { reply: 'Chiudo la scheda corrente sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+    }
+    if (/\b(ricarica|aggiorna\s+(?:la\s+)?pagina)\b/i.test(withoutPc)) {
+      devices.enqueueCommand(db, 'desktop', { kind: 'hotkey', target: 'f5' }, nowMs);
+      return { reply: 'Aggiorno la pagina sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+    }
+    if (/\b(torna\s+indietro|pagina\s+indietro)\b/i.test(withoutPc)) {
+      devices.enqueueCommand(db, 'desktop', { kind: 'hotkey', target: 'alt+left' }, nowMs);
+      return { reply: 'Torno alla pagina precedente sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+    }
+    if (/\b(schermo\s+intero|fullscreen)\b/i.test(withoutPc)) {
+      devices.enqueueCommand(db, 'desktop', { kind: 'hotkey', target: 'f11' }, nowMs);
+      return { reply: 'Attivo/disattivo lo schermo intero sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+    }
+    if (/\b(scorri\s+gi[uù]|scendi)\b/i.test(withoutPc)) {
+      devices.enqueueCommand(db, 'desktop', { kind: 'hotkey', target: 'pagedown' }, nowMs);
+      return { reply: 'Scorro verso il basso sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+    }
+    if (/\b(scorri\s+su|sali)\b/i.test(withoutPc)) {
+      devices.enqueueCommand(db, 'desktop', { kind: 'hotkey', target: 'pageup' }, nowMs);
+      return { reply: 'Scorro verso l\'alto sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+    }
+    if (/\b(cambia\s+finestra|alt\s+tab)\b/i.test(withoutPc)) {
+      devices.enqueueCommand(db, 'desktop', { kind: 'hotkey', target: 'alt+tab' }, nowMs);
+      return { reply: 'Cambio finestra attiva sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+    }
+    if (/\b(mostra\s+(?:il\s+)?desktop|minimizza\s+tutto|riduci\s+tutto)\b/i.test(withoutPc)) {
+      devices.enqueueCommand(db, 'desktop', { kind: 'hotkey', target: 'win+d' }, nowMs);
+      return { reply: 'Mostro il desktop sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+    }
+
+    // Chiusura programmi / app / siti / finestre sul PC ("chiudi chrome sul pc", "chiudi youtube", "chiudi tutto")
+    const closeMatch = /^(?:per\s+favore\s+)?(?:mi\s+)?(?:chiudi|chiudere|termina|terminare|ferma|fermare|uccidi)\s+(?:il\s+|la\s+|l'|lo\s+)?(?:programma\s+|app\s+|sito\s+|finestra\s+(?:di\s+)?)?(.+)$/i.exec(withoutPc);
+    if (closeMatch) {
+      const target = closeMatch[1].replace(/[.!?]+$/, '').trim();
+      const norm = /^(?:questa\s+finestra|finestra|la\s+finestra)$/i.test(target) ? 'window'
+        : /^(?:tutto|tutte\s+le\s+app|tutti\s+i\s+programmi)$/i.test(target) ? 'all'
+        : target;
+      devices.enqueueCommand(db, 'desktop', { kind: 'close_app', target: norm }, nowMs);
+      return { reply: `Chiudo ${target} sul PC, signore.`, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+    }
+
+    // Scrittura / incolla testo sul PC ("scrivi ciao a tutti sul pc")
+    const typeMatch = /^(?:per\s+favore\s+)?(?:scrivi|digita|incolla)\s+(.+)$/i.exec(withoutPc);
+    if (typeMatch) {
+      const txt = typeMatch[1].trim();
+      devices.enqueueCommand(db, 'desktop', { kind: 'type_text', target: txt }, nowMs);
+      return { reply: `Scrivo sul PC: "${txt.slice(0, 60)}", signore.`, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+    }
+
+    // Ricerca file o cartelle locali sul PC ("cerca file preventivo sul pc")
+    const fileMatch = /^(?:per\s+favore\s+)?(?:cerca|trova)\s+(?:il\s+|un\s+|la\s+)?(?:file|documento|cartella)\s+(.+)$/i.exec(withoutPc);
+    if (fileMatch) {
+      const q = fileMatch[1].replace(/[.!?]+$/, '').trim();
+      devices.enqueueCommand(db, 'desktop', { kind: 'search_files', target: q }, nowMs);
+      return { reply: `Cerco "${q}" tra i file del PC, signore.`, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+    }
+
+    // Esecuzione comando shell esplicito sul PC ("esegui comando dir sul pc")
+    const shellMatch = /^(?:esegui\s+comando|lancia\s+comando|terminale)\s+(.+)$/i.exec(withoutPc);
+    if (shellMatch) {
+      devices.enqueueCommand(db, 'desktop', { kind: 'shell', target: shellMatch[1].trim() }, nowMs);
+      return { reply: `Eseguo il comando sul PC, signore.`, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+    }
+
     // Far partire un video, un film o una canzone su YouTube sul PC (anche "apri youtube e fai partire un video sul pc")
     if (/\b(fai\s+partire|fammi\s+partire|metti(?:mi)?|riproduci|cerca|ascolta|avvia)\b/i.test(withoutPc) && /\b(youtube|video|film|musica|canzon\w*|brano)\b/i.test(withoutPc)) {
       return dispatchPcPlayYoutube(db, withoutPc, nowMs);
     }
 
-    // Apertura URL sul PC
+    // Apertura URL o ricerca sito/web sul PC ("cerca il sito amazon", "cerca meteo roma su google", "vai su wikipedia")
     const urlMatch = /\b((?:https?:\/\/)?[a-z0-9-]+(?:\.[a-z0-9-]+)+(?:\/\S*)?)\b/i.exec(withoutPc);
-    if (urlMatch && /\b(apri|vai\s+su|visita)\b/i.test(withoutPc)) {
+    if (urlMatch && /\b(apri|aprire|vai\s+su|visita|cerca|cercare)\b/i.test(withoutPc)) {
       const url = /^https?:\/\//i.test(urlMatch[1]) ? urlMatch[1] : 'https://' + urlMatch[1];
       devices.enqueueCommand(db, 'desktop', { kind: 'open_url', target: url }, nowMs);
       return { reply: `Apro ${urlMatch[1]} sul PC, signore.`, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
 
     // Apertura programma/app/sito sul PC ("apri YouTube su Ghideon", "aprire YouTube sul computer", "avvia VS Code sul computer")
-    const openMatch = /^(?:per\s+favore\s+)?(?:mi\s+)?(?:apri|aprire|avvia|avviare|lancia|lanciare|esegui|eseguire)\s+(?:il\s+|la\s+|l'|lo\s+)?(?:programma\s+|app\s+|sito\s+)?(.+)$/i.exec(withoutPc);
+    const openMatch = /^(?:per\s+favore\s+)?(?:mi\s+)?(?:apri|aprire|avvia|avviare|lancia|lanciare|esegui|eseguire|vai\s+su)\s+(?:il\s+|la\s+|l'|lo\s+)?(?:programma\s+|app\s+|sito\s+(?:di\s+|della\s+)?)?(.+)$/i.exec(withoutPc);
     if (openMatch) {
       const res = dispatchPcOpen(db, openMatch[1], nowMs);
       if (res) return res;
     }
 
-    // Qualsiasi altra ricerca sul PC
-    const searchMatch = /^(?:cerca|metti|riproduci|ascolta|fai\s+partire|fammi\s+partire)\s+(.+)$/i.exec(withoutPc);
+    // Qualsiasi altra ricerca web o sito sul PC ("cerca <query> su google", "cerca il sito <nome>", "cerca <query>")
+    const searchMatch = /^(?:per\s+favore\s+)?(?:cerca|cercare|trova|trovare|metti|riproduci|ascolta|fai\s+partire|fammi\s+partire)\s+(.+)$/i.exec(withoutPc);
     if (searchMatch) {
-      return dispatchPcPlayYoutube(db, searchMatch[1], nowMs);
+      const q = searchMatch[1].replace(/[.!?]+$/, '').trim();
+      const siteOnly = /^(?:il\s+sito\s+(?:di\s+|della\s+)?|il\s+portale\s+)?([a-z0-9_-]+)$/i.exec(q);
+      if (siteOnly && WEB_SERVICES[siteOnly[1].toLowerCase()]) {
+        return dispatchPcOpen(db, siteOnly[1], nowMs);
+      }
+      if (/^(?:metti|riproduci|ascolta|fai\s+partire|fammi\s+partire)\b/i.test(withoutPc)) {
+        return dispatchPcPlayYoutube(db, q, nowMs);
+      }
+      devices.enqueueCommand(db, 'desktop', { kind: 'search_web', target: q }, nowMs);
+      return { reply: `Cerco "${q}" sul PC, signore.`, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
   }
 

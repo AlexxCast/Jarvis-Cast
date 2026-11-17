@@ -112,6 +112,8 @@ function runDeviceActions(list) {
     else if (a.type === 'phone_task') {
       if (!native) { toast('Per usare il telefono serve l\'app Android di Jarvis.'); continue; }
       if (nativeCall('runPhoneTask', a.goal) === 'spento') toast('Attivi "Jarvis: usa il telefono" in Accessibilità (sezione Altro).');
+    } else if (a.type === 'start_live_call') {
+      openLiveCall();
     }
   }
 }
@@ -172,6 +174,7 @@ const ICONS = {
   gallery: 'M4 5h16v14H4z|M4 15l4-4 4 4 3-3 5 5|M15 9.5a1 1 0 1 0 0-.01',
   file: 'M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48',
   send: 'M5 12h14|M13 6l6 6-6 6', photo: 'M4 8h3l2-3h6l2 3h3v11H4z|M12 10a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z', mic: 'M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z|M5 11a7 7 0 0 0 14 0|M12 18v3', trash: 'M4 7h16|M9 7V4h6v3|M6 7l1 13h10l1-13',
+  video: 'M3 7a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z|M16 10l5-3v10l-5-3z',
 };
 const fmt = (n) => Math.round(Number(n) || 0).toLocaleString('it-IT');
 const dateLabel = (iso) => { const d = new Date(iso + 'T12:00:00'); return d.toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' }); };
@@ -563,6 +566,7 @@ function viewChat() {
     store.pendingImage ? h('img', { class: 'thumb', alt: 'Foto allegata', src: 'data:image/jpeg;base64,' + store.pendingImage, onclick: () => { store.pendingImage = null; render(); } }) : null,
     h('button', { class: 'btn icon', title: 'Allega file', 'aria-label': 'Allega file', onclick: () => pickFile() }, icon(ICONS.file)),
     h('button', { class: 'btn icon', 'aria-label': native ? 'Scatta una foto' : 'Allega una foto', onclick: () => pickPhoto(!!native) }, icon(ICONS.photo)),
+    h('button', { class: 'btn icon', title: 'Video Call Live con Jarvis', 'aria-label': 'Video Call Live', onclick: () => openLiveCall() }, icon(ICONS.video)),
     native ? h('button', { class: 'btn icon', 'aria-label': 'Scegli dalla galleria', onclick: () => pickPhoto(false) }, icon(ICONS.gallery)) : null,
     native ? h('button', { class: 'btn icon', 'aria-label': 'Parla ora', onclick: () => nativeCall('listenNow') }, icon(ICONS.mic)) : null,
     h('button', { class: 'btn icon' + (store.chatOpen ? ' on' : ''), 'aria-label': store.chatOpen ? 'Chiudi la chat' : 'Apri la chat', 'aria-pressed': store.chatOpen ? 'true' : 'false', onclick: () => { store.chatOpen = !store.chatOpen; render(); if (store.chatOpen) scrollChat(); } }, icon(ICONS.chat)),
@@ -1024,6 +1028,175 @@ function render() {
   if (keep) { const ta = document.querySelector('.composer textarea'); if (ta) ta.value = keep; }
   if (scroll) { const m = document.querySelector('main'); if (m) m.scrollTop = scroll; }
   updateOrb(); orb.sync();
+}
+
+// ------------------------------------------------------------------ Video Call Live (Visione dal vivo)
+
+function openLiveCall() {
+  if (document.getElementById('live-call-modal')) return;
+  if (!navigator.mediaDevices?.getUserMedia) {
+    toast('La fotocamera live non è supportata su questo dispositivo/browser.');
+    return;
+  }
+
+  let facing = 'environment';
+  let stream = null;
+  let closed = false;
+  let busy = false;
+  let speaking = false;
+  let autoMode = false;
+  let autoTimer = null;
+  let recog = null;
+
+  const video = h('video', { autoplay: true, playsinline: true, muted: true, class: 'live-video' });
+  const statusEl = h('span', { class: 'live-pill' }, '● AVVIO CAMERA…');
+  const subEl = h('div', { class: 'live-sub' }, 'Inquadra ciò che vuoi mostrarmi e parla pure, oppure tocca "Guarda ora".');
+  const autoBtn = h('button', { class: 'btn', onclick: toggleAuto }, 'Auto-osserva: OFF');
+
+  const overlay = h('div', { id: 'live-call-modal', class: 'live-overlay' },
+    h('div', { class: 'live-top' },
+      h('b', { style: 'color:#39ff14' }, '◉ JARVIS LIVE CALL'),
+      statusEl,
+      h('button', { class: 'btn', onclick: switchCam }, '🔄 Camera')),
+    h('div', { class: 'live-stage' }, video, subEl),
+    h('div', { class: 'live-controls' },
+      h('button', { class: 'btn primary', onclick: () => askLive('Guarda cosa ti sto mostrando dal vivo e rispondimi in modo diretto e conciso.') }, '👁️ Guarda ora'),
+      autoBtn,
+      h('button', { class: 'btn danger', onclick: closeCall }, '✕ Chiudi Call')));
+  document.body.append(overlay);
+
+  async function startCamera() {
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: facing, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
+      video.srcObject = stream;
+      statusEl.textContent = recog ? '● IN ASCOLTO LIVE' : '● LIVE PRONTO';
+    } catch (e) {
+      statusEl.textContent = '○ CAMERA NON DISPONIBILE';
+      subEl.textContent = 'Permesso fotocamera negato o non disponibile (' + (e.message || 'errore') + ').';
+    }
+  }
+
+  function switchCam() {
+    facing = facing === 'environment' ? 'user' : 'environment';
+    startCamera();
+  }
+
+  function captureFrameB64() {
+    if (!video.videoWidth || !video.videoHeight) return null;
+    const scale = Math.min(1, 800 / Math.max(video.videoWidth, video.videoHeight));
+    const c = document.createElement('canvas');
+    c.width = Math.round(video.videoWidth * scale);
+    c.height = Math.round(video.videoHeight * scale);
+    c.getContext('2d').drawImage(video, 0, 0, c.width, c.height);
+    return c.toDataURL('image/jpeg', 0.78).split(',')[1];
+  }
+
+  function speakLive(text) {
+    const clean = String(text || '').trim();
+    if (!clean || closed) return;
+    speaking = true;
+    statusEl.textContent = '◉ JARVIS PARLA';
+    const doneSpeak = () => {
+      speaking = false;
+      if (!closed) statusEl.textContent = recog ? '● IN ASCOLTO LIVE' : '● LIVE PRONTO';
+    };
+    if (native) {
+      nativeCall('speak', clean);
+      setTimeout(doneSpeak, Math.min(14000, 1200 + clean.length * 60));
+    } else if (window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(clean);
+      u.lang = 'it-IT';
+      u.onend = doneSpeak;
+      u.onerror = doneSpeak;
+      window.speechSynthesis.speak(u);
+    } else {
+      doneSpeak();
+    }
+  }
+
+  async function askLive(promptText) {
+    if (closed || busy) return;
+    const image = captureFrameB64();
+    if (!image) return;
+    busy = true;
+    statusEl.textContent = '◌ ANALIZZO LIVE…';
+    subEl.textContent = `Tu: ${promptText}`;
+    try {
+      const out = await api('POST', '/chat', {
+        text: `[MODALITÀ VIDEO CALL LIVE] Rispondi breve e naturale (max 2-3 frasi, tono da conversazione dal vivo). Richiesta: ${promptText}`,
+        image,
+      });
+      if (closed) return;
+      const reply = out.reply || 'Ho visto, signore.';
+      subEl.textContent = reply;
+      store.messages.push({ role: 'user', text: `📹 [Live] ${promptText}`, image: true });
+      store.messages.push({ role: 'assistant', text: reply, model: out.model });
+      speakLive(reply);
+    } catch (e) {
+      if (!closed) subEl.textContent = 'Errore analisi live: ' + e.message;
+    } finally {
+      busy = false;
+      if (!closed && !speaking) statusEl.textContent = recog ? '● IN ASCOLTO LIVE' : '● LIVE PRONTO';
+    }
+  }
+
+  function toggleAuto() {
+    autoMode = !autoMode;
+    autoBtn.textContent = autoMode ? 'Auto-osserva: ON' : 'Auto-osserva: OFF';
+    autoBtn.classList.toggle('primary', autoMode);
+    clearInterval(autoTimer);
+    if (autoMode) {
+      autoTimer = setInterval(() => {
+        if (!closed && !busy && !speaking) {
+          askLive('Osserva la scena attuale e dimmi brevemente cosa vedi o se c\'è qualcosa di nuovo.');
+        }
+      }, 6500);
+    }
+  }
+
+  function startVoiceLoop() {
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) return;
+    try {
+      recog = new SR();
+      recog.lang = 'it-IT';
+      recog.continuous = true;
+      recog.interimResults = true;
+      recog.onresult = (ev) => {
+        if (closed || speaking) return;
+        const last = ev.results[ev.results.length - 1];
+        const transcript = (last[0]?.transcript || '').trim();
+        if (!transcript) return;
+        subEl.textContent = `🎤 ${transcript}`;
+        if (last.isFinal && transcript.length >= 2) {
+          if (/^(chiudi|esci|termina|stop)\s+(?:la\s+)?(?:video\s*)?call/i.test(transcript)) {
+            closeCall();
+            return;
+          }
+          askLive(transcript);
+        }
+      };
+      recog.onend = () => { if (!closed) { try { recog.start(); } catch {} } };
+      recog.onerror = () => {};
+      recog.start();
+    } catch { recog = null; }
+  }
+
+  function closeCall() {
+    if (closed) return;
+    closed = true;
+    clearInterval(autoTimer);
+    try { recog?.stop(); } catch {}
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    if (window.speechSynthesis) try { window.speechSynthesis.cancel(); } catch {}
+    overlay.remove();
+    render();
+  }
+
+  startCamera();
+  startVoiceLoop();
 }
 
 boot();

@@ -48,11 +48,14 @@ export function heartbeat(db, payload = {}, nowMs = Date.now()) {
   const updated = [record, ...list.filter(d => d.id !== record.id)].slice(0, 12);
   kvSet(db, DEVICES_KEY, updated);
 
-  // Consegna e svuota i comandi in coda per questo dispositivo (per id o per kind).
+  // Consegna e svuota i comandi in coda per questo dispositivo (solo se poll !== false, così la GUI non li ruba al demone).
+  const shouldPoll = payload.poll !== false;
   const queue = kvGet(db, QUEUE_KEY, []);
-  const mine = queue.filter(c => c.targetDevice === record.id || c.targetDevice === kind);
-  const rest = queue.filter(c => !(c.targetDevice === record.id || c.targetDevice === kind));
-  if (mine.length) kvSet(db, QUEUE_KEY, rest);
+  const mine = shouldPoll ? queue.filter(c => c.targetDevice === record.id || c.targetDevice === kind) : [];
+  if (mine.length) {
+    const rest = queue.filter(c => !(c.targetDevice === record.id || c.targetDevice === kind));
+    kvSet(db, QUEUE_KEY, rest);
+  }
 
   return { device: { ...record, online: true }, commands: mine };
 }
@@ -95,5 +98,5 @@ export function devicesPrompt(db, nowMs = Date.now()) {
     const apps = (d.apps || []).length ? ` · App PC: ${d.apps.slice(0, 20).join(', ')}` : '';
     return `- ${d.name} (${d.kind}, ${st}${metr ? ' · ' + metr : ''})${apps}`;
   });
-  return 'DISPOSITIVI GESTITI DA JARVIS (puoi controllarli con l\'azione pc_action {kind: "open_app"|"open_url"|"system"|"notify"|"shell", target: "..."}):\n' + lines.join('\n');
+  return 'DISPOSITIVI GESTITI DA JARVIS (puoi controllarli con l\'azione pc_action {kind: "open_app"|"open_url"|"close_app"|"search_web"|"play_youtube"|"search_files"|"type_text"|"hotkey"|"system"|"capture_screen"|"notify"|"shell", target: "...", args?: "..."}):\n' + lines.join('\n');
 }
