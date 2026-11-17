@@ -308,3 +308,8 @@ Jarvis diceva "ho aggiornato il piano" o "chiamo Marcolino" senza farlo.
 - **Mai credenziali nel repo.**
 - **Branch e PR**, test verdi, poi unione.
 - **Se due assistenti lavorano insieme** (es. Antigravity e Claude), ognuno usa il suo branch e si parte sempre da `main` aggiornato.
+
+## Puntatore di Contesto Attivo (`focusContext`, v2.22)
+- Per mantenere coerenza tra turni senza appesantire il prompt con lunga cronologia, ogni sessione mantiene un puntatore gerarchico leggero (`focus:<sessionId>`, es. `dispositivo(pc(chrome · profilo: Persona 1 · apri))`, `dieta(...)`, `progetti(...)`).
+- `jarvis_core.js` eredita automaticamente il dispositivo attivo (es. se siamo sul PC, `"apri youtube"` / `"chiudilo"` vanno sul PC senza ripeterlo) e permette il cambio immediato sullo stesso oggetto (`"ora fai la stessa cosa sul telefono"` → `dispositivo(telefono(youtube · apri))`).
+- `brain.js` inietta una sola riga `CONTESTO ATTIVO (grafo): ...` nei prompt dei modelli LLM e aggiorna il puntatore a ogni azione eseguita.

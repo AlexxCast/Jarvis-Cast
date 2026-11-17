@@ -48,6 +48,40 @@ const WEB_SERVICES = {
 
 const LIVE_CARDS_KEY = 'liveCards';
 const LIVE_KINDS = new Set(['countdown', 'stopwatch', 'progress', 'counter', 'metric', 'checklist']);
+const FOCUS_TTL_MS = 15 * 60_000;
+
+/** Legge il puntatore gerarchico di contesto attivo per la sessione (es. dispositivo(pc(chrome · apri))). */
+export function getFocus(db, sessionId = 'main', nowMs = Date.now()) {
+  const f = kvGet(db, `focus:${sessionId}`, null);
+  if (!f || (nowMs - Number(f.updatedAt || 0)) > FOCUS_TTL_MS) return null;
+  return f;
+}
+
+/** Aggiorna la "sotto-cartella" di contesto attivo senza appesantire la memoria o la cronologia. */
+export function setFocus(db, sessionId = 'main', patch = {}, nowMs = Date.now()) {
+  const prev = getFocus(db, sessionId, nowMs) || {};
+  const next = {
+    domain: patch.domain || prev.domain || 'generale',
+    device: patch.device !== undefined ? patch.device : (prev.device || null),
+    target: patch.target !== undefined ? String(patch.target || '').slice(0, 60) : (prev.target || ''),
+    action: patch.action !== undefined ? String(patch.action || '').slice(0, 30) : (prev.action || ''),
+    profile: patch.profile !== undefined ? String(patch.profile || '').slice(0, 40) : (prev.profile || ''),
+    updatedAt: nowMs,
+  };
+  const inner = [next.target, next.profile ? `profilo: ${next.profile}` : '', next.action].filter(Boolean).join(' · ');
+  next.path = next.device
+    ? `${next.domain}(${next.device}(${inner || 'attivo'}))`
+    : `${next.domain}(${inner || 'attivo'})`;
+  kvSet(db, `focus:${sessionId}`, next);
+  return next;
+}
+
+/** Una sola riga compatta per il prompt LLM: mantiene la coerenza sul ramo/dispositivo/oggetto attivo a costo zero. */
+export function focusPromptLine(db, sessionId = 'main', nowMs = Date.now()) {
+  const f = getFocus(db, sessionId, nowMs);
+  if (!f) return '';
+  return `CONTESTO ATTIVO (grafo): ${f.path} — se l'utente continua sullo stesso argomento/dispositivo senza specificarlo, resta in questo percorso; se chiede di cambiare dispositivo (es. telefono/pc), sposta lì l'azione sullo stesso oggetto.`;
+}
 
 /** Gestisce le schede vive modulari (create dinamicamente da Jarvis Core o dall'IA). */
 export function applyLiveCard(db, a = {}, nowMs = Date.now()) {
@@ -412,7 +446,7 @@ export function dispatchPcScreenView(db, nowMs = Date.now()) {
  * Riconosce comandi diretti al PC Desktop, Antigravity, diagnostica, cattura schermo o parola d'ordine
  * e li esegue localmente tramite il nucleo proprietario Jarvis Core (zero chiamate a modelli esterni).
  */
-export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}) {
+export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, sessionId = 'main') {
   const raw = String(userText || '').trim();
   if (!raw) return null;
 
@@ -521,12 +555,53 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}) {
 
   // 4. Task autonomo su Antigravity ("fai partire un task a Antigravity sul progetto X")
   if (ANTIGRAVITY_RE.test(clean)) {
+    setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target: 'antigravity', action: 'task' }, nowMs);
     return dispatchAntigravityTask(db, clean, nowMs);
   }
 
-  // 5. Comandi verso il PC Desktop (es. "apri youtube e fai partire un video al pc", "metti un video su youtube da pc gideon")
-  if (isPcTarget(db, clean)) {
+  const focus = getFocus(db, sessionId, nowMs);
+  const PHONE_REF_RE = /\b(?:sul|al|nel|dal|su|da)\s+(?:mio\s+)?(?:telefono|cellulare|smartphone|android)\b/i;
+
+  // 4b. Cambio contesto esplicito verso il Telefono ("ora fai la stessa cosa sul telefono", "aprilo sul telefono")
+  if (PHONE_REF_RE.test(clean) && !isPcTarget(db, clean)) {
+    const sameRef = /\b(?:stessa\s+cosa|lo\s+stesso|aprilo|fallo|eseguilo|mettilo|anche\s+l[iì]|anche\s+sul)\b/i.test(clean);
+    if (sameRef && focus?.target) {
+      const target = focus.target;
+      setFocus(db, sessionId, { domain: 'dispositivo', device: 'telefono', target, action: focus.action || 'apri' }, nowMs);
+      const webUrl = WEB_SERVICES[target.toLowerCase()];
+      const devAct = webUrl ? { type: 'open_url', url: webUrl } : { type: 'open_app', name: target };
+      return {
+        reply: `Passo al telefono e apro ${target} qui, signore.`,
+        device: [devAct],
+        actions: [devAct.type],
+        touched: ['automazioni'],
+        touchedLeaves: [],
+      };
+    }
+    const openPhone = /^(?:per\s+favore\s+)?(?:ora\s+)?(?:apri|aprire|avvia)\s+(?:il\s+|la\s+|l')?(?:app\s+|sito\s+)?(.+?)\s+(?:sul|al|su|nel)\s+(?:telefono|cellulare|smartphone|android)/i.exec(clean);
+    if (openPhone) {
+      const target = openPhone[1].replace(/[.!?]+$/, '').trim();
+      setFocus(db, sessionId, { domain: 'dispositivo', device: 'telefono', target, action: 'apri' }, nowMs);
+    }
+  }
+
+  // 5. Comandi verso il PC Desktop (espliciti oppure ereditati dal contesto attivo "dispositivo(pc(...))")
+  const PC_CONTINUATION_RE = /^(?:per\s+favore\s+)?(?:ora\s+|adesso\s+|poi\s+|invece\s+)?(?:apri|aprire|avvia|avviare|lancia|chiudi|chiudere|termina|cerca|cercare|trova|vai\s+su|scrivi|digita|nuova\s+scheda|chiudi\s+(?:la\s+)?scheda|ricarica|aggiorna|schermo\s+intero|scorri|cambia\s+finestra|mostra\s+desktop|minimizza|alza\s+il\s+volume|abbassa\s+il\s+volume|muto|pausa|play|prossim[ao]|precedente|blocca|aprilo|chiudilo|fallo|seleziona\s+(?:il\s+)?(?:profilo|account)|usa\s+(?:il\s+|l')?(?:profilo|account))\b/i;
+  const inheritPc = !isPcTarget(db, clean) && !PHONE_REF_RE.test(clean) && focus?.domain === 'dispositivo' && focus?.device === 'pc' && PC_CONTINUATION_RE.test(clean);
+
+  if (isPcTarget(db, clean) || inheritPc) {
     const withoutPc = stripPcWords(db, clean);
+
+    // Anafora contestuale ("aprilo", "chiudilo", "fallo") usando focus.target dal grafo attivo
+    if (/^(?:ora\s+|adesso\s+)?(?:aprilo|fallo|eseguilo|chiudilo)\s*$/i.test(withoutPc) && focus?.target) {
+      if (/chiud/i.test(withoutPc)) {
+        devices.enqueueCommand(db, 'desktop', { kind: 'close_app', target: focus.target }, nowMs);
+        setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target: focus.target, action: 'chiudi' }, nowMs);
+        return { reply: `Chiudo ${focus.target} sul PC, signore.`, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+      }
+      setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target: focus.target, action: 'apri' }, nowMs);
+      return dispatchPcOpen(db, focus.target, nowMs);
+    }
 
     // Correzione rapida ("ma no sul pc", "aprilo sul pc", "fallo sul pc"): recupera l'azione dal messaggio precedente!
     if (/^(?:ma\s+)?(?:no\s+)?(?:aprilo|fallo|eseguilo|mettilo|cercalo)?\s*$/i.test(withoutPc)) {
@@ -554,6 +629,7 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}) {
       if (profName.length >= 2) {
         const shouldPersist = /\b(quando|sempre|imposta|usa\s+sempre|di\s+default)\b/i.test(clean);
         devices.enqueueCommand(db, 'desktop', { kind: 'open_chrome_profile', target: profName, args: shouldPersist ? 'persist' : '' }, nowMs);
+        setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target: 'chrome', profile: profName, action: 'profilo' }, nowMs);
         return {
           reply: `Apro Chrome sul PC con il profilo "${profName}"${shouldPersist ? ' e lo memorizzo come predefinito' : ''}, signore.`,
           device: [], actions: ['pc_action'], touched: ['automazioni', 'tecnologia'], touchedLeaves: [],
@@ -649,6 +725,7 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}) {
         : /^(?:tutto|tutte\s+le\s+app|tutti\s+i\s+programmi)$/i.test(target) ? 'all'
         : target;
       devices.enqueueCommand(db, 'desktop', { kind: 'close_app', target: norm }, nowMs);
+      setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target, action: 'chiudi' }, nowMs);
       return { reply: `Chiudo ${target} sul PC, signore.`, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
 
@@ -692,7 +769,10 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}) {
     const openMatch = /^(?:per\s+favore\s+)?(?:mi\s+)?(?:apri|aprire|avvia|avviare|lancia|lanciare|esegui|eseguire|vai\s+su)\s+(?:il\s+|la\s+|l'|lo\s+)?(?:programma\s+|app\s+|sito\s+(?:di\s+|della\s+)?)?(.+)$/i.exec(withoutPc);
     if (openMatch) {
       const res = dispatchPcOpen(db, openMatch[1], nowMs);
-      if (res) return res;
+      if (res) {
+        setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target: openMatch[1].replace(/[.!?]+$/, '').trim(), action: 'apri' }, nowMs);
+        return res;
+      }
     }
 
     // Qualsiasi altra ricerca web o sito sul PC ("cerca <query> su google", "cerca il sito <nome>", "cerca <query>")
@@ -701,12 +781,15 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}) {
       const q = searchMatch[1].replace(/[.!?]+$/, '').trim();
       const siteOnly = /^(?:il\s+sito\s+(?:di\s+|della\s+)?|il\s+portale\s+)?([a-z0-9_-]+)$/i.exec(q);
       if (siteOnly && WEB_SERVICES[siteOnly[1].toLowerCase()]) {
+        setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target: siteOnly[1], action: 'apri' }, nowMs);
         return dispatchPcOpen(db, siteOnly[1], nowMs);
       }
       if (/^(?:metti|riproduci|ascolta|fai\s+partire|fammi\s+partire)\b/i.test(withoutPc)) {
+        setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target: 'youtube', action: 'riproduci' }, nowMs);
         return dispatchPcPlayYoutube(db, q, nowMs);
       }
       devices.enqueueCommand(db, 'desktop', { kind: 'search_web', target: q }, nowMs);
+      setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target: q, action: 'cerca' }, nowMs);
       return { reply: `Cerco "${q}" sul PC, signore.`, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
   }

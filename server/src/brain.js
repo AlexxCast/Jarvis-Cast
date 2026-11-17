@@ -187,7 +187,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   jarvisCore.selfInterrogate(db, env, ms, tz);
 
   // 1. JARVIS CORE (IA proprietaria interna): gestisce direttamente controllo multi-dispositivo (PC/Telefono), Antigravity, timer e diagnostica.
-  const coreHit = (!image && !fileList.length) ? jarvisCore.handleCoreIntent(db, userText, ms, env) : null;
+  const coreHit = (!image && !fileList.length) ? jarvisCore.handleCoreIntent(db, userText, ms, env, sessionId) : null;
   if (coreHit) {
     if (coreHit.scheduleAt) deps.schedule?.(coreHit.scheduleAt);
     if (coreHit.reply) {
@@ -242,10 +242,12 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
       pdfBase64 = null; // testo estratto: ora può leggerlo qualsiasi modello!
     }
   }
+  const activeFocus = jarvisCore.getFocus(db, sessionId, ms);
+  const focusLine = jarvisCore.focusPromptLine(db, sessionId, ms);
   const parts = {
     core: CORE_PROMPT(diary.profile.name, nowHuman(ms, tz)) + '\n\n' + mood.MOOD_PROMPT(mood.current(db, ms)),
     brief: dietBrief(diary, today),
-    rules: [dietOn ? DIET_RULES : '', UI_WORDS.test(userText) ? ui.uiPrompt(ui.loadLayout(db)) : '', UI_WORDS.test(userText) ? coder.codePrompt(env, db) : '', DEVICE_WORDS.test(userText) ? appsPrompt(db) : '', /\b(pc|computer|desktop|windows|dispositiv\w*)\b/i.test(userText) ? devices.devicesPrompt(db, ms) : '', phone.pendingContext(db, ms)].filter(Boolean).join('\n\n'),
+    rules: [focusLine, dietOn ? DIET_RULES : '', UI_WORDS.test(userText) ? ui.uiPrompt(ui.loadLayout(db)) : '', UI_WORDS.test(userText) ? coder.codePrompt(env, db) : '', DEVICE_WORDS.test(userText) ? appsPrompt(db) : '', (/\b(pc|computer|desktop|windows|dispositiv\w*)\b/i.test(userText) || activeFocus?.device === 'pc') ? devices.devicesPrompt(db, ms) : '', phone.pendingContext(db, ms)].filter(Boolean).join('\n\n'),
     blocks: dietOn ? dietContext(diary, today) : [],
     memories: recalled.entries.map(m => `- [${m.id}] (${m.module}) ${m.text}`),
     moduleIndex: [mods.length ? 'MODULI DI MEMORIA ESISTENTI: ' + mods.map(m => `${m.name}${m.description ? ` (${m.description})` : ''} [${m.entries}]`).join('; ') : '',
@@ -334,6 +336,22 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
       : [];
     const mergedTopics = cleanCmd ? [] : [...(parsed.topics || []), ...fallbackTopics].slice(0, 4);
     topicHits = cleanCmd ? { modules: cleanCmd.branch !== 'all' ? [cleanCmd.branch] : [], leaves: [] } : memory.touchTopics(db, mergedTopics, nowIso);
+    // Aggiorna la sotto-cartella di contesto attivo per mantenere coerenza tra turni senza appesantire il prompt.
+    const pcAct = parsed.actions.find(a => a?.type === 'pc_action');
+    const devAct = done.device?.[0];
+    if (pcAct) {
+      jarvisCore.setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target: String(pcAct.target || pcAct.name || pcAct.url || '').trim(), action: String(pcAct.kind || 'azione') }, ms);
+    } else if (devAct) {
+      jarvisCore.setFocus(db, sessionId, { domain: 'dispositivo', device: 'telefono', target: String(devAct.name || devAct.url || devAct.goal || '').slice(0, 50), action: devAct.type }, ms);
+    } else if (done.jobs?.length) {
+      jarvisCore.setFocus(db, sessionId, { domain: 'progetti', device: null, target: done.jobs[0].title, action: 'progetto' }, ms);
+    } else if (parsed.actions.some(a => DIET_ACTIONS.has(a?.type))) {
+      jarvisCore.setFocus(db, sessionId, { domain: 'dieta', device: null, target: parsed.actions[0]?.meal || 'diario', action: parsed.actions[0]?.type || 'dieta' }, ms);
+    } else if (parsed.actions.some(a => a?.type === 'add_reminder')) {
+      jarvisCore.setFocus(db, sessionId, { domain: 'agenda', device: null, target: 'promemoria', action: 'agenda' }, ms);
+    } else if (mergedTopics[0]?.topic) {
+      jarvisCore.setFocus(db, sessionId, { domain: memory.slug(mergedTopics[0].area || 'generale') || 'generale', device: null, target: mergedTopics[0].topic, action: 'chat' }, ms);
+    }
     if (parsed.mood) mood.feel(db, parsed.mood.emozione, parsed.mood.intensita, ms);
     // Ha promesso di farlo ma non ha messo l'azione: la aggiungiamo noi, così non resta una promessa a vuoto.
     const goal = userText.replace(/^\W*(ehi|ciao|ok)?\W*jarvis\W*/i, '').slice(0, 1000);
