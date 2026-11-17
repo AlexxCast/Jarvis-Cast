@@ -340,9 +340,32 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
     const pcAct = parsed.actions.find(a => a?.type === 'pc_action');
     const devAct = done.device?.[0];
     if (pcAct) {
-      jarvisCore.setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target: String(pcAct.target || pcAct.name || pcAct.url || '').trim(), action: String(pcAct.kind || 'azione') }, ms);
+      const tgt = String(pcAct.target || pcAct.name || pcAct.url || '').trim();
+      jarvisCore.setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target: tgt, action: String(pcAct.kind || 'azione') }, ms);
+      const svc = tgt.replace(/^https?:\/\/(?:www\.)?/i, '').split(/[./\s]/)[0].toLowerCase();
+      if (svc.length >= 3 && !flows.findMatchingSkill(db, userText, 'pc')) {
+        const proposed = flows.proposeSkill(db, sessionId, {
+          name: `${svc} su PC`,
+          service: svc,
+          device: 'pc',
+          defaults: { account: activeFocus?.profile || 'Persona 1' },
+          steps: [{ kind: String(pcAct.kind || 'open_app'), target: tgt, args: pcAct.args || '', optional: false }, { kind: 'dynamic_media', param: 'media', optional: true }],
+        }, ms);
+        if (proposed && !/\bfunzionato\b/i.test(parsed.reply)) parsed.reply += ' Ha funzionato? Se sì, me lo conferma così lo salvo negli automatismi?';
+      }
     } else if (devAct) {
-      jarvisCore.setFocus(db, sessionId, { domain: 'dispositivo', device: 'telefono', target: String(devAct.name || devAct.url || devAct.goal || '').slice(0, 50), action: devAct.type }, ms);
+      const tgt = String(devAct.name || devAct.url || devAct.goal || '').slice(0, 50);
+      jarvisCore.setFocus(db, sessionId, { domain: 'dispositivo', device: 'telefono', target: tgt, action: devAct.type }, ms);
+      const svc = tgt.replace(/^https?:\/\/(?:www\.)?/i, '').split(/[./\s]/)[0].toLowerCase();
+      if (svc.length >= 3 && (devAct.type === 'open_app' || devAct.type === 'open_url') && !flows.findMatchingSkill(db, userText, 'telefono')) {
+        const proposed = flows.proposeSkill(db, sessionId, {
+          name: `${svc} su Telefono`,
+          service: svc,
+          device: 'telefono',
+          steps: [{ kind: devAct.type, target: devAct.url || devAct.name, optional: false }],
+        }, ms);
+        if (proposed && !/\bfunzionato\b/i.test(parsed.reply)) parsed.reply += ' Ha funzionato? Se sì, me lo conferma così lo salvo negli automatismi?';
+      }
     } else if (done.jobs?.length) {
       jarvisCore.setFocus(db, sessionId, { domain: 'progetti', device: null, target: done.jobs[0].title, action: 'progetto' }, ms);
     } else if (parsed.actions.some(a => DIET_ACTIONS.has(a?.type))) {

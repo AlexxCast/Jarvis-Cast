@@ -26,6 +26,8 @@ const SELF_PROMPT_ECHO_RE = /^\W*(?:parola\s+d'ordine(?:\s+non\s+corretta.*)?|ce
 
 const WEB_SERVICES = {
   youtube: 'https://www.youtube.com',
+  prime: 'https://www.primevideo.com',
+  'prime video': 'https://www.primevideo.com',
   gmail: 'https://mail.google.com',
   instagram: 'https://www.instagram.com',
   whatsapp: 'https://web.whatsapp.com',
@@ -484,6 +486,18 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
   const clean = raw.replace(/^\W*(ehi|ciao|ok)?\W*jarvis\W*/i, '').replace(/\bniente\s+pi[uù]\s+fili\b/gi, '').trim();
   if (!clean) return null;
 
+  // 1a. Conferma salvataggio automatismo a step appena eseguito ("sì, ha funzionato" / "no")
+  const skillConfirm = flows.confirmPendingSkill(db, sessionId, clean, nowMs);
+  if (skillConfirm) {
+    return {
+      reply: skillConfirm.reply,
+      device: [],
+      actions: skillConfirm.saved ? ['save_skill'] : [],
+      touched: ['automazioni'],
+      touchedLeaves: skillConfirm.skill ? ['f:' + skillConfirm.skill.id] : [],
+    };
+  }
+
   // 1b. Timer o Cronometro esplicito ("metti un timer di 5 minuti", "avvia un cronometro")
   const timerMatch = TIMER_RE.exec(clean);
   if (timerMatch) {
@@ -582,6 +596,40 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
     if (openPhone) {
       const target = openPhone[1].replace(/[.!?]+$/, '').trim();
       setFocus(db, sessionId, { domain: 'dispositivo', device: 'telefono', target, action: 'apri' }, nowMs);
+    }
+  }
+
+  // 4c. Esecuzione intelligente di un automatismo modulare a step già verificato (autocontrollo parametri, zero conferme ripetute)
+  const matchedSkill = flows.findMatchingSkill(db, clean, focus?.device);
+  if (matchedSkill) {
+    const plan = flows.planSkillExecution(matchedSkill, clean);
+    if (plan.steps.length && !plan.needsModelForFinalStep) {
+      const devList = [];
+      for (const st of plan.steps) {
+        if (matchedSkill.device === 'pc') {
+          devices.enqueueCommand(db, 'desktop', { kind: st.kind, target: st.target, args: st.args || '' }, nowMs);
+        } else if (st.kind === 'open_url') {
+          devList.push({ type: 'open_url', url: st.target });
+        } else if (st.kind === 'open_app') {
+          devList.push({ type: 'open_app', name: st.target });
+        }
+      }
+      setFocus(db, sessionId, {
+        domain: 'dispositivo',
+        device: matchedSkill.device,
+        target: matchedSkill.service,
+        profile: plan.overrides.account || matchedSkill.defaults?.account || '',
+        action: plan.media ? 'media' : 'apri',
+      }, nowMs);
+      const noteAcc = plan.accountChanged ? ` (profilo aggiornato a ${plan.overrides.account})` : '';
+      const noteStop = !plan.media ? ' Mi fermo sulla schermata principale' : ` e avvio "${plan.media}"`;
+      return {
+        reply: `Eseguo l'automatismo "${matchedSkill.name}"${noteAcc}:${noteStop}, signore.`,
+        device: devList,
+        actions: matchedSkill.device === 'pc' ? ['pc_action'] : devList.map(d => d.type),
+        touched: ['automazioni'],
+        touchedLeaves: ['f:' + matchedSkill.id],
+      };
     }
   }
 
@@ -768,9 +816,23 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
     // Apertura programma/app/sito sul PC ("apri YouTube su Ghideon", "aprire YouTube sul computer", "avvia VS Code sul computer")
     const openMatch = /^(?:per\s+favore\s+)?(?:mi\s+)?(?:apri|aprire|avvia|avviare|lancia|lanciare|esegui|eseguire|vai\s+su)\s+(?:il\s+|la\s+|l'|lo\s+)?(?:programma\s+|app\s+|sito\s+(?:di\s+|della\s+)?)?(.+)$/i.exec(withoutPc);
     if (openMatch) {
-      const res = dispatchPcOpen(db, openMatch[1], nowMs);
+      const targetName = openMatch[1].replace(/[.!?]+$/, '').trim();
+      const res = dispatchPcOpen(db, targetName, nowMs);
       if (res) {
-        setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target: openMatch[1].replace(/[.!?]+$/, '').trim(), action: 'apri' }, nowMs);
+        setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target: targetName, action: 'apri' }, nowMs);
+        const lowT = targetName.toLowerCase();
+        const webUrl = WEB_SERVICES[lowT];
+        const steps = webUrl
+          ? [{ kind: 'open_chrome_profile', target: '{account}', optional: false }, { kind: 'open_url', target: webUrl, optional: false }, { kind: 'dynamic_media', param: 'media', optional: true }]
+          : [{ kind: 'open_app', target: targetName, optional: false }];
+        const proposed = flows.proposeSkill(db, sessionId, {
+          name: `${targetName} su PC`,
+          service: lowT,
+          device: 'pc',
+          defaults: { account: focus?.profile || 'Persona 1' },
+          steps,
+        }, nowMs);
+        if (proposed) res.reply += ' Ha funzionato? Se sì, me lo conferma così salvo ogni step negli automatismi?';
         return res;
       }
     }

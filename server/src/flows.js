@@ -393,3 +393,148 @@ export function gatekeepChat(db, userText, { hasImage = false, hasPendingPhone =
   }
   return null;
 }
+
+// ------------------------------------------------------------------ Automatismi Modulari a Step Verificati
+
+const SKILLS_KEY = 'modularSkills';
+const PENDING_SKILL_TTL_MS = 5 * 60_000;
+const CONFIRM_YES_RE = /^\W*(?:s[iì]|si|ha\s+funzionato|funziona(?:to)?|perfetto|ottimo|ok(?:\s+salva\w*)?|va\s+bene|conferm\w*|salva\w*|esatto|certo|bravo)\W*$/i;
+const CONFIRM_NO_RE = /^\W*(?:no|non\s+ha\s+funzionato|non\s+funziona|sbagliato|annulla|non\s+salvare|lascia\s+stare)\W*$/i;
+
+export function listSkills(db) {
+  return kvGet(db, SKILLS_KEY, []);
+}
+
+/**
+ * Propone il salvataggio di un nuovo automatismo a step se non ne esiste già uno verificato identico.
+ * Ritorna true se è stata creata una proposta da confermare all'utente.
+ */
+export function proposeSkill(db, sessionId = 'main', draft = {}, nowMs = Date.now()) {
+  const service = norm(draft.service || '');
+  const device = String(draft.device || 'pc').toLowerCase();
+  const steps = Array.isArray(draft.steps) ? draft.steps.filter(s => s && s.kind) : [];
+  if (!service || !steps.length) return false;
+
+  const id = slug(`skill-${device}-${service}`);
+  const existing = listSkills(db).find(s => s.id === id);
+  if (existing && existing.verified) return false;
+
+  kvSet(db, `pendingSkill:${sessionId}`, {
+    id,
+    name: String(draft.name || `${service} (${device})`).slice(0, 80),
+    service,
+    device,
+    defaults: draft.defaults && typeof draft.defaults === 'object' ? draft.defaults : {},
+    steps,
+    createdAt: nowMs,
+  });
+  return true;
+}
+
+/**
+ * Gestisce la risposta di conferma ("sì, ha funzionato" / "no") per salvare ogni singolo step dell'automatismo.
+ */
+export function confirmPendingSkill(db, sessionId = 'main', userText = '', nowMs = Date.now()) {
+  const key = `pendingSkill:${sessionId}`;
+  const pending = kvGet(db, key, null);
+  if (!pending || (nowMs - Number(pending.createdAt || 0)) > PENDING_SKILL_TTL_MS) return null;
+
+  const clean = String(userText || '').trim();
+  if (CONFIRM_YES_RE.test(clean)) {
+    const list = listSkills(db).filter(s => s.id !== pending.id);
+    const saved = { ...pending, verified: true, uses: 1, updatedAt: nowMs };
+    kvSet(db, SKILLS_KEY, [saved, ...list].slice(0, MAX_FLOWS));
+    kvSet(db, key, null);
+    registerAutoGoal(db, `Skill: ${saved.name} (${saved.steps.length} step)`, nowMs);
+    return {
+      saved: true,
+      skill: saved,
+      reply: `Perfetto, signore! Ho salvato l'automatismo "${saved.name}" con ${saved.steps.length} step modulari. La prossima volta lo eseguirò in automatico (e potrà cambiare solo i singoli dati o fermarsi prima quando vuole).`,
+    };
+  }
+  if (CONFIRM_NO_RE.test(clean)) {
+    kvSet(db, key, null);
+    return {
+      saved: false,
+      reply: 'Ricevuto, signore: non salvo questo tentativo negli automatismi.',
+    };
+  }
+  return null;
+}
+
+/**
+ * Cerca uno skill verificato compatibile con il servizio richiesto e con il dispositivo (esplicito o dal contesto attivo).
+ */
+export function findMatchingSkill(db, userText = '', activeDevice = null) {
+  const low = norm(userText);
+  if (!low) return null;
+  const askPhone = /\b(telefono|cellulare|smartphone|android)\b/i.test(userText);
+  const askPc = /\b(pc|computer|desktop|windows|gh?ideon)\b/i.test(userText);
+  const preferredDevice = askPhone ? 'telefono' : (askPc ? 'pc' : (activeDevice || 'pc'));
+
+  const skills = listSkills(db).filter(s => s.verified);
+  let best = null;
+  let bestScore = 0;
+  for (const s of skills) {
+    if (!s.service) continue;
+    const svcRe = new RegExp(`\\b${escapeRe(s.service)}\\b`, 'i');
+    if (!svcRe.test(low)) continue;
+    let sc = 1;
+    if (s.device === preferredDevice) sc += 2;
+    else if (s.device === 'generale') sc += 1;
+    else if (askPhone || askPc) continue;
+    if (sc > bestScore) { bestScore = sc; best = s; }
+  }
+  return best;
+}
+
+/**
+ * Analizza quali step dello skill eseguire e quali parametri singoli sovrascrivere (autocontrollo senza chiedere conferma).
+ */
+export function planSkillExecution(skill, userText = '') {
+  const text = String(userText || '').trim();
+  const overrides = {};
+
+  // Override account/profilo ("con l'account Ale", "profilo Alessio", "su Persona 1")
+  const accMatch = /\b(?:con\s+(?:l'|il\s+)?(?:account|profilo)|profilo|account|su\s+profilo)\s+([a-z0-9._\s-]{2,40}?)(?=\s+(?:e\s+|sul|su|nel|al|per|con|metti|cerca|guarda|fai\s+partire)|$)/i.exec(text);
+  if (accMatch && accMatch[1]) {
+    overrides.account = accMatch[1].trim();
+  }
+
+  // Parametro opzionale media/film/ricerca ("e metti ...", "e cerca ...", "e fai partire ...")
+  const mediaMatch = /\b(?:e\s+)?(?:metti(?:mi)?|fai\s+partire|fammi\s+partire|riproduci|guarda|cerca)\s+(?:il\s+film\s+|la\s+serie\s+|il\s+video\s+)?(.{2,100})$/i.exec(
+    text.replace(/\b(?:su|sul|in|nel|al|dal)\s+(?:pc|computer|desktop|telefono|cellulare|prime(?:\s+video)?|youtube|netflix|spotify)\b/gi, ' ')
+      .replace(/\b(?:con\s+(?:l'|il\s+)?(?:account|profilo)|profilo|account)\s+[a-z0-9._\s-]{2,40}/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim()
+  );
+  const media = mediaMatch && mediaMatch[1] ? mediaMatch[1].replace(/[.!?]+$/, '').trim() : '';
+  if (media && !/^(?:home|pagina\s+iniziale|sito)$/i.test(media)) {
+    overrides.media = media;
+  }
+
+  const resolvedSteps = [];
+  let needsModelForFinalStep = false;
+  for (const st of (skill.steps || [])) {
+    if (st.optional && !overrides[st.param || 'media']) continue;
+    let target = String(st.target || '');
+    for (const [k, v] of Object.entries({ ...(skill.defaults || {}), ...overrides })) {
+      target = target.replace(new RegExp(`\\{${k}\\}`, 'gi'), String(v));
+    }
+    if (st.kind === 'dynamic_media' && overrides.media) {
+      needsModelForFinalStep = true;
+      continue;
+    }
+    if (target && !/\{[a-z0-9_]+\}/i.test(target)) {
+      resolvedSteps.push({ ...st, target });
+    }
+  }
+
+  return {
+    steps: resolvedSteps,
+    overrides,
+    media: overrides.media || '',
+    accountChanged: !!overrides.account && norm(overrides.account) !== norm(skill.defaults?.account || ''),
+    needsModelForFinalStep,
+  };
+}

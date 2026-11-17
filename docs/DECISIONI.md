@@ -313,3 +313,7 @@ Jarvis diceva "ho aggiornato il piano" o "chiamo Marcolino" senza farlo.
 - Per mantenere coerenza tra turni senza appesantire il prompt con lunga cronologia, ogni sessione mantiene un puntatore gerarchico leggero (`focus:<sessionId>`, es. `dispositivo(pc(chrome · profilo: Persona 1 · apri))`, `dieta(...)`, `progetti(...)`).
 - `jarvis_core.js` eredita automaticamente il dispositivo attivo (es. se siamo sul PC, `"apri youtube"` / `"chiudilo"` vanno sul PC senza ripeterlo) e permette il cambio immediato sullo stesso oggetto (`"ora fai la stessa cosa sul telefono"` → `dispositivo(telefono(youtube · apri))`).
 - `brain.js` inietta una sola riga `CONTESTO ATTIVO (grafo): ...` nei prompt dei modelli LLM e aggiorna il puntatore a ogni azione eseguita.
+
+## Automatismi Modulari a Step Verificati (`modularSkills`, v2.23)
+- Le nuove azioni su PC/telefono/servizi generano una bozza in `pendingSkill:<sessionId>` e chiedono conferma all'utente (*"Ha funzionato?"*); solo dopo conferma esplicita vengono salvate in `modularSkills` con ogni singolo step separato e parametrizzato (`{account}`, `{media}` opzionale).
+- Alla riesecuzione (`findMatchingSkill` + `planSkillExecution`), Jarvis si ferma ai blocchi richiesti (es. sulla home di Prime se non è indicato un film), delega al modello solo gli eventuali step finali dinamici e fa autocontrollo quando cambia un solo dato (es. un altro account) senza chiedere nuova conferma.
