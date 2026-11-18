@@ -170,7 +170,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
         if (foreground) return
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0
-        ServiceCompat.startForeground(this, NOTIF_ID, buildNotification("In ascolto di \"Jarvis\""), type)
+        ServiceCompat.startForeground(this, NOTIF_ID, buildNotification("In ascolto di \"Kestra\""), type)
         foreground = true
         wakeLock?.acquire()
     }
@@ -562,19 +562,19 @@ class JarvisService : LifecycleService(), SensorEventListener {
     private var lastWakeGreetingIdx = -1
     private val wakeGreetings = listOf(
         "Eccomi, signore.",
-        "Mi dica.",
-        "Sono qui, signore.",
-        "A sua disposizione.",
-        "Comandi, signore.",
-        "La ascolto.",
-        "Dica pure, signore.",
-        "Pronto, signore.",
-        "Sì, signore?",
-        "Sempre operativo.",
-        "Ai suoi ordini.",
-        "Eccomi qui, dica pure.",
-        "Tutto orecchi, signore.",
-        "Mi dica tutto.",
+        "Eccomi, Capo.",
+        "Dimmi tutto, Capo.",
+        "Sono qui, Capo.",
+        "Agli ordini, Capo.",
+        "Comandi, Capo.",
+        "Ti ascolto, Capo.",
+        "Pronta, Capo.",
+        "Sì, Capo?",
+        "Sempre operativa.",
+        "Qual è il piano, Capo?",
+        "Eccomi qui, spara pure.",
+        "Tutto orecchi, Capo.",
+        "Dimmi pure.",
     )
 
     private fun nextWakeGreeting(): String {
@@ -970,7 +970,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
         val pi = PendingIntent.getActivity(this, 10, openIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val notif = NotificationCompat.Builder(this, JarvisApp.CH_POPUP)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("Jarvis Assistente • Dati")
+            .setContentTitle("Kestra • Dati")
             .setContentText(infoText.lines().firstOrNull() ?: infoText)
             .setStyle(NotificationCompat.BigTextStyle().bigText(infoText))
             .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -988,7 +988,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
         val pi = PendingIntent.getActivity(this, 3, i, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
         val n = NotificationCompat.Builder(this, JarvisApp.CH_PHOTO)
             .setSmallIcon(R.drawable.ic_notification)
-            .setContentTitle("Jarvis vuole una foto")
+            .setContentTitle("Kestra vuole una foto")
             .setContentText(reason)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setAutoCancel(true)

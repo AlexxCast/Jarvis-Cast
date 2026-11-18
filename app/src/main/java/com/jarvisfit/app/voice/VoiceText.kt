@@ -43,9 +43,9 @@ object VoiceText {
      * o "grazie, quante calorie mi restano?" non devono chiudere la sessione.
      */
     private val cancelRegex = Regex(
-        "^(?:ok |okay |va bene |perfetto |tutto )?(?:basta(?: così)?|grazie(?: mille| tante| jarvis| giarvis)?|a posto(?: così)?|stop|annulla|chiudi|" +
-            "lascia stare|arrivederci|ciao(?: jarvis| giarvis)?|ok basta|perfetto grazie|ho finito|finito|va bene così|può bastare|sono a posto|tutto chiaro)" +
-            "(?: (?:così|jarvis|giarvis|grazie|ciao|signore))*$",
+        "^(?:ok |okay |va bene |perfetto |tutto )?(?:basta(?: così)?|grazie(?: mille| tante| kestra| chestra)?|a posto(?: così)?|stop|annulla|chiudi|" +
+            "lascia stare|arrivederci|ciao(?: kestra| chestra)?|ok basta|perfetto grazie|ho finito|finito|va bene così|può bastare|sono a posto|tutto chiaro)" +
+            "(?: (?:così|kestra|chestra|grazie|ciao|capo))*$",
         RegexOption.IGNORE_CASE,
     )
 
@@ -81,9 +81,9 @@ object VoiceText {
      * "giarvis", "jarvi", "garvis"... Tutte queste valgono già con la sensibilità media; il contesto
      * (nome all'inizio, alla fine o giudicato dal server) evita le false chiamate.
      */
-    private val wakeToken = Regex("\\b(kestra|chestra|questra|cestra|khestra|keistra|kesra|kestre|kestro|estra|jarvis|jarvi|giarvis|jervis|gervis|jarvys|jarviss|jarbis|giarvi|garvis|charvis|jarvas|giarviz|jarviz|jarves|giarves|giarbis|jervi|giervis|harvis|giorvis|jarvees|ciarvis|sarvis|garbis|darvis|carvis|zarvis|iarvis|arvis|giardi|giarri|ciardi)\\b")
-    /** Sensibilità alta: accetta anche come il riconoscimento vocale storpia spesso il nome detto a voce bassa o da lontano. */
-    private val wakeTokenLoose = Regex("\\b(kestra|chestra|questra|cestra|khestra|keistra|kesra|kestre|kestro|estra|castra|destra|finestra|jarvis|jarvi|giarvis|jervis|gervis|jarvys|jarviss|jarbis|giarvi|garvis|charvis|jarvas|giarviz|jarviz|jarves|giarves|giarbis|jervi|giervis|harvis|giorvis|jarvees|travis|davis|chavis|service|servis|ciarvis|sarvis|harvey|garbis|darvis|carvis|zarvis|iarvis|arvis|giardi|giarri|ciardi|giar|jarv|giarv|sciarvis|cervi|servi|chavez)\\b")
+    private val wakeToken = Regex("\\b(kestra|chestra|questra|cestra|khestra|keistra|kesra|kestre|kestro|kestrah|chestre|chestro|estra)\\b")
+    /** Sensibilità alta: accetta anche come il riconoscimento vocale storpia spesso "Kestra" detto a voce bassa o da lontano. */
+    private val wakeTokenLoose = Regex("\\b(kestra|chestra|questra|cestra|khestra|keistra|kesra|kestre|kestro|kestrah|chestre|chestro|estra|castra|destra|finestra|kestre|chiestra|questo|kest)\\b")
 
     /** Parole che possono precedere il nome quando lo si chiama ("ehi Jarvis", "senti Jarvis"). */
     private val callWords = setOf(
