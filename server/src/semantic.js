@@ -67,13 +67,16 @@ export async function backfill(db, env, fetchFn, limit = 40) {
 }
 
 /**
- * Punteggio di significato da sommare a quello per parole. Conta quanto un ricordo spicca rispetto agli altri:
- * sopra la media di 1,2 deviazioni (e con una somiglianza minima) prende fino a 4,5 punti, come un cassetto citato.
+ * Punteggio di significato da sommare a quello per parole. Conta quanto un ricordo spicca rispetto agli altri,
+ * con statistiche robuste (mediana e deviazione mediana): funziona sia se c'entrano pochi ricordi su centinaia,
+ * sia se una frase tocca tanti cassetti insieme. Fino a 4,5 punti, come un cassetto citato per nome.
  * Con meno di 4 ricordi con impronta si usa una soglia fissa prudente.
  */
 export function relativeScorer(values) {
   if (values.length < 4) return (sim) => Math.min(4.5, Math.max(0, (sim - 0.6) / 0.1) * 1.5);
-  const mean = values.reduce((a, b) => a + b, 0) / values.length;
-  const sd = Math.sqrt(values.reduce((a, b) => a + (b - mean) ** 2, 0) / values.length) || 0.01;
-  return (sim) => (sim < 0.3 ? 0 : Math.min(4.5, Math.max(0, (sim - mean) / sd - 1.2) * 1.5));
+  const sorted = [...values].sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  const dev = values.map(v => Math.abs(v - median)).sort((a, b) => a - b);
+  const mad = Math.max(0.02, dev[Math.floor(dev.length / 2)] * 1.4826);
+  return (sim) => (sim < 0.3 || sim - median < 0.05 ? 0 : Math.min(4.5, Math.max(0, (sim - median) / mad - 2) * 1.2));
 }

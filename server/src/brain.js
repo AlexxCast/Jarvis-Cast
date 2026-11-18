@@ -10,6 +10,7 @@ import * as projects from './projects.js';
 import * as initiative from './initiative.js';
 import * as lessons from './lessons.js';
 import * as semantic from './semantic.js';
+import * as continuity from './continuity.js';
 import { WEATHER_WORDS, weatherContext } from './weather.js';
 import * as web from './web.js';
 import * as router from './router.js';
@@ -312,6 +313,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
       kvSet(db, 'lastTouched', { at: nowIso + '#' + ms, touched: coreHit.touched, leaves: coreHit.touchedLeaves });
       memory.noteUse(db, coreHit.touched, ms);
     }
+    if (coreHit.reply) continuity.record(db, { ms, tz, sessionId, userText, reply: coreHit.reply, applied: coreHit.actions || [], device: coreHit.device || [], touched: coreHit.touched || [], expectReply: !!coreHit.expectReply });
     return {
       reply: coreHit.reply, expectReply: !!coreHit.expectReply, card: '', visual: coreHit.visual || null, photoRequest: null,
       model: 'jarvis-core', switched: false, actions: coreHit.actions, device: coreHit.device,
@@ -327,6 +329,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
     jarvisCore.maybeLogLatentIssue(db, sessionId, userText, ms, tz);
     if (localHit.device.some(d => d.type === 'phone_task')) kvSet(db, 'phonePending', null);
     const { touched, touchedLeaves } = agents.onLocalHit(db, userText, localHit, nowIso, ms);
+    continuity.record(db, { ms, tz, sessionId, userText, reply: localHit.reply, applied: localHit.actions || [], device: localHit.device || [], touched: touched || [] });
     return {
       reply: localHit.reply, expectReply: false, card: '', visual: null, photoRequest: null,
       model: 'local-gatekeeper', switched: false, actions: localHit.actions, device: localHit.device,
@@ -376,6 +379,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
     // Domande su fatti recenti: la ricerca parte subito, senza aspettare che il modello la chieda.
     web: web.WEB_WORDS.test(userText) && !WEATHER_WORDS.test(userText) ? web.webBlock(userText, await web.search(env, deps.fetchFn, userText, today)) : '',
     summary: sess.summary,
+    continuity: continuity.block(db, { ms, tz, sessionId, userText }),
     history,
     userText: `[${nowHuman(ms, tz)}${source === 'voice' ? ', a voce' : ''}] ${userText}` +
       (textFiles.length ? '\n\nFILE ALLEGATI DALL\'UTENTE:\n' + textFiles.map(f => `=== FILE: ${f.name} ===\n${f.content.slice(0, 24000)}`).join('\n\n') : '') +
@@ -652,6 +656,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   result.touched = [...touched];
   result.touchedLeaves = [...new Set([...topicHits.leaves, ...(result.rememberedIds || []).map(id => 'm:' + id), ...(result.autoLeaves || []), ...recalled.entries.map(m => 'm:' + m.id)])];
   kvSet(db, 'lastTouched', { at: nowIso + '#' + ms, touched: result.touched, leaves: result.touchedLeaves });
+  if (!result.error) continuity.record(db, { ms, tz, sessionId, chatTitle: proj ? `${proj.project.name}${proj.chat?.title ? ' › ' + proj.chat.title : ''}` : '', userText, reply: result.reply, applied: result.actions || [], device: result.device || [], touched: result.touched, expectReply: result.expectReply });
   memory.markUsed(db, recalled.entries.map(m => m.id), nowIso);
   memory.noteUse(db, result.touched, ms);
 

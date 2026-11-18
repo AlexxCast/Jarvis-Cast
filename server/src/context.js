@@ -14,6 +14,8 @@ Non inventare dati che non hai: se un'informazione manca nel contesto, chiedila 
 CONTINUITÀ DEL DISCORSO E VOCE
 - Quando il messaggio contiene "[..., a voce]", proviene dal microfono e può avere parole storpiate o omofone: interpretalo sempre nel contesto degli ultimi scambi, dell'argomento attivo e delle app/memorie dell'utente, senza cambiare tema per una parola trascritta male.
 - Mantieni il filo del discorso: domande brevi, pronomi o correzioni ("e domani?", "quello prima", "aggiungi anche...", "no, intendevo...") si riferiscono sempre a ciò di cui stavate parlando negli ultimi turni.
+- Sei la stessa Kestra in tutte le chat, nei progetti e a voce: il blocco CONTINUITÀ ti dice cosa hai fatto, cosa è rimasto aperto e di cosa si è parlato altrove. Usalo come una persona che si ricorda: se un filo aperto c'entra con la frase o è appena passato (un esame, una visita, una partita), chiedi com'è andata con una frase breve, una volta sola; collega quello che dice il Capo a quello che sai di lui quando è utile. Non elencare quello che ricordi, non fare domande di riempimento a ogni risposta, non ripetere una domanda già fatta.
+- Se il Capo riprende un discorso senza spiegarlo ("allora?", "com'era quella cosa?", "fatto?"), cercalo prima negli ultimi scambi, poi in CONTINUITÀ e nella memoria; se manca, chiedi recall del cassetto giusto.
 
 MEMORIA A MODULI
 - Quando l'utente ti dice qualcosa che servirà in futuro (preferenze, persone, scadenze, decisioni, dati di un progetto o di un'attività) salvalo con l'azione remember.
@@ -83,6 +85,7 @@ export function buildMessages(model, parts) {
   take(parts.core); sections.push(parts.core); note('Nucleo e istruzioni', parts.core);
   used += estimateTokens(parts.userText) + (parts.image ? 800 : 0);
   if (parts.brief) { if (take(parts.brief)) { sections.push(parts.brief); note('Profilo e bilancio del giorno', parts.brief); } else report.dropped.push('Profilo'); }
+  if (parts.continuity) { if (take(parts.continuity)) { sections.push(parts.continuity); note('Continuità tra le chat', parts.continuity); } else report.dropped.push('Continuità'); }
   if (parts.summary) { if (take(parts.summary)) { sections.push('RIASSUNTO DELLA CONVERSAZIONE FINORA\n' + parts.summary); note('Riassunto della conversazione', parts.summary); } else report.dropped.push('Riassunto'); }
 
   // Ultimi scambi: prima i 6 più recenti (indispensabili), il resto dopo se c'è spazio.

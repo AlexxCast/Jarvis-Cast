@@ -423,3 +423,11 @@ Scelta del Capo: l'agente del telefono invia messaggi e avvia chiamate senza chi
 Dubbio del Capo: senza parole chiave i cassetti giusti possono restare fuori, e una frase può toccare più cassetti. Scelta: niente IA intermedia a ogni messaggio (latenza e crediti), invece:
 - `semantic.js`: impronta (embedding Gemini `gemini-embedding-001`, 256 numeri, riserva `text-embedding-004`) per ogni ricordo, colonna `memories.vec`, calcolata una volta (40 per battito, 10 dopo ogni chat). A ogni messaggio un'impronta sola (tetto 1,5 s). In `memory.recall` il significato si somma alle parole; il punteggio è relativo (quanto il ricordo spicca rispetto agli altri), così non dipende dalla scala del modello. Se Gemini non risponde resta la ricerca per parole.
 - Azione `recall {module?, query?}`: il modello, vedendo l'indice dei cassetti, può chiedere quello che manca e risponde di nuovo (come `web_search`).
+
+### Continuità tra le chat e Kestra "viva" (2026-11-18)
+Richiesta del Capo: un contesto allargato e schematico che dia continuità alle azioni, e una Kestra che riprende i fili da sola senza essere imboccata.
+- `continuity.js` (kv `continuity`, una scrittura per messaggio): ultime azioni fatte davvero, fili aperti (piani detti dal Capo con la loro data, l'ultima domanda di Kestra), argomenti recenti, ultimo scambio delle altre chat. Entra sempre nel contesto subito dopo il nucleo, al massimo ~1.200 caratteri. L'ultimo scambio di un'altra chat entra solo se il Capo lo riprende ("allora?", "a che punto siamo") o parla della stessa cosa.
+- Prompt: Kestra è la stessa in tutte le chat; riprende un filo quando c'entra, una volta, senza domande di riempimento.
+- Iniziativa: il giorno dopo un piano ("domani ho l'esame"), tra le 9 e le 21, chiede com'è andata una volta; se il Capo ne ha già parlato, non chiede.
+- `test/conversazioni.test.js`: conversazioni su più giorni e più chat, riassunto dopo 30 messaggi, una frase che tocca più cassetti, messaggi strani e modello che risponde male.
+- Punteggio di significato con mediana e deviazione mediana (robusto con pochi o tanti ricordi pertinenti).
