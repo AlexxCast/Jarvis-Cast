@@ -8,6 +8,7 @@ import * as agenda from './agenda.js';
 import * as jobs from './jobs.js';
 import * as jarvisCore from './jarvis_core.js';
 import { PROVIDERS } from './models.js';
+import { forwardToBrain } from './forward.js';
 
 function sameToken(a, b) {
   const x = new TextEncoder().encode(String(a)), y = new TextEncoder().encode(String(b));
@@ -20,7 +21,8 @@ export class JarvisDO extends DurableObject {
   constructor(ctx, env) {
     super(ctx, env);
     this.db = wrapDurableSql(ctx.storage.sql);
-    migrate(this.db);
+    // Se l'aggiornamento dello schema fallisce, l'oggetto deve comunque rispondere spiegando il perché.
+    try { migrate(this.db); this.bootError = null; } catch (e) { this.bootError = e; console.error('Migrazione fallita:', e?.stack || e); }
   }
 
   deps() {
@@ -39,7 +41,20 @@ export class JarvisDO extends DurableObject {
   }
 
   async fetch(request) {
-    return handleApi(this.db, this.env, this.deps(), request);
+    // Il battito parte alla prima richiesta e poi si mantiene da solo nell'allarme.
+    if (this.bootError) {
+      try { migrate(this.db); this.bootError = null; } catch (e) {
+        return Response.json({ error: `Errore all'avvio del database: ${String(e?.message || e).slice(0, 200)}` }, { status: 500 });
+      }
+    }
+    if (!this.beat) { this.beat = true; this.ctx.waitUntil(this.schedule(Date.now() + 15 * 60_000)); }
+    try {
+      return await handleApi(this.db, this.env, this.deps(), request);
+    } catch (e) {
+      // Errore fuori dal gestore (per esempio mentre si registra un altro errore): risposta leggibile, mai una 500 muta.
+      console.error('Errore nel Durable Object:', e?.stack || e);
+      return Response.json({ error: `Errore interno: ${String(e?.message || e).slice(0, 200)}` }, { status: 500 });
+    }
   }
 
   async alarm() {
@@ -47,7 +62,8 @@ export class JarvisDO extends DurableObject {
     const pulse = jarvisCore.selfInterrogate(this.db, this.env, Date.now(), deps.tz);
     const nextDue = agenda.fireDue(this.db, Date.now(), deps.tz);
     const delay = await jobs.advance(this.db, this.env, deps);
-    const candidates = [nextDue, pulse?.nextTimed, delay != null ? Date.now() + delay : null].filter(x => x != null);
+    // Battito: anche senza promemoria o compiti, Kestra si risveglia ogni 15 minuti per il motore di iniziativa.
+    const candidates = [nextDue, pulse?.nextTimed, delay != null ? Date.now() + delay : null, Date.now() + 15 * 60_000].filter(x => x != null);
     if (candidates.length) await this.ctx.storage.setAlarm(Math.max(Math.min(...candidates), Date.now() + 100));
   }
 }
@@ -66,7 +82,6 @@ export default {
     const given = (request.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
     if (!given || !sameToken(given, env.JARVIS_TOKEN)) return Response.json({ error: 'Token non valido.' }, { status: 401 });
 
-    const stub = env.JARVIS.get(env.JARVIS.idFromName('main'));
-    return stub.fetch(request);
+    return forwardToBrain(env, request);
   },
 };

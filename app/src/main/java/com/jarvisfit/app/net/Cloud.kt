@@ -115,6 +115,20 @@ object Cloud {
         }.getOrNull()
     }
 
+    /** Una notifica del telefono letta da KestraNotifications. */
+    data class PhoneNotification(val app: String, val label: String, val title: String, val text: String, val at: Long)
+
+    /** Manda al server un gruppo di notifiche. Silenzioso: se il server non risponde non succede nulla. */
+    suspend fun notify(items: List<PhoneNotification>) = withContext(Dispatchers.IO) {
+        runCatching {
+            request("POST", "/api/notify", buildJsonObject {
+                put("items", JsonArray(items.map { n ->
+                    buildJsonObject { put("app", n.app); put("label", n.label); put("title", n.title); put("text", n.text); put("at", n.at) }
+                }))
+            }, readTimeoutMs = 20_000)
+        }
+    }
+
     /** Avvisi da consegnare e tra quanti ms scade il prossimo promemoria (null se non ce ne sono). */
     data class Inbox(val items: List<String>, val nextInMs: Long?)
 

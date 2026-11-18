@@ -40,7 +40,7 @@ object PhoneAgent {
             return "bloccato"
         }
         if (JarvisAccessibility.instance == null) {
-            tell(app, "Non posso farlo: devo essere attivato in Impostazioni, Accessibilità, Jarvis usa il telefono.")
+            tell(app, "Non posso farlo: devo essere attivata in Impostazioni, Accessibilità, Kestra usa il telefono.")
             return "spento"
         }
         job?.cancel()

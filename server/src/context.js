@@ -47,6 +47,7 @@ AZIONI DISPONIBILI (campo "type"):
 - update_recipe_session {title, current_step, ingredients_needed, notes} · clear_recipe_session {}
 - save_recipe {title, items, instructions, total_kcal, total_protein, total_carbs, total_fat} · delete_recipe {id | title}
 - remember {module, text, description: descrizione del modulo se è nuovo} · forget {id}
+- learn {rule}: quando il Capo ti corregge o ti spiega come preferisce una cosa, scrivi una regola generale e breve per non ripetere l'errore (es. "Per la musica il Capo usa Joytify, non Spotify"). Va insieme alla risposta corretta.
 - clean_graph {branch: "dieta"|"sport"|"all"|nome_modulo, max_nodes: 3..10}: riduce, pulisce e riordina i nodi di un ramo del grafo (o di tutto il grafo) quando l'utente dice che un ramo è troppo grande o chiede di sistemarlo/ridurlo.
 - add_reminder {text, due: "yyyy-MM-ddTHH:mm" (la prima volta), repeat: ""|giorno|feriali|settimana|mese} · done_reminder {id} (per un promemoria che si ripete lo ferma per sempre)
 - add_reminder legato a un luogo {text, place: "casa"|"palestra"|..., when: arrivo|uscita, repeat: ""|sempre} (senza due). Se il luogo non è tra i LUOGHI SALVATI crealo lo stesso e chiedi all'utente di dirti "salva questo posto come <nome>" quando si trova lì.
@@ -73,12 +74,15 @@ export function buildMessages(model, parts) {
   const budget = Math.max(1500, Math.min(model.ctx * 0.55, 48000));
   let used = 0;
   const take = (text) => { const t = estimateTokens(text); if (!text || used + t > budget) return false; used += t; return true; };
+  // Resoconto di cosa entra nel contesto (vista Mente): nome della sezione e token stimati.
+  const report = { model: model.model ? `${model.provider}:${model.model}` : '', budget: Math.round(budget), sections: [], dropped: [] };
+  const note = (name, text) => report.sections.push({ name, tokens: estimateTokens(text) });
 
   const sections = [];
-  take(parts.core); sections.push(parts.core);
+  take(parts.core); sections.push(parts.core); note('Nucleo e istruzioni', parts.core);
   used += estimateTokens(parts.userText) + (parts.image ? 800 : 0);
-  if (take(parts.brief)) sections.push(parts.brief);
-  if (parts.summary && take(parts.summary)) sections.push('RIASSUNTO DELLA CONVERSAZIONE FINORA\n' + parts.summary);
+  if (parts.brief) { if (take(parts.brief)) { sections.push(parts.brief); note('Profilo e bilancio del giorno', parts.brief); } else report.dropped.push('Profilo'); }
+  if (parts.summary) { if (take(parts.summary)) { sections.push('RIASSUNTO DELLA CONVERSAZIONE FINORA\n' + parts.summary); note('Riassunto della conversazione', parts.summary); } else report.dropped.push('Riassunto'); }
 
   // Ultimi scambi: prima i 6 più recenti (indispensabili), il resto dopo se c'è spazio.
   const hist = parts.history || [];
@@ -89,18 +93,27 @@ export function buildMessages(model, parts) {
   if (parts.memories?.length) {
     const lines = [];
     for (const m of parts.memories) { if (!take(m)) break; lines.push(m); }
-    if (lines.length) sections.push('MEMORIA RILEVANTE\n' + lines.join('\n'));
+    if (lines.length) { sections.push('MEMORIA RILEVANTE\n' + lines.join('\n')); note(`Ricordi pertinenti (${lines.length})`, lines.join('\n')); }
+    report.memories = lines.map(l => l.slice(0, 140));
   }
-  if (parts.rules && take(parts.rules)) sections.push(parts.rules);
+  if (parts.rules) { if (take(parts.rules)) { sections.push(parts.rules); note('Regole del momento', parts.rules); } else report.dropped.push('Regole'); }
   const blocks = [...(parts.blocks || [])].sort((a, b) => a.prio - b.prio);
+  const blockName = (b) => { const x = b.name || String(b.text).split('\n')[0].replace(/[:=]+$/, '').trim().slice(0, 50); return x === x.toUpperCase() ? x.charAt(0) + x.slice(1).toLowerCase() : x; };
   const rest = [];
-  for (const b of blocks) { if (b.prio === 1) { if (take(b.text)) sections.push(b.text); } else rest.push(b); }
-  if (parts.web && take(parts.web)) sections.push(parts.web);
-  if (parts.weather && take(parts.weather)) sections.push(parts.weather);
-  if (parts.agenda && take(parts.agenda)) sections.push(parts.agenda);
-  if (parts.moduleIndex && take(parts.moduleIndex)) sections.push(parts.moduleIndex);
+  for (const b of blocks) {
+    if (b.prio === 1) { if (take(b.text)) { sections.push(b.text); note(blockName(b), b.text); } else report.dropped.push(blockName(b)); }
+    else rest.push(b);
+  }
+  const opt = (name, text, title = name) => { if (!text) return; if (take(text)) { sections.push(text); note(title, text); } else report.dropped.push(title); };
+  opt('web', parts.web, 'Ricerca sul web');
+  opt('weather', parts.weather, 'Meteo');
+  opt('agenda', parts.agenda, 'Agenda');
+  opt('moduleIndex', parts.moduleIndex, 'Indice dei moduli di memoria');
   for (; idx >= Math.max(0, hist.length - 14); idx--) { if (!take(hist[idx].text)) break; kept.unshift(hist[idx]); }
-  for (const b of rest) if (take(b.text)) sections.push(b.text);
+  for (const b of rest) { if (take(b.text)) { sections.push(b.text); note(blockName(b), b.text); } else report.dropped.push(blockName(b)); }
+  report.history = kept.length;
+  report.used = Math.round(used);
+  if (parts.report && typeof parts.report === 'object') Object.assign(parts.report, report);
 
   // Ruoli alternati, si parte sempre da un messaggio dell'utente.
   const turns = [];

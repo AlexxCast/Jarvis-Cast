@@ -7,27 +7,20 @@ import { kvGet, kvSet } from './db.js';
 import * as router from './router.js';
 import * as jobs from './jobs.js';
 import { nowIso as nowIsoOf } from './clock.js';
+import * as projects from './projects.js';
+import { cleanProjectContext } from './projects.js';
 
-const ACTIVE_KEY = 'activeWorkspace';
 const SPECS_KEY = 'workspaceSpecs';
 
-/**
- * Toglie dal contesto di un progetto le righe che obbligano a "verificare la passphrase" o a ripetere
- * la parola d'ordine: il modello le aveva copiate dalla memoria nel prompt del progetto e ogni risposta
- * iniziava con "Verifica passphrase: niente più fili [OK]".
- */
-export function cleanProjectContext(text) {
-  return String(text || '').split('\n')
-    .filter(l => !/(passphrase|parola\s+d'ordine|niente\s+pi[uù]\s+fili)/i.test(l))
-    .join('\n').replace(/\n{3,}/g, '\n\n').trim();
-}
+export { cleanProjectContext } from './projects.js';
 
+/** Il "workspace" ora è il progetto attivo: stessa forma di prima per la schermata (titolo, tipo, widget). */
 export function getActiveWorkspace(db) {
-  return kvGet(db, ACTIVE_KEY, null);
+  return projects.activeSummary(db);
 }
 
 export function exitWorkspace(db) {
-  kvSet(db, ACTIVE_KEY, null);
+  projects.exitProject(db);
   return null;
 }
 
@@ -85,7 +78,7 @@ function buildFallbackSpec(title, rawText) {
   return {
     title: t.slice(0, 70),
     kind,
-    systemContext: `MODALITÀ PROGETTO ATTIVA: "${t}".\nSegui rigorosamente le istruzioni e il contesto forniti dall'utente per questo progetto fino a quando non esce dalla modalità progetto.\n\nCONTESTO DEL PROGETTO:\n${String(rawText || t).slice(0, 10000)}`,
+    systemContext: `MODALITÀ PROGETTO ATTIVA: "${t}".\nSegui rigorosamente le istruzioni e il contesto forniti dall'utente per questo progetto fino a quando non esce dalla modalità progetto.\n\nCONTESTO DEL PROGETTO (il materiale completo è tra i file del progetto):\n${String(rawText || t).slice(0, 1500)}`,
     widgets,
   };
 }
@@ -98,11 +91,11 @@ export async function enterWorkspace(db, env, fetchFn, { jobId = '', title = '',
   let projTitle = String(title || '').trim();
 
   if (jobId) {
-    const existingSpec = getSavedSpec(db, jobId);
-    if (existingSpec && !fullText && !pdfBase64) {
-      const active = { ...existingSpec, jobId, enteredAt: nowIsoOf(nowMs, tz) };
-      kvSet(db, ACTIVE_KEY, active);
-      return active;
+    projects.migrateWorkspaces(db, nowIsoOf(nowMs, tz), nowMs);
+    const linked = kvGet(db, 'workspacesMigrated', {})[jobId];
+    if (linked && projects.getProject(db, linked) && !fullText && !pdfBase64) {
+      projects.enterProject(db, linked, {}, nowIsoOf(nowMs, tz), nowMs);
+      return projects.activeSummary(db);
     }
     const j = db.get('SELECT * FROM jobs WHERE id = ?', jobId);
     if (j) {
@@ -164,20 +157,30 @@ Includi solo widget davvero utili e specifici per quel documento/obiettivo.`,
   } catch { /* fallback deterministico sotto */ }
 
   if (!spec) spec = buildFallbackSpec(projTitle, fullText);
-  saveSpec(db, id, spec);
-  const active = { ...spec, jobId: id, enteredAt: nowIsoOf(nowMs, tz) };
-  kvSet(db, ACTIVE_KEY, active);
-  return active;
+  // Il workspace diventa un progetto vero: istruzioni generate, materiale come file di conoscenza, chat propria.
+  const nowIso = nowIsoOf(nowMs, tz);
+  const pid = projects.createProject(db, { name: spec.title, instructions: spec.systemContext, kind: spec.kind, widgets: spec.widgets }, nowIso, nowMs);
+  if (fullText.length > 200) projects.addFile(db, pid, { name: 'materiale del progetto.txt', content: fullText }, nowIso);
+  if (jobId) {
+    if (db.get('SELECT id FROM jobs WHERE id = ?', jobId)) db.run('UPDATE jobs SET project = ? WHERE id = ?', pid, jobId);
+    const map = kvGet(db, 'workspacesMigrated', {});
+    map[jobId] = pid;
+    kvSet(db, 'workspacesMigrated', map);
+  }
+  void id;
+  projects.enterProject(db, pid, {}, nowIso, nowMs);
+  return projects.activeSummary(db);
 }
 
-/** Spunta/despunta un elemento della checklist del workspace attivo. */
+/** Spunta/despunta un elemento della checklist del progetto attivo. */
 export function toggleWorkspaceItem(db, widgetIdx, itemIdx) {
-  const active = getActiveWorkspace(db);
-  if (!active || !Array.isArray(active.widgets)) return null;
-  const w = active.widgets[Number(widgetIdx)];
-  if (!w || w.type !== 'checklist' || !Array.isArray(w.items) || !w.items[Number(itemIdx)]) return active;
-  w.items[Number(itemIdx)].done = !w.items[Number(itemIdx)].done;
-  kvSet(db, ACTIVE_KEY, active);
-  if (active.jobId) saveSpec(db, active.jobId, active);
-  return active;
+  const a = projects.getActive(db);
+  if (!a) return null;
+  const widgets = a.project.widgets;
+  const w = widgets[Number(widgetIdx)];
+  if (w && w.type === 'checklist' && Array.isArray(w.items) && w.items[Number(itemIdx)]) {
+    w.items[Number(itemIdx)].done = !w.items[Number(itemIdx)].done;
+    projects.updateProject(db, a.project.id, { widgets }, a.project.updated);
+  }
+  return projects.activeSummary(db);
 }

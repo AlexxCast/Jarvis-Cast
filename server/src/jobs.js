@@ -8,6 +8,7 @@ import * as memory from './memory.js';
 import * as mood from './mood.js';
 import * as devices from './devices.js';
 import { pushInbox, logEvent } from './db.js';
+import * as projects from './projects.js';
 import { today as todayOf, nowIso as nowIsoOf, nowHuman } from './clock.js';
 
 const MAX_STEPS = 14;
@@ -39,15 +40,16 @@ export function extractProjectFiles(text) {
   return files;
 }
 
-export function createJob(db, { title, goal }, ms, tz) {
+export function createJob(db, { title, goal, project = '' }, ms, tz) {
   const id = newId('j', ms);
   const at = nowIsoOf(ms, tz);
-  db.run('INSERT INTO jobs (id, title, goal, status, created, updated) VALUES (?, ?, ?, ?, ?, ?)', id, String(title || 'Compito').slice(0, 80), String(goal).slice(0, 2000), 'planning', at, at);
+  const pid = project && projects.getProject(db, project) ? String(project) : '';
+  db.run('INSERT INTO jobs (id, title, goal, status, created, updated, project) VALUES (?, ?, ?, ?, ?, ?, ?)', id, String(title || 'Compito').slice(0, 80), String(goal).slice(0, 2000), 'planning', at, at, pid);
   return id;
 }
 
 export function listJobs(db) {
-  return db.all('SELECT id, title, goal, status, steps, result, created, updated FROM jobs ORDER BY created DESC LIMIT 30').map(j => {
+  return db.all('SELECT id, title, goal, status, steps, result, created, updated, project FROM jobs ORDER BY created DESC LIMIT 30').map(j => {
     let steps = [];
     try { steps = JSON.parse(j.steps); } catch { /* vuoto */ }
     const doneCount = steps.filter(s => s.status === 'done').length;
@@ -64,9 +66,11 @@ export function listJobs(db) {
 
 export const hasPendingJobs = (db) => !!db.get("SELECT id FROM jobs WHERE status IN ('planning', 'running') LIMIT 1");
 
-function background(db, goal, ms, tz) {
+function background(db, goal, ms, tz, project = '') {
   const today = todayOf(ms, tz);
   const out = [`ADESSO: ${nowHuman(ms, tz)}.`];
+  // Compito di un progetto: istruzioni, file pertinenti e memoria del progetto vengono prima di tutto.
+  if (project) { const pb = projects.jobBackground(db, project, goal); if (pb) out.push(pb); }
   const rec = memory.recall(db, goal, { limit: 16 });
   if (rec.entries.length) out.push('COSA SAI DELL\'UTENTE\n' + rec.entries.map(m => `- (${m.module}) ${m.text}`).join('\n'));
   if (DIET_KEYWORDS.test(goal)) out.push(dietContext(loadDiary(db), today).filter(b => b.prio <= 2).map(b => b.text).join('\n\n'));
@@ -92,11 +96,11 @@ export async function advance(db, env, deps) {
   };
 
   try {
-    const ctx = background(db, job.goal, ms, tz);
+    const ctx = background(db, job.goal, ms, tz, job.project || '');
     if (job.status === 'planning') {
       const res = await call('smart',
         `Sei il pianificatore a grafo multi-agente di Jarvis. L'utente è l'orchestratore: trasforma il compito complesso in un grafo di nodi-agente piccoli e indipendenti (da 1 a ${MAX_STEPS}, ciascuno con un ruolo preciso: Architetto, Logico, Sviluppatore, Revisore). Ogni nodo deve indicare SOLO gli id dei nodi genitori da cui dipende ("dependsOn") per evitare di sprecare token. Se serve programmare multi-file o GUI, dedica un nodo a ciascun modulo/file. Rispondi SOLO con JSON: {"reply": "ok", "steps": [{"id": "n1", "role": "Architetto", "title": "...", "dependsOn": [], "instruction": "...", "tier": "fast|smart"}]}`,
-        `${ctx.slice(0, 3000)}\n\nCOMPITO: ${job.goal}`, 1100);
+        `${ctx.slice(0, job.project ? 9000 : 3000)}\n\nCOMPITO: ${job.goal}`, 1100);
       const obj = extractObject(res.text);
       let steps = Array.isArray(obj?.steps) ? obj.steps.filter(s => s && s.instruction).slice(0, MAX_STEPS) : [];
       if (!steps.length) steps = [{ id: 'n1', role: 'Esecutore', title: job.title, dependsOn: [], instruction: job.goal, tier: 'smart' }];
@@ -135,7 +139,7 @@ export async function advance(db, env, deps) {
           : '';
       const res = await call(steps[i].tier,
         `Sei il nodo-agente "${steps[i].role || 'Specialista'}" di Jarvis. Lavori con contesto chirurgico per risparmiare token: svolgi SOLO il tuo nodo in italiano, applicando logiche, calcoli o codice completo senza introduzioni.${codeHint}`,
-        `${ctx.slice(0, 2000)}\n\nCOMPITO COMPLESSIVO: ${job.goal}\n\n${manifest}${prior ? 'RISULTATI DEI PASSI PRECEDENTI:\n' + prior + '\n\n' : ''}PASSO DA SVOLGERE ORA (${i + 1} di ${steps.length}) — ${steps[i].title}: ${steps[i].instruction}`, 2400);
+        `${ctx.slice(0, job.project ? 9000 : 2000)}\n\nCOMPITO COMPLESSIVO: ${job.goal}\n\n${manifest}${prior ? 'RISULTATI DEI PASSI PRECEDENTI:\n' + prior + '\n\n' : ''}PASSO DA SVOLGERE ORA (${i + 1} di ${steps.length}) — ${steps[i].title}: ${steps[i].instruction}`, 2400);
       steps[i].status = 'done';
       steps[i].output = res.text.trim().slice(0, 10000);
       steps[i].model = res.key;

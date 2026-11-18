@@ -11,6 +11,9 @@ import * as devices from './devices.js';
 import * as jarvisCore from './jarvis_core.js';
 import * as selfHeal from './self_heal.js';
 import * as workspace from './workspace.js';
+import * as projects from './projects.js';
+import * as initiative from './initiative.js';
+import * as lessons from './lessons.js';
 import * as places from './places.js';
 import * as agenda from './agenda.js';
 import * as ui from './ui.js';
@@ -51,6 +54,7 @@ function statePayload(db, ms, tz, env = {}) {
     timedActions: kvGet(db, 'timedActions', []).filter(t => Number(t.dueMs) > ms),
     skills: flows.listSkills(db),
     activeWorkspace: workspace.getActiveWorkspace(db),
+    activeProject: projects.activeSummary(db),
     legacyImported: kvGet(db, 'legacyImported', null),
     layout: ui.loadLayout(db),
     mood: mood.current(db, ms),
@@ -147,7 +151,8 @@ export async function handleApi(db, env, deps, request) {
     if (path === '/api/state' && method === 'GET') return json(statePayload(db, ms, tz, env));
 
     if (path === '/api/history' && method === 'GET') {
-      const session = String(url.searchParams.get('session') || 'main');
+      // Senza sessione indicata: la chat in corso (quella del progetto attivo, se ce n'è uno).
+      const session = String(url.searchParams.get('session') || projects.activeSession(db));
       const rows = db.all('SELECT id, role, text, at, meta FROM messages WHERE session = ? ORDER BY id DESC LIMIT 80', session).reverse();
       return json({ messages: rows.map(m => ({ id: m.id, role: m.role, text: m.text, at: m.at, ...(safeParse(m.meta) || {}) })) });
     }
@@ -279,10 +284,19 @@ export async function handleApi(db, env, deps, request) {
         summaries: db.all("SELECT id, summary, updated FROM sessions WHERE summary != '' ORDER BY updated DESC LIMIT 20"),
         active,
         jobs: jobs.listJobs(db).slice(0, 10).map(j => ({ id: j.id, title: j.title, status: j.status, steps: j.steps.length })),
+        // Cosa è entrato nel contesto dell'ultima risposta, e com'è andata la gestione della memoria.
+        context: kvGet(db, 'contextReport', null),
+        contextHistory: kvGet(db, 'contextReports', []),
+        consolidation: kvGet(db, 'consolidationLog', []).slice(-7),
+        improvements: kvGet(db, 'improvementRequests', []).slice(-10),
+        ignoredHeard: kvGet(db, 'ignoredHeard', []).slice(-5),
+        projects: projects.listProjects(db).slice(0, 12),
+        lessons: lessons.list(db).slice(-12).reverse(),
+        initiative: { settings: initiative.settings(db), history: kvGet(db, 'initiativeHistory', []).slice(-8).reverse() },
       });
     }
     if (path === '/api/memory' && method === 'GET') {
-      return json({ modules: memory.listModules(db), entries: db.all('SELECT id, module, text, created, uses FROM memories ORDER BY module, id DESC LIMIT 1000') });
+      return json({ modules: memory.listModules(db), entries: db.all("SELECT id, module, text, created, uses FROM memories WHERE module NOT LIKE 'p:%' ORDER BY module, id DESC LIMIT 1000") });
     }
     if (path === '/api/memory' && method === 'POST') {
       const b = await body(request);
@@ -338,6 +352,77 @@ export async function handleApi(db, env, deps, request) {
       return j ? json({ ...j, steps: safeParse(j.steps) || [] }) : bad('non trovato', 404);
     }
     if (job && method === 'DELETE') { db.run('DELETE FROM jobs WHERE id = ?', job[1]); return json({ jobs: jobs.listJobs(db) }); }
+
+    // ---------------------------------------------------------------- iniziativa, notifiche, lezioni
+    if (path === '/api/notify' && method === 'POST') {
+      // Notifiche lette dall'app Android: contesto per "chi mi ha scritto?" e avvisi se urgenti.
+      const b = await body(request);
+      return json(initiative.ingestNotifications(db, b.items, ms, tz));
+    }
+    if (path === '/api/initiative' && method === 'GET') return json({ settings: initiative.settings(db), history: kvGet(db, 'initiativeHistory', []).slice(-20).reverse() });
+    if (path === '/api/initiative' && method === 'POST') return json({ settings: initiative.saveSettings(db, await body(request)) });
+    if (path === '/api/lessons' && method === 'GET') return json({ lessons: lessons.list(db).slice().reverse() });
+    const lessonDel = /^\/api\/lessons\/([\w-]+)$/.exec(path);
+    if (lessonDel && method === 'DELETE') { lessons.forget(db, lessonDel[1]); return json({ lessons: lessons.list(db).slice().reverse() }); }
+
+    // ---------------------------------------------------------------- progetti (come i progetti di Claude)
+    if (path === '/api/projects' && method === 'GET') return json({ projects: projects.listProjects(db), active: projects.activeSummary(db) });
+    if (path === '/api/projects' && method === 'POST') {
+      const b = await body(request);
+      if (!String(b.name || '').trim()) return bad('serve un nome');
+      const id = projects.createProject(db, { name: b.name, instructions: b.instructions || '' }, nowIsoOf(ms, tz), ms);
+      return json({ id, projects: projects.listProjects(db) });
+    }
+    if (path === '/api/projects/exit' && method === 'POST') {
+      projects.exitProject(db);
+      return json({ state: statePayload(db, ms, tz, env) });
+    }
+    const pr = /^\/api\/projects\/([\w-]+)(?:\/(files|memory|chats|jobs|enter)(?:\/([\w-]+))?)?$/.exec(path);
+    if (pr) {
+      const [, pid, sub, subId] = pr;
+      const p = projects.getProject(db, pid);
+      if (!p) return bad('progetto non trovato', 404);
+      const at = nowIsoOf(ms, tz);
+      const detail = () => json({
+        project: projects.getProject(db, pid), files: projects.listFiles(db, pid), chats: projects.listChats(db, pid),
+        memories: projects.listMemories(db, pid), jobs: jobs.listJobs(db).filter(j => j.project === pid), active: projects.activeSummary(db),
+      });
+      if (!sub && method === 'GET') return detail();
+      if (!sub && (method === 'POST' || method === 'PATCH')) { const b = await body(request); projects.updateProject(db, pid, b, at); return detail(); }
+      if (!sub && method === 'DELETE') { projects.deleteProject(db, pid); return json({ projects: projects.listProjects(db), state: statePayload(db, ms, tz, env) }); }
+      if (sub === 'enter' && method === 'POST') {
+        const b = await body(request);
+        projects.enterProject(db, pid, { chatId: String(b.chatId || ''), newChat: b.newChat === true }, at, ms);
+        return json({ state: statePayload(db, ms, tz, env) });
+      }
+      if (sub === 'files' && method === 'POST') {
+        const b = await body(request);
+        let content = typeof b.content === 'string' ? b.content : '';
+        if (b.encoding === 'base64') {
+          // PDF: il testo viene estratto una volta sola e salvato, così ogni modello lo può leggere.
+          content = await router.readPdfWithGemini(env, deps.fetchFn, content.replace(/^data:[^,]+,/, ''), 'Estrai fedelmente tutto il testo, le tabelle e le istruzioni di questo PDF.') || '';
+          if (!content) return bad('non sono riuscita a leggere il PDF');
+        }
+        if (!projects.addFile(db, pid, { name: b.name, content }, at)) return bad('file vuoto');
+        return detail();
+      }
+      if (sub === 'files' && subId && method === 'DELETE') { projects.deleteFile(db, pid, subId); return detail(); }
+      if (sub === 'memory' && method === 'POST') { const b = await body(request); if (!projects.remember(db, pid, b.text, at)) return bad('testo mancante'); return detail(); }
+      if (sub === 'memory' && subId && method === 'DELETE') { db.run('DELETE FROM memories WHERE id = ? AND module = ?', Number(subId), projects.memModule(pid)); return detail(); }
+      if (sub === 'chats' && subId && method === 'DELETE') {
+        const c = db.get('SELECT * FROM project_chats WHERE id = ? AND project = ?', subId, pid);
+        if (c) { db.run('DELETE FROM messages WHERE session = ?', c.session); db.run('DELETE FROM sessions WHERE id = ?', c.session); db.run('DELETE FROM project_chats WHERE id = ?', c.id); }
+        if (kvGet(db, 'activeProject', null)?.chat === subId) projects.exitProject(db);
+        return detail();
+      }
+      if (sub === 'jobs' && method === 'POST') {
+        const b = await body(request);
+        if (!String(b.goal || '').trim()) return bad('serve un obiettivo');
+        startJob({ title: String(b.title || b.goal).slice(0, 60), goal: String(b.goal), project: pid });
+        return detail();
+      }
+      return bad('richiesta non valida', 404);
+    }
 
     if (path === '/api/workspace/enter' && method === 'POST') {
       const b = await body(request);

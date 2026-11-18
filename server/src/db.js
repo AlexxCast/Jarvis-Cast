@@ -17,6 +17,11 @@ CREATE TABLE IF NOT EXISTS reminders (id TEXT PRIMARY KEY, text TEXT NOT NULL, d
 CREATE TABLE IF NOT EXISTS code_proposals (id TEXT PRIMARY KEY, request TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, branch TEXT NOT NULL DEFAULT '', pr INTEGER NOT NULL DEFAULT 0, files TEXT NOT NULL DEFAULT '[]', error TEXT NOT NULL DEFAULT '', created TEXT NOT NULL, updated TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS inbox (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, text TEXT NOT NULL, at TEXT NOT NULL, delivered INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS events (id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS projects (id TEXT PRIMARY KEY, name TEXT NOT NULL, instructions TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL DEFAULT 'progetto', widgets TEXT NOT NULL DEFAULT '[]', created TEXT NOT NULL, updated TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS project_files (id INTEGER PRIMARY KEY AUTOINCREMENT, project TEXT NOT NULL, name TEXT NOT NULL, content TEXT NOT NULL, created TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS project_files_project ON project_files(project);
+CREATE TABLE IF NOT EXISTS project_chats (id TEXT PRIMARY KEY, project TEXT NOT NULL, title TEXT NOT NULL DEFAULT '', session TEXT NOT NULL, created TEXT NOT NULL, updated TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS project_chats_project ON project_chats(project);
 `;
 
 /** Adatta ctx.storage.sql (Durable Object) all'interfaccia { all, get, run }. */
@@ -43,6 +48,7 @@ const ADDED_COLUMNS = [
   "ALTER TABLE reminders ADD COLUMN place TEXT NOT NULL DEFAULT ''",
   "ALTER TABLE reminders ADD COLUMN place_event TEXT NOT NULL DEFAULT ''",
   "ALTER TABLE topics ADD COLUMN parent TEXT NOT NULL DEFAULT ''",
+  "ALTER TABLE jobs ADD COLUMN project TEXT NOT NULL DEFAULT ''",
 ];
 
 export function migrate(db) {
