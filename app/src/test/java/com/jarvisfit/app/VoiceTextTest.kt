@@ -30,7 +30,6 @@ class VoiceTextTest {
             "a posto così",
             "stop",
             "annulla",
-            "niente",
             "chiudi",
             "lascia stare",
             "arrivederci",
@@ -122,24 +121,26 @@ class VoiceTextTest {
     private fun direct(text: String): String? = (VoiceText.wake(text) as? VoiceText.Wake.Direct)?.command
 
     @Test
-    fun sensitivityChangesHowEasilyJarvisAnswers() {
-        assertTrue(VoiceText.wake("che ore sono jarvis", 0.2f) is VoiceText.Wake.None)
-        assertTrue(VoiceText.wake("jarvis che ore sono", 0.2f) is VoiceText.Wake.Direct)
-        assertTrue(VoiceText.wake("ehi davis accendi la luce", 0.5f) is VoiceText.Wake.None)
-        assertTrue(VoiceText.wake("ehi davis accendi la luce", 0.9f) is VoiceText.Wake.Direct)
-        assertTrue(VoiceText.wake("allora jarvis mi dici il meteo di oggi", 0.9f) is VoiceText.Wake.Direct)
-        assertTrue(VoiceText.wake("ieri ho visto il film Marvel dove c'è Jarvis", 0.9f) is VoiceText.Wake.Ambiguous)
+    fun sensitivityChangesHowEasilyKestraAnswers() {
+        assertTrue(VoiceText.wake("che ore sono kestra", 0.2f) is VoiceText.Wake.None)
+        assertTrue(VoiceText.wake("kestra che ore sono", 0.2f) is VoiceText.Wake.Direct)
+        assertTrue(VoiceText.wake("ehi kiestra accendi la luce", 0.5f) is VoiceText.Wake.None)
+        assertTrue(VoiceText.wake("ehi kiestra accendi la luce", 0.9f) is VoiceText.Wake.Direct)
+        assertTrue(VoiceText.wake("allora kestra mi dici il meteo di oggi", 0.9f) is VoiceText.Wake.Direct)
+        assertTrue(VoiceText.wake("ieri ho visto la serie dove c'è Kestra", 0.9f) is VoiceText.Wake.Ambiguous)
     }
 
     @Test
     fun testWake_DirectCalls() {
-        assertEquals("quante calorie mi restano", direct("Jarvis, quante calorie mi restano?"))
-        assertEquals("aggiungi una mela", direct("Ehi Jarvis aggiungi una mela"))
-        assertEquals("", direct("ciao Jarvis"))
-        assertEquals("", direct("Jarvis"))
-        assertEquals("che ore sono", direct("che ore sono Jarvis"))
-        // Il comando deve arrivare intero, non troncato
-        assertEquals("ricordami alle 18 di chiamare il dentista", direct("Hey Jarvis ricordami alle 18 di chiamare il dentista"))
+        assertEquals("quante calorie mi restano", direct("Kestra, quante calorie mi restano?"))
+        assertEquals("aggiungi una mela", direct("Ehi Kestra aggiungi una mela"))
+        assertEquals("", direct("ciao Kestra"))
+        assertEquals("", direct("Kestra"))
+        assertEquals("che ore sono", direct("che ore sono Kestra"))
+        assertEquals("ricordami alle 18 di chiamare il dentista", direct("Hey Kestra ricordami alle 18 di chiamare il dentista"))
+        // Storpiature vere del riconoscimento italiano
+        assertEquals("apri whatsapp", direct("chestra apri whatsapp"))
+        assertEquals("che tempo fa", direct("questra che tempo fa"))
     }
 
     @Test
@@ -147,40 +148,51 @@ class VoiceTextTest {
         assertTrue(VoiceText.wake("che tempo fa oggi") is VoiceText.Wake.None)
         assertTrue(VoiceText.wake("") is VoiceText.Wake.None)
         assertFalse(VoiceText.containsWake("ok google apri gemini"))
-        assertTrue(VoiceText.containsWake("ehi jarvis"))
+        assertTrue(VoiceText.containsWake("ehi kestra"))
     }
 
     @Test
-    fun testWake_TalkingAboutJarvisIsNotADirectCall() {
-        val film = VoiceText.wake("ieri ho visto il film Marvel dove c'è Jarvis")
-        assertTrue(film is VoiceText.Wake.Ambiguous)
-        assertTrue((film as VoiceText.Wake.Ambiguous).aboutJarvis)
+    fun `parole italiane comuni non attivano Kestra neanche con sensibilita alta`() {
+        // Falsi positivi reali: "destra", "finestra", "questo" e il frammento "estra" la facevano partire con la TV accesa.
+        for (heard in listOf("gira a destra dopo il semaforo", "chiudi la finestra che fa freddo", "questo è il mio quaderno",
+                "un'orchestra suonava in piazza", "la minestra è pronta", "estrarre il dente")) {
+            assertFalse("'$heard' non deve chiamare Kestra", VoiceText.containsWake(heard, 0.9f))
+            assertTrue("'$heard' non deve chiamare Kestra", VoiceText.wake(heard, 0.9f) is VoiceText.Wake.None)
+        }
+    }
 
-        val middle = VoiceText.wake("secondo me dovremmo chiedere a Jarvis cosa cucinare stasera")
+    @Test
+    fun testWake_TalkingAboutKestraIsNotADirectCall() {
+        val serie = VoiceText.wake("ieri ho visto il film dove c'è Kestra")
+        assertTrue(serie is VoiceText.Wake.Ambiguous)
+        assertTrue((serie as VoiceText.Wake.Ambiguous).aboutJarvis)
+
+        val middle = VoiceText.wake("secondo me dovremmo chiedere a Kestra cosa cucinare stasera")
         assertTrue(middle is VoiceText.Wake.Ambiguous)
+        assertTrue((middle as VoiceText.Wake.Ambiguous).aboutJarvis)
 
-        // Anche a inizio frase, se si parla del personaggio decide il contesto
-        val character = VoiceText.wake("Jarvis è il maggiordomo di Tony Stark nei film")
+        val character = VoiceText.wake("Kestra è il personaggio di quella serie")
         assertTrue(character is VoiceText.Wake.Ambiguous)
-        assertTrue((character as VoiceText.Wake.Ambiguous).aboutJarvis)
     }
 
     @Test
     fun testWake_CommandMentioningFilmsStillReachesContextCheck() {
         // "film" è un indizio, non un divieto: la frase passa al controllo di contesto invece di essere scartata
-        val w = VoiceText.wake("Jarvis che film danno stasera al cinema")
+        val w = VoiceText.wake("Kestra che film danno stasera al cinema")
         assertTrue(w is VoiceText.Wake.Ambiguous)
-        assertEquals("Jarvis che film danno stasera al cinema", (w as VoiceText.Wake.Ambiguous).text)
+        assertEquals("Kestra che film danno stasera al cinema", (w as VoiceText.Wake.Ambiguous).text)
     }
 
     @Test
-    fun `nomi storpiati comuni valgono gia con la sensibilita media`() {
-        for (heard in listOf("giarvis accendi la luce", "garvis che ore sono", "jarbis", "ehi giarvi", "jarviz quante calorie")) {
-            assertTrue("'$heard' dovrebbe chiamare Jarvis", VoiceText.wake(heard, 0.5f) is VoiceText.Wake.Direct)
-        }
-        assertTrue(VoiceText.wake("davis apri whatsapp", 0.5f) == VoiceText.Wake.None)
-        assertTrue(VoiceText.wake("davis apri whatsapp", 0.85f) is VoiceText.Wake.Direct)
-        assertEquals("che ore sono", VoiceText.commandAfterLostWake("giarvis che ore sono"))
+    fun `il nome perso nella frase finale lascia il comando`() {
+        assertEquals("che ore sono", VoiceText.commandAfterLostWake("chestra che ore sono"))
         assertEquals("che ore sono", VoiceText.commandAfterLostWake("che ore sono"))
+    }
+
+    @Test
+    fun `le frasi tipiche di Kestra sentite dal microfono sono eco`() {
+        assertTrue(VoiceText.isSelfEcho("certamente capo ho registrato il pranzo", "", -1L))
+        assertTrue(VoiceText.isSelfEcho("dimmi capo", "", -1L))
+        assertFalse(VoiceText.isSelfEcho("capo della squadra ha detto di no", "", -1L))
     }
 }

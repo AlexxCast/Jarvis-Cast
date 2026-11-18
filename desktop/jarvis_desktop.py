@@ -28,7 +28,10 @@ import tkinter as tk
 from tkinter import messagebox
 
 DIR = Path(__file__).resolve().parent
-CONFIG_PATH = DIR / "config.json"
+# La configurazione vera (indirizzo del server e token) sta in config.local.json, che git ignora.
+# config.json resta solo come vecchio file da cui leggere la prima volta: il token non va nel repository.
+CONFIG_PATH = DIR / "config.local.json"
+LEGACY_CONFIG_PATH = DIR / "config.json"
 
 COMMON_APPS = {
     "chrome": "chrome",
@@ -124,11 +127,20 @@ VK_MAP = {
 
 
 def load_config() -> dict:
-    if CONFIG_PATH.exists():
+    for path in (CONFIG_PATH, LEGACY_CONFIG_PATH):
+        if not path.exists():
+            continue
         try:
-            return json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+            cfg = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
-            pass
+            continue
+        if path is LEGACY_CONFIG_PATH and cfg.get("server_token"):
+            try:
+                save_config(cfg)  # prima volta: copia in config.local.json
+            except Exception:
+                pass
+        if cfg.get("server_url") or path is LEGACY_CONFIG_PATH:
+            return cfg
     return {"server_url": "", "server_token": "", "speak": True}
 
 

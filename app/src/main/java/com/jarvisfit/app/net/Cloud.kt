@@ -72,12 +72,18 @@ object Cloud {
     }
 
     /** Manda una frase al cervello nel cloud. Non lancia eccezioni: in caso di problemi risponde con un messaggio. */
-    suspend fun chat(text: String): Brain.Reply = withContext(Dispatchers.IO) {
+    /**
+     * [followup] = frase sentita a conversazione aperta senza dire "Kestra": il server decide se era
+     * rivolta all'assistente o era la TV / altre persone (in quel caso risponde ignored = true e non dice nulla).
+     */
+    suspend fun chat(text: String, followup: Boolean = false): Brain.Reply = withContext(Dispatchers.IO) {
         try {
             val o = request("POST", "/api/chat", buildJsonObject {
                 put("text", text)
                 put("source", "voice")
+                if (followup) put("followup", true)
             })
+            if ((o["ignored"] as? JsonPrimitive)?.booleanOrNull == true) return@withContext Brain.Reply("", false, null, null, ignored = true)
             Brain.Reply(
                 text = str(o, "reply").ifBlank { "Fatto." },
                 expectReply = (o["expectReply"] as? JsonPrimitive)?.booleanOrNull ?: false,

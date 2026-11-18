@@ -10,13 +10,16 @@ import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
 /**
- * Sintesi vocale italiana condivisa tra app e servizio.
+ * Sintesi vocale italiana condivisa tra app, servizio vocale, agente del telefono e promemoria.
  *
  * Garanzie:
  *  - [speak] chiama SEMPRE onDone, anche se il motore TTS non è disponibile o non notifica la fine
  *    (watchdog), così il servizio vocale non resta mai bloccato in stato "sto parlando".
- *  - onDone arriva solo dopo che l'audio è uscito davvero dallo speaker + 500 ms di cooldown
- *    acustico, così il microfono non riascolta la voce di Jarvis.
+ *  - onDone arriva solo dopo che l'audio è uscito davvero dallo speaker + cooldown acustico.
+ *  - Chiunque faccia parlare Kestra (app aperta, promemoria, agente del telefono) avvisa gli ascoltatori
+ *    registrati con [addListener]: il servizio vocale spegne il microfono finché la voce non è finita.
+ *    Prima solo il servizio vocale lo faceva, e Kestra si riascoltava quando parlava l'app (eco).
+ *  - Ricorda le ultime frasi dette con l'ora in cui sono FINITE ([recentSpoken]), per scartare l'eco.
  */
 object Speaker {
     private var tts: TextToSpeech? = null
@@ -28,9 +31,52 @@ object Speaker {
 
     @Volatile
     private var activelySpeaking = false
+    @Volatile
+    private var cooldownUntil = 0L
+    private const val COOLDOWN_MS = 650L
+
+    /** Testi in riproduzione (id utterance → testo) e ultime frasi finite, per riconoscere l'eco. */
+    private val activeTexts = ConcurrentHashMap<String, String>()
+    private val recent = ArrayDeque<Pair<String, Long>>()
+
+    /** Ascoltatori dello stato della voce: true quando Kestra inizia a parlare, false quando ha finito (cooldown incluso). */
+    private val listeners = java.util.concurrent.CopyOnWriteArrayList<(Boolean) -> Unit>()
+    @Volatile private var announcedSpeaking = false
+
+    fun addListener(l: (Boolean) -> Unit) { listeners.addIfAbsent(l) }
+    fun removeListener(l: (Boolean) -> Unit) { listeners.remove(l) }
+
+    private fun announce(speaking: Boolean) {
+        if (announcedSpeaking == speaking) return
+        announcedSpeaking = speaking
+        listeners.forEach { l -> runCatching { l(speaking) } }
+    }
 
     /** Vero se il TTS sta sintetizzando o riproducendo audio (cooldown incluso). */
-    fun isSpeaking(): Boolean = activelySpeaking || (tts?.isSpeaking == true)
+    fun isSpeaking(): Boolean =
+        activelySpeaking || activeTexts.isNotEmpty() || (tts?.isSpeaking == true) || System.currentTimeMillis() < cooldownUntil
+
+    /** Ultime frasi dette (testo, ora di fine in ms), dalla più recente. */
+    fun recentSpoken(): List<Pair<String, Long>> = synchronized(recent) { recent.toList().asReversed() }
+
+    private fun rememberSpoken(text: String) {
+        if (text.isBlank()) return
+        synchronized(recent) {
+            recent.addLast(text to System.currentTimeMillis())
+            while (recent.size > 4) recent.removeFirst()
+        }
+    }
+
+    /** Fine di un'utterance: memorizza la frase, applica il cooldown e, se non parla più nessuno, avvisa gli ascoltatori. */
+    private fun finish(id: String) {
+        activeTexts.remove(id)?.let { rememberSpoken(it) }
+        cooldownUntil = System.currentTimeMillis() + COOLDOWN_MS
+        mainHandler.postDelayed({
+            if (activeTexts.isEmpty()) activelySpeaking = false
+            callbacks.remove(id)?.invoke()
+            if (activeTexts.isEmpty() && tts?.isSpeaking != true && System.currentTimeMillis() >= cooldownUntil - 20) announce(false)
+        }, COOLDOWN_MS)
+    }
 
     fun init(context: Context) {
         if (tts != null) return
@@ -72,21 +118,16 @@ object Speaker {
     /** Pulisce il testo per la sintesi vocale (markdown, link, emoji). */
     fun cleanTextForSpeech(raw: String): String = VoiceText.cleanForSpeech(raw)
 
-    /** Attende la fine reale dell'audio, poi applica 500 ms di cooldown e invoca la callback. */
+    /** Attende la fine reale dell'audio, poi applica il cooldown e invoca la callback. */
     private fun handleUtteranceFinished(id: String) {
-        if (!callbacks.containsKey(id) && !activelySpeaking) return
+        // I segmenti intermedi di una frase bilingue non chiudono la frase: conta solo l'ultimo (id della frase).
+        if (!activeTexts.containsKey(id) && !callbacks.containsKey(id)) return
         val checkRunnable = object : Runnable {
             var attempts = 0
             override fun run() {
                 attempts++
-                if (tts?.isSpeaking == true && attempts < 80) {
-                    mainHandler.postDelayed(this, 50)
-                } else {
-                    mainHandler.postDelayed({
-                        activelySpeaking = false
-                        callbacks.remove(id)?.invoke()
-                    }, 500)
-                }
+                if (tts?.isSpeaking == true && attempts < 80) mainHandler.postDelayed(this, 50)
+                else finish(id)
             }
         }
         mainHandler.post(checkRunnable)
@@ -149,7 +190,6 @@ object Speaker {
     fun speak(text: String, onDone: (() -> Unit)? = null) {
         val cleaned = cleanTextForSpeech(text)
         if (cleaned.isBlank() || failed) {
-            activelySpeaking = false
             onDone?.invoke()
             return
         }
@@ -161,7 +201,11 @@ object Speaker {
         val segments = splitLanguageSegments(cleaned)
         val id = "u" + System.nanoTime()
         if (onDone != null) callbacks[id] = onDone
+        // QUEUE_FLUSH interrompe la frase precedente: la si chiude subito, senza aspettare il watchdog.
+        activeTexts.keys.toList().forEach { prev -> finish(prev) }
+        activeTexts[id] = cleaned
         activelySpeaking = true
+        if (Looper.myLooper() == Looper.getMainLooper()) announce(true) else mainHandler.post { announce(true) }
         var ok = true
         for ((idx, pair) in segments.withIndex()) {
             val (segText, segLocale) = pair
@@ -182,24 +226,26 @@ object Speaker {
             }
         }
         if (!ok) {
-            activelySpeaking = false
+            activeTexts.remove(id)
+            if (activeTexts.isEmpty()) activelySpeaking = false
             callbacks.remove(id)?.invoke()
+            if (activeTexts.isEmpty()) mainHandler.post { announce(false) }
             return
         }
         // Watchdog: se il motore non notifica mai la fine, sblocca comunque il flusso
         val maxMs = (3_000L + cleaned.length * 120L).coerceAtMost(95_000L)
         mainHandler.postDelayed({
-            if (callbacks.containsKey(id)) {
-                activelySpeaking = false
-                callbacks.remove(id)?.invoke()
-            }
+            if (activeTexts.containsKey(id) || callbacks.containsKey(id)) finish(id)
         }, maxMs)
     }
 
     /** Interrompe la voce. Le callback in sospeso vengono scartate (il chiamante gestisce il nuovo flusso). */
     fun stop() {
+        activeTexts.keys.toList().forEach { k -> activeTexts.remove(k)?.let { rememberSpoken(it) } }
         activelySpeaking = false
         callbacks.clear()
         runCatching { tts?.stop() }
+        cooldownUntil = System.currentTimeMillis() + COOLDOWN_MS
+        mainHandler.postDelayed({ if (activeTexts.isEmpty()) announce(false) }, COOLDOWN_MS)
     }
 }

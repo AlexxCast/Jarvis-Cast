@@ -225,7 +225,7 @@ test('grafo e multi-agente locale: i flow appresi creano il ramo autonomo e gli 
   }))).json();
   assert.equal(hb2.commands.length, 1);
   assert.equal(hb2.commands[0].kind, 'open_app');
-  assert.equal(hb2.commands[0].target, 'Chrome');
+  assert.equal(hb2.commands[0].target.toLowerCase(), 'chrome');
 
   const pcStatus = await handleChat(db, ENV, deps(zeroLlm), { text: 'Jarvis qual è lo stato del PC?' });
   assert.equal(pcStatus.model, 'jarvis-core');

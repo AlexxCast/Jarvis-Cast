@@ -77,34 +77,34 @@ object VoiceText {
     }
 
     /**
-     * Il riconoscimento italiano scrive "Jarvis" in molti modi: detto a voce normale esce spesso
-     * "giarvis", "jarvi", "garvis"... Tutte queste valgono già con la sensibilità media; il contesto
-     * (nome all'inizio, alla fine o giudicato dal server) evita le false chiamate.
+     * Il riconoscimento italiano scrive "Kestra" in molti modi ("chestra", "questra", "kesra"...).
+     * SOLO omofoni veri: parole italiane comuni come "destra", "finestra", "questo" o il frammento "estra"
+     * facevano attivare Kestra parlando normalmente nella stanza o con la TV accesa (falsi positivi).
      */
-    private val wakeToken = Regex("\\b(kestra|chestra|questra|cestra|khestra|keistra|kesra|kestre|kestro|kestrah|chestre|chestro|estra)\\b")
-    /** Sensibilità alta: accetta anche come il riconoscimento vocale storpia spesso "Kestra" detto a voce bassa o da lontano. */
-    private val wakeTokenLoose = Regex("\\b(kestra|chestra|questra|cestra|khestra|keistra|kesra|kestre|kestro|kestrah|chestre|chestro|estra|castra|destra|finestra|kestre|chiestra|questo|kest)\\b")
+    private val wakeToken = Regex("\\b(kestra|chestra|questra|cestra|khestra|keistra|kesra|kestre|kestro|kestrah|chestre|chestro|kestrà|kesztra)\\b")
+    /** Sensibilità alta: anche le storpiature più lontane, ma mai parole italiane di uso comune. */
+    private val wakeTokenLoose = Regex("\\b(kestra|chestra|questra|cestra|khestra|keistra|kesra|kestre|kestro|kestrah|chestre|chestro|kestrà|kesztra|chiestra|kiestra|kestar|chestar|kestera|kesstra)\\b")
 
-    /** Parole che possono precedere il nome quando lo si chiama ("ehi Jarvis", "senti Jarvis"). */
+    /** Parole che possono precedere il nome quando lo si chiama ("ehi Kestra", "senti Kestra"). */
     private val callWords = setOf(
         "ehi", "hey", "ei", "hei", "ciao", "ok", "okay", "senti", "ascolta", "scusa", "scusami",
         "allora", "oh", "dimmi", "per", "favore", "cortesia", "ora", "adesso", "dico", "sentimi",
         "buongiorno", "buonasera", "buonanotte", "grazie", "e", "ma", "dai",
     )
 
-    /** Indizi che si sta parlando DI Jarvis (il personaggio dei film, o l'assistente in terza persona). */
+    /** Indizi che si sta parlando DI Kestra (un film, una serie, l'assistente in terza persona). */
     private val aboutCues = Regex(
-        "\\b(film|marvel|iron man|ironman|tony stark|stark|avengers|ultron|fumett\\w*|serie|personaggi\\w*|attore|cinema|" +
-            "si chiama|chiamat\\w*|chiamano|di jarvis|su jarvis|con jarvis|a jarvis|il jarvis|un jarvis|" +
-            "questo jarvis|quel jarvis|tipo jarvis|come jarvis)\\b"
+        "\\b(film|marvel|serie|personaggi\\w*|attore|attrice|cinema|videogioc\\w*|gioco|fumett\\w*|si chiama|chiamat\\w*|chiamano)\\b"
     )
+    /** Parole che, subito prima del nome, indicano che se ne sta parlando in terza persona ("chiedi a Kestra"). */
+    private val aboutBefore = setOf("di", "su", "con", "a", "il", "la", "un", "una", "questo", "questa", "quel", "quella", "tipo", "come", "della", "sulla", "alla", "dalla")
 
     /** Vero se nella frase (anche parziale) compare la parola di attivazione. */
     fun containsWake(text: String, sensitivity: Float = 0.5f): Boolean =
         (if (sensitivity > 0.7f) wakeTokenLoose else wakeToken).containsMatchIn(normalize(text))
 
     /**
-     * La frase finale ha perso il nome che i risultati parziali avevano sentito ("Jarvis accendi" →
+     * La frase finale ha perso il nome che i risultati parziali avevano sentito ("Kestra accendi" →
      * "accendi"): è comunque una chiamata, con quello che resta come comando.
      */
     fun commandAfterLostWake(finalText: String): String = normalize(finalText).let { t ->
@@ -113,9 +113,9 @@ object VoiceText {
     }
 
     /**
-     * Decide se una frase è una chiamata a Jarvis.
-     * - "Jarvis, quante calorie mi restano?" / "Ehi Jarvis" / "che ore sono Jarvis" → [Wake.Direct]
-     * - "ieri ho visto il film dove c'è Jarvis" → [Wake.Ambiguous] (deciderà il contesto)
+     * Decide se una frase è una chiamata a Kestra.
+     * - "Kestra, quante calorie mi restano?" / "Ehi Kestra" / "che ore sono Kestra" → [Wake.Direct]
+     * - "ieri ho visto il film dove c'è Kestra" → [Wake.Ambiguous] (deciderà il contesto)
      */
     fun wake(raw: String, sensitivity: Float = 0.5f): Wake {
         val norm = normalize(raw)
@@ -123,7 +123,7 @@ object VoiceText {
         val before = norm.substring(0, m.range.first).trim()
         val after = norm.substring(m.range.last + 1).trim()
         val beforeWords = before.split(" ").filter { it.isNotBlank() }
-        val about = aboutCues.containsMatchIn(norm)
+        val about = aboutCues.containsMatchIn(norm) || (beforeWords.lastOrNull() in aboutBefore && beforeWords.size > 1)
 
         // Nome all'inizio (eventualmente dopo un saluto): chiamata diretta.
         if (beforeWords.size <= 3 && beforeWords.all { it in callWords }) {

@@ -53,7 +53,7 @@ test('applyEdits: sostituzioni univoche, solo nella web app', () => {
 
 test('Jarvis programmatore: richiesta a voce → ramo, pull request e anteprima; approvazione → unione', async () => {
   const db = makeDb();
-  const { gh, fn } = world({ edits: (body) => (/Sei JARVIS/.test(body.messages[0].content)
+  const { gh, fn } = world({ edits: (body) => (/Sei KESTRA/.test(body.messages[0].content)
     ? reply({ reply: 'Preparo la modifica, la avviso quando l\'anteprima è pronta.', actions: [{ type: 'code_change', request: 'Mostra il deficit nella scheda Oggi' }] })
     : EDIT) });
   const d = deps(fn);

@@ -11,6 +11,17 @@ import { nowIso as nowIsoOf } from './clock.js';
 const ACTIVE_KEY = 'activeWorkspace';
 const SPECS_KEY = 'workspaceSpecs';
 
+/**
+ * Toglie dal contesto di un progetto le righe che obbligano a "verificare la passphrase" o a ripetere
+ * la parola d'ordine: il modello le aveva copiate dalla memoria nel prompt del progetto e ogni risposta
+ * iniziava con "Verifica passphrase: niente più fili [OK]".
+ */
+export function cleanProjectContext(text) {
+  return String(text || '').split('\n')
+    .filter(l => !/(passphrase|parola\s+d'ordine|niente\s+pi[uù]\s+fili)/i.test(l))
+    .join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 export function getActiveWorkspace(db) {
   return kvGet(db, ACTIVE_KEY, null);
 }
@@ -146,7 +157,7 @@ Includi solo widget davvero utili e specifici per quel documento/obiettivo.`,
       spec = {
         title: String(parsed.title || projTitle).slice(0, 70),
         kind: String(parsed.kind || 'progetto').slice(0, 20),
-        systemContext: String(parsed.systemContext).slice(0, 12000),
+        systemContext: cleanProjectContext(parsed.systemContext).slice(0, 12000),
         widgets: parsed.widgets.slice(0, 6),
       };
     }
