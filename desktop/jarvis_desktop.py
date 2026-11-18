@@ -954,11 +954,23 @@ class JarvisDesktopApp:
                         self.log("PC registrato e connesso al sistema multi-dispositivo di Jarvis.")
                     for cmd in res.get("commands") or []:
                         execute_pc_command(cmd, self.log, self.cfg)
+                    wait = poll_wait(res)
                 except Exception:
+                    wait = 10
                     if self.online:
                         self.online = False
                         self.root.after(0, lambda: self.status_lbl.configure(text="○ Disconnesso (riprovo...)", fg="#f59e0b"))
-            time.sleep(2)
+            else:
+                wait = 5
+            time.sleep(wait)
+
+
+def poll_wait(res) -> float:
+    """Il server dice tra quanto richiedere: 2 secondi quando il Capo usa Kestra, di più quando è tutto fermo."""
+    try:
+        return min(30.0, max(2.0, float(res.get("nextPollMs") or 2000) / 1000))
+    except (TypeError, ValueError, AttributeError):
+        return 2.0
 
 
 DAEMON_PORT = 47621
@@ -1040,12 +1052,16 @@ def run_background_daemon() -> None:
                 last_err = ""
                 for cmd in res.get("commands") or []:
                     execute_pc_command(cmd, bg_log, cfg)
+                wait = poll_wait(res)
             except Exception as e:
+                wait = 10  # server irraggiungibile: niente raffica di tentativi
                 err_s = str(e)
                 if err_s != last_err:
                     last_err = err_s
                     bg_log(f"Errore heartbeat: {err_s}")
-        time.sleep(2)
+        else:
+            wait = 5
+        time.sleep(wait)
 
 
 if __name__ == "__main__":

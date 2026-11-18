@@ -75,6 +75,7 @@ export async function handleApi(db, env, deps, request) {
 
   try {
     if (path === '/api/chat' && method === 'POST') {
+      devices.markActive(db, ms); // il Capo sta parlando: il PC torna a chiedere comandi ogni 2 secondi
       const b = await body(request);
       const image = typeof b.image === 'string' && b.image.length > 100 ? b.image.replace(/^data:image\/\w+;base64,/, '') : null;
       const files = Array.isArray(b.files) ? b.files.slice(0, 4).filter(f => f && f.name && typeof f.content === 'string').map(f => ({
@@ -130,6 +131,7 @@ export async function handleApi(db, env, deps, request) {
     if (path === '/api/devices/heartbeat' && method === 'POST') return json(devices.heartbeat(db, await body(request), ms));
     if (path === '/api/devices/command' && method === 'POST') {
       const b = await body(request);
+      devices.markActive(db, ms);
       const cmd = devices.enqueueCommand(db, b.targetDevice || 'desktop', b, ms);
       return json({ command: cmd, devices: devices.listDevices(db, ms), history: devices.listCommandHistory(db) });
     }

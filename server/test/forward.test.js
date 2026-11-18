@@ -46,3 +46,17 @@ test('avvio: la migrazione non riscrive nulla se lo schema è già aggiornato', 
   const db = makeDb();
   assert.equal(migrate(db), false);
 });
+
+test('richieste: il PC chiede ogni 2 secondi mentre il Capo usa Kestra, più di rado quando è tutto fermo', async () => {
+  const { makeDb } = await import('./helpers.js');
+  const devices = await import('../src/devices.js');
+  const db = makeDb();
+  const t0 = Date.parse('2026-11-18T20:00:00Z');
+  assert.equal(devices.heartbeat(db, { kind: 'desktop' }, t0).nextPollMs, 8000);
+  assert.equal(devices.heartbeat(db, { kind: 'desktop', poll: false }, t0).nextPollMs, 30000);
+  devices.markActive(db, t0);
+  assert.equal(devices.heartbeat(db, { kind: 'desktop' }, t0 + 60_000).nextPollMs, 2000);
+  assert.equal(devices.heartbeat(db, { kind: 'desktop' }, t0 + 11 * 60_000).nextPollMs, 8000);
+  devices.enqueueCommand(db, 'desktop', { kind: 'open_app', target: 'Chrome' }, t0 + 12 * 60_000);
+  assert.equal(devices.heartbeat(db, { kind: 'desktop' }, t0 + 12 * 60_000 + 5000).nextPollMs, 2000);
+});

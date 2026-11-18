@@ -413,3 +413,4 @@ Il vero motivo dell'"Errore 500": "Exceeded allowed rows written in Durable Obje
 - `db.js`: la migrazione salva la firma dello schema e all'avvio non riscrive nulla se è uguale.
 - Con il limite esaurito l'app si apre in sola lettura e mostra un messaggio chiaro invece di "Errore 500".
 Regola: niente scritture nel database a ogni richiesta frequente (battiti, polling); tenere in memoria e salvare a intervalli.
+- Anche le richieste hanno un limite gratuito (100.000 al giorno) e il PC da solo ne faceva circa 86.000. Ora il server risponde al battito con `nextPollMs`: 2 secondi per 10 minuti dopo un messaggio o un comando, 8 secondi quando è tutto fermo, 30 secondi per la finestra quando il demone in background è attivo. Il programma del PC (`desktop/jarvis_desktop.py`) segue quel ritmo e, se il server non risponde, riprova dopo 10 secondi. Va aggiornato a mano sul PC: il vecchio programma continua a chiedere ogni 2 secondi, ma senza più scrivere nel database.

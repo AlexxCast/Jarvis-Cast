@@ -8,7 +8,7 @@ import * as flows from './flows.js';
 const DEVICES_KEY = 'devicesRegistry';
 const QUEUE_KEY = 'devicesQueue';
 const HISTORY_KEY = 'devicesHistory';
-const ONLINE_TTL_MS = 45_000;
+const ONLINE_TTL_MS = 45_000; // il PC fermo chiede ogni 8 secondi, la finestra ogni 30: restano entrambi "online"
 
 // Il PC manda un battito ogni 2 secondi (anche due programmi insieme): scriverlo ogni volta nel database
 // consumava da solo quasi 90.000 scritture al giorno, oltre il limite gratuito di Cloudflare (100.000).
@@ -16,6 +16,17 @@ const ONLINE_TTL_MS = 45_000;
 const PERSIST_MS = 5 * 60_000;
 const live = new WeakMap(); // db → Map(id → record più recente)
 const liveOf = (db) => { let m = live.get(db); if (!m) { m = new Map(); live.set(db, m); } return m; };
+
+// Ritmo delle domande del PC ("hai comandi per me?"): ogni 2 secondi quando il Capo sta usando Kestra,
+// ogni 8 quando è tutto fermo. Anche le richieste hanno un limite gratuito (100.000 al giorno).
+const ACTIVE_MS = 10 * 60_000;
+const FAST_POLL_MS = 2000, IDLE_POLL_MS = 8000, GUI_POLL_MS = 30_000;
+const activeUntil = new WeakMap();
+export function markActive(db, nowMs = Date.now()) { activeUntil.set(db, nowMs + ACTIVE_MS); }
+export function pollDelay(db, nowMs, { poll = true, delivered = 0 } = {}) {
+  if (!poll) return GUI_POLL_MS;
+  return delivered || nowMs < (activeUntil.get(db) || 0) ? FAST_POLL_MS : IDLE_POLL_MS;
+}
 
 function storedDevices(db) {
   const raw = kvGet(db, DEVICES_KEY, []);
@@ -79,7 +90,8 @@ export function heartbeat(db, payload = {}, nowMs = Date.now()) {
     kvSet(db, QUEUE_KEY, rest);
   }
 
-  return { device: { ...record, online: true }, commands: mine };
+  if (mine.length) markActive(db, nowMs);
+  return { device: { ...record, online: true }, commands: mine, nextPollMs: pollDelay(db, nowMs, { poll: shouldPoll, delivered: mine.length }) };
 }
 
 const STOPWORDS_APP = new Set(['l', 'la', 'lo', 'le', 'il', 'i', 'gli', 'un', 'una', 'uno', 'per', 'su', 'da', 'in', 'di', 'a', 'e', 'o', 'che', 'con', 'non', 'si', 'no', 'del', 'della', 'dello', 'dei', 'degli', 'delle', 'al', 'alla', 'allo', 'nel', 'nella', 'nello', 'sul', 'sulla', 'sullo']);
