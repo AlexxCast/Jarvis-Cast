@@ -129,18 +129,24 @@ object Speaker {
     private fun pickMaleVoice(engine: TextToSpeech, locale: Locale): android.speech.tts.Voice? {
         val lang = locale.language
         val candidates = runCatching {
-            (engine.voices ?: emptySet()).filter { it.locale.language == lang && !it.isNetworkConnectionRequired }
+            (engine.voices ?: emptySet()).filter { it.locale.language == lang }
         }.getOrDefault(emptyList())
         if (candidates.isEmpty()) return null
         val maleHints = listOf("male", "#male", "-itd-", "-tpd-", "-iom-", "-iol-", "-rjs-", "cosimo", "luca", "diego", "david", "daniel", "george", "guy", "ryan")
         val femaleHints = listOf("female", "#female", "-itc-", "-itb-", "-sfg-", "-tpf-", "elsa", "alice", "federica", "zira", "samantha", "jenny", "aria")
-        return candidates.firstOrNull { v ->
+        val naturalHints = listOf("wavenet", "neural", "natural", "studio", "hd", "journey")
+
+        fun score(v: android.speech.tts.Voice): Int {
             val n = v.name.lowercase()
-            maleHints.any { n.contains(it) } && femaleHints.none { n.contains(it) }
-        } ?: candidates.firstOrNull { v ->
-            val n = v.name.lowercase()
-            femaleHints.none { n.contains(it) }
+            if (femaleHints.any { n.contains(it) }) return -1000
+            var s = v.quality // HIGH=400, VERY_HIGH=500, NORMAL=300
+            if (maleHints.any { n.contains(it) }) s += 300
+            if (naturalHints.any { n.contains(it) }) s += 200
+            if (!v.isNetworkConnectionRequired) s += 40 // piccola preferenza per stabilità offline a parità di qualità
+            if (v.locale.country.equals(locale.country, ignoreCase = true)) s += 30
+            return s
         }
+        return candidates.maxByOrNull { score(it) }
     }
 
     /** Parla e chiama [onDone] quando l'audio è terminato (garantito, anche in caso di errore). */
@@ -168,8 +174,8 @@ object Speaker {
             runCatching {
                 val maleVoice = pickMaleVoice(engine, segLocale)
                 if (maleVoice != null) engine.voice = maleVoice else engine.language = segLocale
-                engine.setPitch(0.86f)
-                engine.setSpeechRate(if (segLocale == Locale.US) 0.92f else 1.0f)
+                engine.setPitch(0.95f)
+                engine.setSpeechRate(if (segLocale == Locale.US) 0.94f else 1.0f)
             }
             val queueMode = if (isFirst) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
             val uttId = if (isLast) id else "seg_${idx}_${System.nanoTime()}"

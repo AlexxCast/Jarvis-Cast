@@ -635,17 +635,19 @@ function speakBilingual(text, onDone) {
   const voices = window.speechSynthesis.getVoices?.() || [];
   const pickMaleWebVoice = (langPrefix) => {
     const pool = voices.filter(v => String(v.lang || '').toLowerCase().startsWith(langPrefix));
-    const maleRe = /\b(male|cosimo|luca|marco|diego|giorgio|david|daniel|george|guy|ryan|andrew|mark)\b/i;
-    const femaleRe = /\b(female|elsa|alice|federica|paola|zira|samantha|victoria|jenny|aria|susan)\b/i;
-    return pool.find(v => maleRe.test(v.name) && !femaleRe.test(v.name)) || pool.find(v => !femaleRe.test(v.name)) || null;
+    const maleRe = /\b(male|cosimo|luca|marco|diego|giorgio|david|daniel|george|guy|ryan|andrew|mark|brian|christopher)\b/i;
+    const femaleRe = /\b(female|elsa|alice|federica|paola|zira|samantha|victoria|jenny|aria|susan|isabella)\b/i;
+    const natRe = /\b(natural|neural|online|google|premium|enhanced|wavenet)\b/i;
+    const score = (v) => (femaleRe.test(v.name) ? -100 : 0) + (maleRe.test(v.name) ? 30 : 0) + (natRe.test(v.name) ? 20 : 0) + (!v.localService ? 5 : 0);
+    return pool.slice().sort((a, b) => score(b) - score(a))[0] || null;
   };
   segs.forEach((sg, idx) => {
     const u = new SpeechSynthesisUtterance(sg.text);
     u.lang = sg.lang;
     const mv = pickMaleWebVoice(sg.lang.slice(0, 2));
     if (mv) u.voice = mv;
-    u.pitch = 0.86;
-    u.rate = sg.lang === 'en-US' ? 0.92 : 1.0;
+    u.pitch = 0.96;
+    u.rate = sg.lang === 'en-US' ? 0.94 : 1.0;
     if (idx === segs.length - 1) { u.onend = () => onDone?.(); u.onerror = () => onDone?.(); }
     window.speechSynthesis.speak(u);
   });
