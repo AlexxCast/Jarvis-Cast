@@ -96,6 +96,36 @@ object Speaker {
         mainHandler.post(checkRunnable)
     }
 
+    private val ENGLISH_HINT = Regex(
+        """\b(i'm|you're|we're|they're|it's|didn't|doesn't|don't|wasn't|weren't|won't|i'd|i've|can't|would|could|should|going\s+to|have\s+you|the|was|were|with|from|this|that|there|here|what|where|when|why|how|yesterday|tomorrow|last\s+week|please|sorry|hello|thanks|amazing|wallet|movie|weekend|question|walk)\b""",
+        RegexOption.IGNORE_CASE,
+    )
+    private val ITALIAN_HINT = Regex(
+        """\b(che|per|con|non|sono|hai|abbiamo|signore|esercizio|frase|regola|errore|ripeti|lezione|domani|stasera|oggi|bene|bravo|giusto|sbagliato|risposta|prova|adesso|ora|questo|questa|quello|quella|anche|perch[eé]|come|quando|dove|quindi|allora|molto|poco|tutto|tutti|mia|mio|tuo|tua|suo|sua|nel|nella|sul|sulla|dal|dalla|alla|degli|delle|pu[oò]|vuole|devo|fai|fatto)\b""",
+        RegexOption.IGNORE_CASE,
+    )
+
+    private fun splitLanguageSegments(text: String): List<Pair<String, Locale>> {
+        val rawParts = text.split(Regex("""(?<=[.!?;:\n])\s+|(?="[^"]+")|(?<=")\s+"""))
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+        val out = mutableListOf<Pair<String, Locale>>()
+        for (part in rawParts) {
+            val clean = part.replace("\"", "").trim()
+            if (clean.isEmpty()) continue
+            val enCount = ENGLISH_HINT.findAll(clean).count()
+            val itCount = ITALIAN_HINT.findAll(clean).count()
+            val locale = if (enCount >= 1 && enCount > itCount) Locale.US else Locale.ITALIAN
+            if (out.isNotEmpty() && out.last().second == locale) {
+                val prev = out.removeAt(out.lastIndex)
+                out += (prev.first + " " + clean) to locale
+            } else {
+                out += clean to locale
+            }
+        }
+        return if (out.isEmpty()) listOf(text to Locale.ITALIAN) else out
+    }
+
     /** Parla e chiama [onDone] quando l'audio è terminato (garantito, anche in caso di errore). */
     fun speak(text: String, onDone: (() -> Unit)? = null) {
         val cleaned = cleanTextForSpeech(text)
@@ -109,17 +139,34 @@ object Speaker {
             synchronized(pending) { pending += cleaned to onDone }
             return
         }
+        val segments = splitLanguageSegments(cleaned)
         val id = "u" + System.nanoTime()
         if (onDone != null) callbacks[id] = onDone
         activelySpeaking = true
-        val result = engine.speak(cleaned, TextToSpeech.QUEUE_FLUSH, Bundle(), id)
-        if (result == TextToSpeech.ERROR) {
+        var ok = true
+        for ((idx, pair) in segments.withIndex()) {
+            val (segText, segLocale) = pair
+            val isFirst = idx == 0
+            val isLast = idx == segments.lastIndex
+            runCatching {
+                engine.language = segLocale
+                engine.setSpeechRate(if (segLocale == Locale.US) 0.92f else 1.0f)
+            }
+            val queueMode = if (isFirst) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+            val uttId = if (isLast) id else "seg_${idx}_${System.nanoTime()}"
+            val result = engine.speak(segText, queueMode, Bundle(), uttId)
+            if (result == TextToSpeech.ERROR) {
+                ok = false
+                break
+            }
+        }
+        if (!ok) {
             activelySpeaking = false
             callbacks.remove(id)?.invoke()
             return
         }
         // Watchdog: se il motore non notifica mai la fine, sblocca comunque il flusso
-        val maxMs = (3_000L + cleaned.length * 110L).coerceAtMost(90_000L)
+        val maxMs = (3_000L + cleaned.length * 120L).coerceAtMost(95_000L)
         mainHandler.postDelayed({
             if (callbacks.containsKey(id)) {
                 activelySpeaking = false

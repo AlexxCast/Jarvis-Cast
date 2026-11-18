@@ -120,3 +120,26 @@
 [2026-11-17 18:32:22] Errore heartbeat: <urlopen error [Errno 11001] getaddrinfo failed>
 [2026-11-18 10:22:35] Eseguo comando [open_url]: https://www.youtube.com
 [2026-11-18 10:22:35] Chrome avviato (Profile 1): https://www.youtube.com
+[2026-11-18 10:29:56] Errore heartbeat: <urlopen error [Errno 11001] getaddrinfo failed>
+[2026-11-18 10:50:13] Eseguo comando [write_project]: Lezione di inglese
+[2026-11-18 10:50:13] Eseguo comando [open_app]: Lezione di inglese
+[2026-11-18 10:50:13] App 'Lezione di inglese' non trovata sul PC (nessun popup aperto).
+[2026-11-18 10:50:13] Errore scrittura progetto: Unterminated string starting at: line 1 column 46 (char 45)
+[2026-11-18 10:50:13] Eseguo comando [write_project]: Lezione di inglese
+[2026-11-18 10:50:13] Eseguo comando [write_project]: Lezione di inglese
+[2026-11-18 10:50:13] Errore scrittura progetto: Unterminated string starting at: line 1 column 46 (char 45)
+[2026-11-18 10:50:13] Errore scrittura progetto: Unterminated string starting at: line 1 column 46 (char 45)
+[2026-11-18 10:50:13] Eseguo comando [write_project]: Lezione di inglese
+[2026-11-18 10:50:13] Eseguo comando [write_project]: Lezione di inglese
+[2026-11-18 10:50:13] Errore scrittura progetto: Unterminated string starting at: line 1 column 46 (char 45)
+[2026-11-18 10:50:13] Eseguo comando [write_project]: Lezione di inglese
+[2026-11-18 10:50:13] Errore scrittura progetto: Unterminated string starting at: line 1 column 46 (char 45)
+[2026-11-18 10:50:13] Eseguo comando [write_project]: Lezione di inglese
+[2026-11-18 10:50:13] Errore scrittura progetto: Unterminated string starting at: line 1 column 46 (char 45)
+[2026-11-18 10:50:13] Eseguo comando [write_project]: Lezione di inglese
+[2026-11-18 10:50:13] Errore scrittura progetto: Unterminated string starting at: line 1 column 46 (char 45)
+[2026-11-18 10:50:13] Eseguo comando [open_app]: modulo
+[2026-11-18 10:50:13] Errore scrittura progetto: Unterminated string starting at: line 1 column 46 (char 45)
+[2026-11-18 10:50:13] App 'modulo' non trovata sul PC (nessun popup aperto).
+[2026-11-18 10:50:13] Eseguo comando [open_app]: Warm
+[2026-11-18 10:50:13] App 'Warm' non trovata sul PC (nessun popup aperto).

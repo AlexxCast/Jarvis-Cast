@@ -553,9 +553,10 @@ function viewChat() {
       (m.image ? '📷 ' : '') + m.text,
       m.card ? h('span', { class: 'cardline' }, m.card) : null,
       visualOf(m),
+      m.role === 'assistant' ? h('button', { type: 'button', class: 'btn icon ghost', style: 'padding:2px 6px;margin-left:6px;vertical-align:middle', title: 'Ascolta (IT/EN)', onclick: () => speakBilingual(m.text) }, '🔊') : null,
       m.model ? h('span', { class: 'meta' }, m.model.split(':').pop()) : null)),
     store.sending ? h('div', { class: 'msg assistant pending' }, 'Sto pensando…') : null);
-  const ta = h('textarea', { rows: 1, placeholder: 'Scrivi a Jarvis…', 'aria-label': 'Messaggio', onkeydown: (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); const v = ta.value; ta.value = ''; send(v); } } });
+  const ta = h('textarea', { rows: 1, placeholder: 'Scrivi o registra con 🎙️ e invia quando sei pronto…', 'aria-label': 'Messaggio', onkeydown: (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); const v = ta.value; ta.value = ''; send(v); } } });
   const attachBar = (store.pendingFiles && store.pendingFiles.length)
     ? h('div', { class: 'attachments' },
       store.pendingFiles.map((f, idx) =>
@@ -573,16 +574,23 @@ function viewChat() {
         toast(`Workspace attivo: ${out.activeWorkspace.title}`);
       }) }, '🎯 Attiva come Workspace Progetto'))
     : null;
+  const isTutor = store.state?.activeWorkspace?.kind === 'tutor';
+  if (!store.recLang) store.recLang = isTutor ? 'en-US' : 'it-IT';
+  const recBar = (isTutor || store.recording)
+    ? h('div', { class: 'attachments', style: 'justify-content:space-between' },
+      h('span', { class: 'muted small' }, store.recording ? `🔴 Sto registrando in ${store.recLang === 'en-US' ? '🇬🇧 Inglese' : '🇮🇹 Italiano'}… premi 🎙️ per fermare e invia con → quando sei pronto` : '🎙️ Modalità esercizio: registra e invia quando ti senti pronto'),
+      h('button', { type: 'button', class: 'btn', style: 'padding:3px 8px;font-size:.78rem', onclick: () => { store.recLang = store.recLang === 'en-US' ? 'it-IT' : 'en-US'; render(); } }, store.recLang === 'en-US' ? '🇬🇧 EN' : '🇮🇹 IT'))
+    : null;
   const composer = h('div', { class: 'composer' },
     store.pendingImage ? h('img', { class: 'thumb', alt: 'Foto allegata', src: 'data:image/jpeg;base64,' + store.pendingImage, onclick: () => { store.pendingImage = null; render(); } }) : null,
     h('button', { class: 'btn icon', title: 'Allega file', 'aria-label': 'Allega file', onclick: () => pickFile() }, icon(ICONS.file)),
     h('button', { class: 'btn icon', 'aria-label': native ? 'Scatta una foto' : 'Allega una foto', onclick: () => pickPhoto(!!native) }, icon(ICONS.photo)),
     h('button', { class: 'btn icon', title: 'Video Call Live con Jarvis', 'aria-label': 'Video Call Live', onclick: () => openLiveCall() }, icon(ICONS.video)),
     native ? h('button', { class: 'btn icon', 'aria-label': 'Scegli dalla galleria', onclick: () => pickPhoto(false) }, icon(ICONS.gallery)) : null,
-    native ? h('button', { class: 'btn icon', 'aria-label': 'Parla ora', onclick: () => nativeCall('listenNow') }, icon(ICONS.mic)) : null,
+    h('button', { class: 'btn icon' + (store.recording ? ' danger' : ''), title: 'Registra bozza vocale (invii tu quando sei pronto)', 'aria-label': 'Registra bozza vocale', onclick: () => toggleDraftRecording(ta) }, icon(ICONS.mic)),
     h('button', { class: 'btn icon' + (store.chatOpen ? ' on' : ''), 'aria-label': store.chatOpen ? 'Chiudi la chat' : 'Apri la chat', 'aria-pressed': store.chatOpen ? 'true' : 'false', onclick: () => { store.chatOpen = !store.chatOpen; render(); if (store.chatOpen) scrollChat(); } }, icon(ICONS.chat)),
     ta,
-    h('button', { class: 'btn primary icon', 'aria-label': 'Invia', disabled: store.sending, onclick: () => { const v = ta.value; ta.value = ''; send(v); } }, icon(ICONS.send)));
+    h('button', { class: 'btn primary icon', 'aria-label': 'Invia', disabled: store.sending, onclick: () => { if (store.recording) stopDraftRecording(); const v = ta.value; ta.value = ''; send(v); } }, icon(ICONS.send)));
   const activeProj = (store.state?.jobs || []).find(j => j.status === 'planning' || j.status === 'running');
   const nextRem = (store.state?.reminders || [])[0];
   const nextTimed = (store.state?.timedActions || [])[0];
@@ -597,8 +605,87 @@ function viewChat() {
   const ws = store.state?.activeWorkspace;
   const wsPanel = ws ? renderAdaptiveWorkspace(ws) : null;
   return store.chatOpen
-    ? [wsPanel, orb.el, list, attachBar, composer]
-    : [wsPanel, codeBanner(), upcomingBanner, projBanner, renderLiveCards(true), widgets('jarvis'), orb.el, caption, attachBar, composer];
+    ? [wsPanel, orb.el, list, attachBar, recBar, composer]
+    : [wsPanel, codeBanner(), upcomingBanner, projBanner, renderLiveCards(true), widgets('jarvis'), orb.el, caption, attachBar, recBar, composer];
+}
+
+// ------------------------------------------------------------------ Sintesi bilingue IT/EN & Registrazione bozza vocale manuale
+
+const EN_TTS_RE = /\b(i'm|you're|we're|they're|it's|didn't|doesn't|don't|wasn't|weren't|won't|i'd|i've|can't|would|could|should|going\s+to|have\s+you|the|was|were|with|from|this|that|there|here|what|where|when|why|how|yesterday|tomorrow|last\s+week|please|sorry|hello|thanks|amazing|wallet|movie|weekend|question|walk)\b/i;
+const IT_TTS_RE = /\b(che|per|con|non|sono|hai|abbiamo|signore|esercizio|frase|regola|errore|ripeti|lezione|domani|stasera|oggi|bene|bravo|giusto|sbagliato|risposta|prova|adesso|ora|questo|questa|quello|quella|anche|perch[eé]|come|quando|dove|quindi|allora|molto|poco|tutto|tutti)\b/i;
+
+function speakBilingual(text, onDone) {
+  const clean = String(text || '').replace(/[*_`#]/g, ' ').trim();
+  if (!clean) { onDone?.(); return; }
+  if (native) {
+    nativeCall('speak', clean);
+    setTimeout(() => onDone?.(), Math.min(18000, 1200 + clean.length * 60));
+    return;
+  }
+  if (!window.speechSynthesis) { onDone?.(); return; }
+  window.speechSynthesis.cancel();
+  const parts = clean.split(/(?<=[.!?;:\n])\s+|(?="[^"]+")|(?<=")\s+/).map(s => s.replace(/"/g, '').trim()).filter(Boolean);
+  const segs = [];
+  for (const p of parts) {
+    const lang = (EN_TTS_RE.test(p) && !IT_TTS_RE.test(p)) ? 'en-US' : 'it-IT';
+    if (segs.length && segs[segs.length - 1].lang === lang) segs[segs.length - 1].text += ' ' + p;
+    else segs.push({ text: p, lang });
+  }
+  if (!segs.length) { onDone?.(); return; }
+  segs.forEach((sg, idx) => {
+    const u = new SpeechSynthesisUtterance(sg.text);
+    u.lang = sg.lang;
+    u.rate = sg.lang === 'en-US' ? 0.92 : 1.0;
+    if (idx === segs.length - 1) { u.onend = () => onDone?.(); u.onerror = () => onDone?.(); }
+    window.speechSynthesis.speak(u);
+  });
+}
+
+let draftRecog = null;
+function stopDraftRecording() {
+  store.recording = false;
+  try { draftRecog?.stop(); } catch {}
+  draftRecog = null;
+  render();
+}
+function toggleDraftRecording(ta) {
+  if (store.recording) { stopDraftRecording(); return; }
+  const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SR) {
+    if (native) nativeCall('listenNow');
+    else toast('Riconoscimento vocale non supportato su questo browser.');
+    return;
+  }
+  try {
+    draftRecog = new SR();
+    draftRecog.lang = store.recLang || (store.state?.activeWorkspace?.kind === 'tutor' ? 'en-US' : 'it-IT');
+    draftRecog.continuous = true;
+    draftRecog.interimResults = true;
+    let baseText = ta.value ? ta.value.trim() + ' ' : '';
+    store.recording = true;
+    render();
+    draftRecog.onresult = (ev) => {
+      let finalChunk = '';
+      let interim = '';
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const t = ev.results[i][0]?.transcript || '';
+        if (ev.results[i].isFinal) finalChunk += t + ' ';
+        else interim += t;
+      }
+      if (finalChunk) baseText += finalChunk;
+      ta.value = (baseText + interim).trim();
+    };
+    draftRecog.onerror = () => {};
+    draftRecog.onend = () => {
+      if (store.recording) {
+        try { draftRecog.start(); } catch { stopDraftRecording(); }
+      }
+    };
+    draftRecog.start();
+  } catch (e) {
+    store.recording = false;
+    toast('Impossibile avviare la registrazione: ' + e.message);
+  }
 }
 
 function renderAdaptiveWorkspace(ws) {
