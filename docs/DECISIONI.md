@@ -403,3 +403,6 @@ Diagnosi fatta leggendo i 1.589 messaggi salvati. Decisioni:
   - composer su due righe (campo e invio sopra, strumenti sotto);
   - meno emoji nelle etichette;
   - tutti i testi usano "Kestra" e il "tu" (prima c'erano "Jarvis" e il "Lei").
+
+### Errori 500 muti (2026-11-18)
+Se il Durable Object si blocca (riavvio durante un aggiornamento, limite di CPU o memoria, migrazione fallita), Cloudflare rispondeva con una pagina 500 senza dettagli e l'app mostrava solo "Errore 500". Ora `server/src/forward.js` riprova una volta gli errori passeggeri e altrimenti risponde 503 con il motivo vero; il Durable Object risponde sempre in JSON anche se fallisce la migrazione all'avvio. Se l'errore torna, il testo mostrato dall'app dice cosa è successo.
