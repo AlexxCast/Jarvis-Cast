@@ -175,6 +175,7 @@ const ICONS = {
   file: 'M21.44 11.05l-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48',
   send: 'M5 12h14|M13 6l6 6-6 6', photo: 'M4 8h3l2-3h6l2 3h3v11H4z|M12 10a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7z', mic: 'M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3z|M5 11a7 7 0 0 0 14 0|M12 18v3', trash: 'M4 7h16|M9 7V4h6v3|M6 7l1 13h10l1-13',
   video: 'M3 7a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z|M16 10l5-3v10l-5-3z',
+  progetti: 'M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z',
 };
 const fmt = (n) => Math.round(Number(n) || 0).toLocaleString('it-IT');
 const dateLabel = (iso) => { const d = new Date(iso + 'T12:00:00'); return d.toLocaleDateString('it-IT', { weekday: 'short', day: 'numeric', month: 'short' }); };
@@ -311,6 +312,7 @@ async function send(text) {
       setTimeout(() => loadGraph(true), 6000);
     }
     store.messages.push({ role: 'assistant', text: out.reply, card: out.card, model: out.model, visual: out.visual || null });
+    if ((out.actions || []).some(a => String(a).startsWith('project_'))) { store.projects = null; store.projectDetail = null; await refresh(); await loadHistory(); }
     if (out.photoRequest) toast('Jarvis chiede una foto: ' + out.photoRequest);
     if ((nativeJson('getConfig') || {}).speakReplies) nativeCall('speak', out.reply);
     markSpeaking(out.reply);
@@ -632,8 +634,9 @@ function viewChat() {
         const out = await api('POST', '/workspace/enter', { text, files });
         store.state = out.state;
         store.chatOpen = true;
+        await loadHistory();
         render();
-        toast(`Workspace attivo: ${out.activeWorkspace.title}`);
+        toast(`Progetto creato: ${out.activeWorkspace.title}`);
       }) }, '🎯 Attiva come Workspace Progetto'))
     : null;
   const isTutor = store.state?.activeWorkspace?.kind === 'tutor';
@@ -774,16 +777,22 @@ function renderAdaptiveWorkspace(ws) {
 
   return h('div', { class: 'ws-panel' },
     h('div', { class: 'row' },
-      h('div', { class: 'grow' },
-        h('div', { class: 'muted small' }, `🎯 MODALITÀ PROGETTO · ${String(ws.kind || 'progetto').toUpperCase()}`),
-        h('b', { style: 'font-size:1.02rem;color:#39ff14' }, ws.title)),
+      h('div', { class: 'grow', style: 'min-width:0' },
+        h('div', { class: 'muted small' }, `Progetto · ${ws.chat?.title || 'nuova chat'}`),
+        h('b', { class: 'clip', style: 'font-size:1.02rem;color:var(--primary);display:block' }, ws.title)),
+      h('button', { class: 'btn', style: 'padding:5px 10px;font-size:.82rem', title: 'Nuova chat nel progetto', onclick: guard(async () => {
+        store.state = (await api('POST', `/projects/${ws.id}/enter`, { newChat: true })).state;
+        await loadHistory(); render();
+      }) }, '+ Chat'),
+      h('button', { class: 'btn', style: 'padding:5px 10px;font-size:.82rem', onclick: () => { store.projectOpen = ws.id; store.projectDetail = null; go('progetti'); } }, 'Apri'),
       h('button', { class: 'btn danger', style: 'padding:5px 10px;font-size:.82rem', onclick: guard(async () => {
-        const out = await api('POST', '/workspace/exit');
+        const out = await api('POST', '/projects/exit');
         store.state = out.state;
         store.wsTimer = null;
+        await loadHistory();
         render();
-        toast('Tornato all\'assetto standard di Jarvis.');
-      }) }, '✕ Esci')),
+        toast('Sei tornato alla chat principale.');
+      }) }, 'Esci')),
     h('div', { class: 'ws-grid' }, (ws.widgets || []).map((w, wIdx) => {
       if (w.type === 'timer') {
         const mins = Number(w.minutes) || 25;
@@ -1061,12 +1070,13 @@ function viewAttivita() {
         store.openJob === j.id && j.result ? h('p', { class: 'pre small', style: 'margin-top:6px;border-top:1px solid var(--line);padding-top:8px' }, j.result) : null,
         h('div', { class: 'row wrap', style: 'margin-top:4px' },
           h('button', { class: 'btn primary', onclick: guard(async () => {
-            toast('Preparo la modalità Workspace del progetto…');
+            toast('Preparo il progetto…');
             const out = await api('POST', '/workspace/enter', { jobId: j.id });
             store.state = out.state;
             store.chatOpen = true;
+            await loadHistory();
             go('chat');
-          }) }, '🎯 Apri Workspace'),
+          }) }, 'Apri come progetto'),
           j.result ? h('button', { class: 'btn', onclick: () => { store.openJob = store.openJob === j.id ? null : j.id; render(); } }, store.openJob === j.id ? 'Chiudi risultato' : 'Leggi risultato') : null,
           j.status === 'done' ? h('button', { class: 'btn primary', onclick: guard(async () => {
             const res = await fetch('/api/jobs/' + j.id + '/document', { headers: { authorization: 'Bearer ' + store.token } });
@@ -1079,6 +1089,109 @@ function viewAttivita() {
   ];
 }
 const jobTag = (j) => h('span', { class: 'tag ' + ({ done: 'ok', failed: 'bad' }[j.status] || 'warn') }, { planning: 'pianifico', running: 'in corso', done: 'completato', failed: 'non riuscito' }[j.status] || j.status);
+
+// ------------------------------------------------------------------ progetti (come i progetti di Claude)
+
+const ago = (iso) => (iso || '').slice(0, 16).replace('T', ' ');
+
+function readFileForProject(file) {
+  if (/\.pdf$/i.test(file.name) || file.type === 'application/pdf') {
+    return new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok({ name: file.name, encoding: 'base64', content: String(r.result).replace(/^data:[^,]+,/, '') }); r.onerror = () => ko(new Error('Lettura del file non riuscita')); r.readAsDataURL(file); });
+  }
+  return file.text().then(content => ({ name: file.name, content }));
+}
+
+async function enterProject(id, body = {}) {
+  store.state = (await api('POST', `/projects/${id}/enter`, body)).state;
+  await loadHistory();
+  store.chatOpen = true;
+  go('chat');
+}
+
+function viewProgetti() {
+  if (store.projectOpen) return viewProgetto(store.projectOpen);
+  if (!store.projects) { api('GET', '/projects').then(r => { store.projects = r.projects; render(); }).catch(e => toast(e.message)); return [h('p', { class: 'empty' }, 'Carico i progetti…')]; }
+  const name = h('input', { placeholder: 'Nome del progetto (es. Tesi, Inglese B2, Viaggio)', 'aria-label': 'Nome del progetto' });
+  const instr = h('textarea', { rows: 3, placeholder: 'Istruzioni per Kestra in questo progetto: ruolo, tono, regole, obiettivo. Puoi cambiarle quando vuoi.', 'aria-label': 'Istruzioni' });
+  const active = store.state?.activeProject;
+  return [
+    h('div', { class: 'card' }, h('h2', {}, 'Nuovo progetto'),
+      h('p', { class: 'muted small' }, 'Ogni progetto ha istruzioni sue, file che Kestra consulta, più chat e una memoria tutta sua. Puoi anche dire "Kestra, crea un progetto chiamato…".'),
+      name, instr,
+      h('button', { class: 'btn primary', onclick: guard(async () => {
+        if (!name.value.trim()) return toast('Serve un nome.');
+        const r = await api('POST', '/projects', { name: name.value, instructions: instr.value });
+        store.projects = r.projects; store.projectOpen = r.id; store.projectDetail = null; render();
+      }) }, 'Crea progetto')),
+    ...(store.projects.length ? store.projects.map(p => h('div', { class: 'card project-card', style: 'cursor:pointer', onclick: () => { store.projectOpen = p.id; store.projectDetail = null; render(); } },
+      h('div', { class: 'row' }, h('h3', { class: 'grow clip', style: 'color:var(--text)' }, p.name), active?.id === p.id ? h('span', { class: 'tag ok' }, 'aperto') : null),
+      h('div', { class: 'muted small' }, `${p.chats} chat · ${p.files} file · ${p.memories} ricordi · aggiornato ${ago(p.updated)}`)))
+      : [h('p', { class: 'empty' }, 'Nessun progetto ancora.')]),
+  ];
+}
+
+function viewProgetto(id) {
+  const back = h('button', { class: 'btn ghost', onclick: () => { store.projectOpen = null; store.projects = null; render(); } }, '‹ Tutti i progetti');
+  if (!store.projectDetail || store.projectDetail.project?.id !== id) {
+    api('GET', '/projects/' + id).then(r => { store.projectDetail = r; render(); }).catch(e => { toast(e.message); store.projectOpen = null; render(); });
+    return [back, h('p', { class: 'empty' }, 'Carico il progetto…')];
+  }
+  const d = store.projectDetail, p = d.project;
+  const set = (r) => { store.projectDetail = r; render(); };
+  const instr = h('textarea', { rows: 6, 'aria-label': 'Istruzioni del progetto', placeholder: 'Come deve lavorare Kestra in questo progetto?' });
+  instr.value = p.instructions || '';
+  const memText = h('input', { placeholder: 'Cosa deve ricordare in questo progetto?', 'aria-label': 'Nuovo ricordo del progetto' });
+  const goal = h('textarea', { rows: 2, placeholder: 'Un lavoro lungo da fare in background con il contesto del progetto', 'aria-label': 'Compito del progetto' });
+  const fileInput = h('input', { type: 'file', multiple: true, style: 'display:none', accept: '.txt,.md,.csv,.json,.pdf,.html,.js,.py,.kt,.java,text/*,application/pdf' });
+  fileInput.addEventListener('change', guard(async () => {
+    for (const f of [...(fileInput.files || [])].slice(0, 6)) {
+      toast(`Carico ${f.name}…`);
+      set(await api('POST', `/projects/${id}/files`, await readFileForProject(f)));
+    }
+  }));
+  const del = store.confirmDelete === id;
+  return [
+    h('div', { class: 'row' }, back),
+    h('div', { class: 'card' },
+      h('div', { class: 'row' }, h('h2', { class: 'grow clip' }, p.name),
+        h('button', { class: 'btn primary', onclick: guard(() => enterProject(id)) }, d.active?.id === id ? 'Torna alla chat' : 'Apri in chat')),
+      h('p', { class: 'muted small' }, `${d.chats.length} chat · ${d.files.length} file · ${d.memories.length} ricordi · ${d.jobs.length} compiti`)),
+    h('div', { class: 'card' }, h('h2', {}, 'Istruzioni'),
+      h('p', { class: 'muted small' }, 'Valgono in ogni chat del progetto, come le istruzioni di un progetto Claude.'),
+      instr, h('button', { class: 'btn primary', onclick: guard(async () => { set(await api('POST', '/projects/' + id, { instructions: instr.value })); toast('Istruzioni salvate.'); }) }, 'Salva istruzioni')),
+    h('div', { class: 'card' },
+      h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'File'), h('button', { class: 'btn', onclick: () => fileInput.click() }, '+ Aggiungi file'), fileInput),
+      h('p', { class: 'muted small' }, 'Kestra li consulta da sola: interi se sono piccoli, altrimenti solo le parti che servono alla domanda. I PDF vengono letti una volta e salvati come testo.'),
+      d.files.length ? h('div', { class: 'list' }, d.files.map(f => h('div', { class: 'item' },
+        h('span', { class: 'grow clip' }, f.name), h('span', { class: 'muted small num' }, `${Math.max(1, Math.round(f.size / 1024))} KB`),
+        h('button', { class: 'btn icon ghost danger', 'aria-label': 'Elimina ' + f.name, onclick: guard(async () => set(await api('DELETE', `/projects/${id}/files/${f.id}`))) }, icon(ICONS.trash)))))
+        : h('p', { class: 'empty' }, 'Nessun file.')),
+    h('div', { class: 'card' },
+      h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Chat'), h('button', { class: 'btn', onclick: guard(() => enterProject(id, { newChat: true })) }, '+ Nuova chat')),
+      d.chats.length ? h('div', { class: 'list' }, d.chats.map(c => h('div', { class: 'item' },
+        h('button', { class: 'btn ghost grow', style: 'text-align:left;justify-content:flex-start;min-width:0', onclick: guard(() => enterProject(id, { chatId: c.id })) },
+          h('span', { class: 'clip' }, c.title || 'Nuova chat')),
+        h('span', { class: 'muted small num' }, `${c.messages} msg · ${ago(c.updated).slice(5)}`),
+        h('button', { class: 'btn icon ghost danger', 'aria-label': 'Elimina chat', onclick: guard(async () => { set(await api('DELETE', `/projects/${id}/chats/${c.id}`)); await refresh(); }) }, icon(ICONS.trash)))))
+        : h('p', { class: 'empty' }, 'Ancora nessuna chat: aprila e scrivi o parla.')),
+    h('div', { class: 'card' }, h('h2', {}, 'Memoria del progetto'),
+      h('p', { class: 'muted small' }, 'Quello che Kestra impara qui resta qui: non entra nelle altre conversazioni.'),
+      h('div', { class: 'row wrap' }, memText, h('button', { class: 'btn primary', onclick: guard(async () => { if (!memText.value.trim()) return; set(await api('POST', `/projects/${id}/memory`, { text: memText.value })); }) }, 'Salva')),
+      d.memories.length ? h('div', { class: 'list' }, d.memories.map(m => h('div', { class: 'item' }, h('span', { class: 'grow' }, m.text),
+        h('button', { class: 'btn icon ghost danger', 'aria-label': 'Dimentica', onclick: guard(async () => set(await api('DELETE', `/projects/${id}/memory/${m.id}`))) }, icon(ICONS.trash)))))
+        : h('p', { class: 'empty' }, 'Ancora nessun ricordo.')),
+    h('div', { class: 'card' }, h('h2', {}, 'Compiti del progetto'),
+      goal, h('button', { class: 'btn primary', onclick: guard(async () => { if (!goal.value.trim()) return; set(await api('POST', `/projects/${id}/jobs`, { goal: goal.value })); toast('Compito avviato: ti avviso a lavoro finito.'); }) }, 'Avvia compito'),
+      d.jobs.length ? h('div', { class: 'list' }, d.jobs.map(j => h('div', { class: 'item' }, h('span', { class: 'grow clip' }, j.title), jobTag(j)))) : null),
+    h('div', { class: 'card' },
+      h('button', { class: 'btn ' + (del ? 'danger' : 'ghost danger'), onclick: guard(async () => {
+        if (!del) { store.confirmDelete = id; render(); return; }
+        const r = await api('DELETE', '/projects/' + id);
+        store.confirmDelete = null; store.projectOpen = null; store.projects = r.projects; store.state = r.state; await loadHistory(); render();
+        toast('Progetto eliminato.');
+      }) }, del ? 'Conferma: elimina progetto, file, chat e memoria' : 'Elimina progetto')),
+  ];
+}
 
 // ------------------------------------------------------------------ altro
 
@@ -1178,9 +1291,12 @@ function viewMente() {
         h('div', { class: 'block' }, h('b', {}, 'Nucleo'), h('span', { class: 'muted small' }, 'Personalità, umore e il tuo profilo: sempre presenti.')),
         h('div', { class: 'block' }, h('b', {}, 'Dipartimenti'), h('span', { class: 'muted small' }, 'Un cassetto per area. Entra nel contesto solo se ne parli.')),
         h('div', { class: 'block' }, h('b', {}, 'Riassunti'), h('span', { class: 'muted small' }, 'Le conversazioni lunghe diventano un riassunto breve.')),
-        h('div', { class: 'block' }, h('b', {}, 'Compiti'), h('span', { class: 'muted small' }, 'Lavori lunghi a passi, ognuno con un contesto pulito.')))),
+        h('div', { class: 'block' }, h('b', {}, 'Compiti'), h('span', { class: 'muted small' }, 'Lavori lunghi a passi, ognuno con un contesto pulito.')),
+        h('div', { class: 'block' }, h('b', {}, 'Progetti'), h('span', { class: 'muted small' }, 'Istruzioni, file, chat e memoria propri: entrano solo quando ci sei dentro.')),
+        h('div', { class: 'block' }, h('b', {}, 'Pulizia'), h('span', { class: 'muted small' }, 'Ogni giorno i ricordi doppi diventano uno. I ricordi entrano per pertinenza.')))),
     h('div', { class: 'card' }, h('h2', {}, 'Nel contesto adesso'),
       m.active.length ? h('div', { class: 'chips' }, m.active.map(a => chip(a, 'ok'))) : h('p', { class: 'muted small' }, 'Solo il nucleo: nessun dipartimento aperto.')),
+    contextCard(m),
     h('div', { class: 'card' }, h('h2', {}, 'Automazioni sul telefono'),
       h('p', { class: 'muted small' }, 'Percorsi autonomi generati in automatico quando chiedi a Jarvis di usare un\'app (nodi verdi/viola sulla sfera).'),
       (m.automations && m.automations.length)
@@ -1203,6 +1319,28 @@ function viewMente() {
     m.jobs.length ? h('div', { class: 'card' }, h('h2', {}, 'Progetti e compiti'),
       h('div', { class: 'chips' }, m.jobs.map(j => chip(`${j.title} · ${j.status} · ${j.steps} passi`, j.status === 'done' ? 'ok' : j.status === 'failed' ? 'bad' : '')))) : null,
   ];
+}
+
+/** Cosa è entrato nel contesto dell'ultima risposta: sezioni con il loro peso, ricordi, file del progetto, cosa è rimasto fuori. */
+function contextCard(m) {
+  const c = m.context;
+  if (!c) return h('div', { class: 'card' }, h('h2', {}, 'Ultima risposta'), h('p', { class: 'muted small' }, 'Ancora nessuna risposta del modello da mostrare.'));
+  const total = Math.max(1, (c.sections || []).reduce((n, s) => n + s.tokens, 0));
+  const pct = Math.min(100, Math.round(((c.used || total) / Math.max(1, c.budget || total)) * 100));
+  return h('div', { class: 'card' },
+    h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Ultima risposta: cosa ho usato'), h('span', { class: 'tag' }, String(c.model || '').split(':').pop() || '—')),
+    h('p', { class: 'muted small' }, `${ago(c.at)} · ${c.project ? 'progetto "' + c.project.project + '"' : 'chat principale'} · ${c.history || 0} messaggi recenti · ${c.recalled || 0} ricordi pertinenti trovati`),
+    h('div', { class: 'row', style: 'gap:8px' }, h('div', { class: 'bar grow' }, h('i', { style: `width:${pct}%` })), h('span', { class: 'num small' }, `${fmt(c.used)} / ${fmt(c.budget)} token`)),
+    h('div', { class: 'list', style: 'margin-top:6px' }, (c.sections || []).map(s => h('div', { class: 'item', style: 'padding:4px 0' },
+      h('span', { class: 'grow small clip' }, s.name),
+      h('div', { class: 'bar', style: 'width:70px' }, h('i', { style: `width:${Math.max(3, Math.round(s.tokens / total * 100))}%` })),
+      h('span', { class: 'muted small num', style: 'width:52px;text-align:right' }, fmt(s.tokens))))),
+    c.project?.files?.length ? h('p', { class: 'small' }, 'File del progetto: ' + c.project.files.join(', ')) : null,
+    c.dropped?.length ? h('p', { class: 'muted small' }, 'Rimasto fuori per spazio: ' + c.dropped.join(', ')) : null,
+    c.memories?.length ? h('details', {}, h('summary', { class: 'small' }, `Ricordi entrati (${c.memories.length})`), h('div', { class: 'list' }, c.memories.map(x => h('div', { class: 'item small' }, x)))) : null,
+    (m.consolidation || []).length ? h('p', { class: 'muted small' }, 'Pulizia della memoria: ' + m.consolidation.map(x => `${x.day.slice(5)} ${x.merged ? x.merged + ' uniti' : 'niente da unire'}`).join(' · ')) : null,
+    (m.improvements || []).length ? h('details', {}, h('summary', { class: 'small' }, `Migliorie richieste (${m.improvements.length})`), h('div', { class: 'list' }, m.improvements.map(x => h('div', { class: 'item small' }, x.text)))) : null,
+    (m.ignoredHeard || []).length ? h('details', {}, h('summary', { class: 'small' }, 'Frasi ignorate (TV, altre persone)'), h('div', { class: 'list' }, m.ignoredHeard.map(x => h('div', { class: 'item small muted' }, x.text)))) : null);
 }
 
 function viewMemoria() {
@@ -1342,7 +1480,7 @@ function viewLogin() {
     h('p', { class: 'muted', style: 'text-align:center' }, 'Inserisca il token scelto durante l\'installazione (JARVIS_TOKEN).'), input, h('button', { class: 'btn primary', onclick: submit }, 'Entra'));
 }
 
-const TABS = [['chat', 'Kestra'], ['oggi', 'Oggi'], ['cucina', 'Cucina'], ['attivita', 'Attività'], ['altro', 'Altro']];
+const TABS = [['chat', 'Kestra'], ['progetti', 'Progetti'], ['oggi', 'Oggi'], ['cucina', 'Cucina'], ['attivita', 'Attività'], ['altro', 'Altro']];
 function go(tab, sub) { store.tab = tab; if (sub) { if (sub !== store.sub) { store.mind = null; store.memory = null; } store.sub = sub; } render(); if (tab === 'chat') scrollChat(); }
 
 function render() {
@@ -1356,13 +1494,13 @@ function render() {
       store.error ? h('button', { class: 'btn primary', onclick: boot }, 'Riprova') : null));
   }
   const listening = !!(nativeJson('getConfig') || {}).listening;
-  const title = { chat: 'Kestra', oggi: 'Oggi', cucina: 'Cucina', attivita: 'Attività', altro: 'Altro' }[store.tab];
+  const title = { chat: 'Kestra', progetti: 'Progetti', oggi: 'Oggi', cucina: 'Cucina', attivita: 'Attività', altro: 'Altro' }[store.tab];
   app.append(h('header', { class: 'top' },
     h('img', { src: '/logo.png', alt: '', class: 'brand-logo' }),
     h('h1', { class: 'brand-title' }, title),
     native ? h('span', { class: 'muted small' }, listening ? 'in ascolto' : 'ascolto spento') : null, native ? h('span', { class: 'dot' + (listening ? ' on' : '') }) : null));
   if (store.tab === 'chat') app.append(...viewChat().filter(Boolean));
-  else app.append(h('main', {}, { oggi: viewOggi, cucina: viewCucina, attivita: viewAttivita, altro: viewAltro }[store.tab]()));
+  else app.append(h('main', {}, { progetti: viewProgetti, oggi: viewOggi, cucina: viewCucina, attivita: viewAttivita, altro: viewAltro }[store.tab]()));
   app.append(h('nav', { class: 'tabs', 'aria-label': 'Sezioni' }, TABS.map(([id, label]) =>
     h('button', { 'aria-current': store.tab === id ? 'page' : null, onclick: () => go(id) }, icon(ICONS[id]), label))));
   if (keep) { const ta = document.querySelector('.composer textarea'); if (ta) ta.value = keep; }

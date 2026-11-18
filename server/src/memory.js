@@ -352,23 +352,70 @@ export function topicsIndex(db, modules) {
  * - Gli altri moduli entrano se il testo ne richiama nome, descrizione o contenuti,
  *   oppure se erano attivi nei turni precedenti (sticky).
  */
+// Radice grossolana per l'italiano: "allenamento", "allenamenti" e "allenarsi" si toccano.
+const rootOf = (w) => (w.length > 5 ? w.slice(0, 5) : w);
+
+/**
+ * Ricordi pertinenti a una frase. Conta le parole in comune per radice (non solo uguali), premia il modulo
+ * di cui si sta parlando, un po' i ricordi usati spesso e quelli recenti; i fatti "generale" restano come base.
+ * Le memorie dei progetti (modulo "p:<id>") non escono qui: entrano solo dentro il loro progetto.
+ */
 export function recall(db, text, { sticky = [], limit = 24 } = {}) {
   const kw = keywords(text);
-  const rows = db.all('SELECT id, module, text, uses FROM memories ORDER BY id DESC LIMIT 2000');
+  const roots = new Set(kw.map(rootOf));
+  const rows = db.all("SELECT id, module, text, uses, last_used FROM memories WHERE module NOT LIKE 'p:%' ORDER BY id DESC LIMIT 2000");
   const mods = db.all('SELECT name, description FROM modules');
   const modScore = new Map();
   for (const m of mods) {
-    const hay = new Set(keywords(m.name.replace(/-/g, ' ') + ' ' + m.description));
-    modScore.set(m.name, kw.filter(k => hay.has(k)).length * 3 + (sticky.includes(m.name) ? 2 : 0));
+    const hay = new Set(keywords(m.name.replace(/-/g, ' ') + ' ' + m.description).map(rootOf));
+    modScore.set(m.name, [...roots].filter(k => hay.has(k)).length * 3 + (sticky.includes(m.name) ? 2 : 0));
   }
+  const newest = rows.length ? rows[0].id : 0;
   const scored = rows.map(row => {
     const hay = new Set(keywords(row.text));
-    const overlap = kw.filter(k => hay.has(k)).length;
+    const hayRoots = new Set([...hay].map(rootOf));
+    let overlap = 0;
+    for (const k of kw) overlap += hay.has(k) ? 2 : hayRoots.has(rootOf(k)) ? 1.5 : 0;
     const base = row.module === 'generale' ? 1 : 0;
-    return { ...row, score: overlap * 2 + (modScore.get(row.module) || 0) + base };
+    const relevant = overlap + (modScore.get(row.module) || 0) + base;
+    // Uso e recenza contano solo se il ricordo è già pertinente: non riempiono il contesto da soli.
+    const bonus = relevant > 0 ? Math.min(1, Math.log2(1 + (row.uses || 0)) / 4) + (newest - row.id < 30 ? 0.3 : 0) : 0;
+    return { ...row, score: relevant + bonus };
   }).filter(x => x.score > 0).sort((a, b) => b.score - a.score || b.id - a.id).slice(0, limit);
   const active = [...new Set(scored.filter(x => x.module !== 'generale').map(x => x.module))];
   return { entries: scored, active };
+}
+
+/**
+ * Consolidamento automatico: nello stesso modulo, due ricordi che dicono quasi la stessa cosa diventano uno
+ * (resta il più recente, che di solito è il più aggiornato, con la somma degli usi). Non cancella mai ricordi
+ * diversi tra loro. Ritorna quanti ne ha uniti.
+ */
+export function consolidate(db) {
+  let merged = 0;
+  const mods = db.all('SELECT DISTINCT module FROM memories').map(r => r.module);
+  for (const mod of mods) {
+    const rows = db.all('SELECT id, text, uses FROM memories WHERE module = ? ORDER BY id DESC LIMIT 400', mod)
+      .map(r => ({ ...r, set: new Set(keywords(r.text).map(rootOf)) }));
+    const gone = new Set();
+    for (let a = 0; a < rows.length; a++) {
+      if (gone.has(rows[a].id) || rows[a].set.size < 2) continue;
+      for (let b = a + 1; b < rows.length; b++) {
+        if (gone.has(rows[b].id)) continue;
+        const A = rows[a].set, B = rows[b].set;
+        let inter = 0;
+        for (const k of A) if (B.has(k)) inter++;
+        const jacc = inter / (A.size + B.size - inter);
+        if (jacc >= 0.8) {
+          db.run('UPDATE memories SET uses = uses + ? WHERE id = ?', rows[b].uses || 0, rows[a].id);
+          db.run('DELETE FROM memories WHERE id = ?', rows[b].id);
+          gone.add(rows[b].id);
+          merged++;
+        }
+      }
+    }
+  }
+  return merged;
 }
 
 export function markUsed(db, ids, nowIso) {
@@ -387,6 +434,10 @@ export function graph(db, { perModule = 24 } = {}) {
   ];
   const jobs = db.all("SELECT id, title, status FROM jobs ORDER BY created DESC LIMIT 24");
   if (jobs.length) branches.push({ id: 'compiti', label: 'Compiti', kind: 'core', children: jobs.map(j => ({ id: 'j:' + j.id, label: j.title, status: j.status })) });
+  // Progetti come i progetti di Claude: un ramo con un nodo per progetto.
+  let projRows = [];
+  try { projRows = db.all('SELECT id, name FROM projects ORDER BY updated DESC LIMIT 24'); } catch { /* tabella non pronta */ }
+  if (projRows.length) branches.push({ id: 'progetti', label: 'Progetti', kind: 'core', children: projRows.map(p => ({ id: 'p:' + p.id, label: p.name })) });
   const flows = kvGet(db, 'phoneFlows', []);
   const autoGoals = kvGet(db, 'autoGoals', []);
   const seenAuto = new Set();

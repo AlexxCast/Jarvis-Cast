@@ -356,3 +356,19 @@ Diagnosi fatta leggendo i 1.589 messaggi salvati. Decisioni:
 - **Progetti**: il contesto di progetto non può contenere passphrase/parola d'ordine (`cleanProjectContext`), e un'intestazione "Verifica passphrase … [OK]" viene tolta dalle risposte.
 - **Pasti**: `update_meal`/`delete_meal` con id sbagliato ritrovano il pasto dello stesso giorno per tipo o alimenti (`findMeal`); senza indizi non si tocca niente.
 - **Token del PC**: `jarvis_desktop.py` usa `config.local.json` (ignorato da git) e legge `config.json` solo la prima volta per migrare. `jarvis_bg.log` non è più nel repository. Il token stava nel repository: va ruotato.
+
+## Progetti come i progetti di Claude, contesto e memoria intelligenti (fase 2, 18/11/2026)
+- **Progetti veri** (`server/src/projects.js`, tabelle `projects`, `project_files`, `project_chats`, colonna `jobs.project`). Ogni progetto ha:
+  - istruzioni proprie;
+  - file di conoscenza, salvati come testo (i PDF vengono estratti una volta sola);
+  - più chat (sessione `p:<progetto>:<chat>`), ognuna con un titolo preso dalla prima domanda;
+  - una memoria sua (modulo `p:<id>`, esclusa dal richiamo generale);
+  - compiti legati, che ricevono istruzioni, file e memoria del progetto.
+- **Dentro un progetto Kestra resta Kestra**: `CORE_PROMPT` (formato JSON e azioni) sempre presente, più l'intestazione del progetto. Prima il prompt del workspace sostituiva tutto e si perdevano formato e azioni.
+- **File per pertinenza**: se tutti i file stanno in circa 7.000 token entrano interi, altrimenti solo i pezzi più vicini alla domanda (radici delle parole). Le altre chat del progetto entrano come riassunto.
+- **Progetto attivo** in kv `activeProject`. App, voce e `/api/history` usano la chat del progetto attivo. A voce: "apri il progetto X", "crea un progetto chiamato X", "nuova chat", "esci dal progetto".
+- **I vecchi workspace** (`workspaceSpecs`, sessione `proj:<id>`) diventano progetti in automatico (`migrateWorkspaces`) senza perdere la conversazione. "Attiva come progetto" con un file ora crea un progetto con il materiale tra i file.
+- **Richiamo dei ricordi**: confronto per radice ("allenamento" ↔ "allenamenti"). Uso frequente e recenza contano solo se il ricordo è già pertinente.
+- **Consolidamento giornaliero** (`memory.consolidate` in `selfInterrogate`): nello stesso modulo, ricordi quasi uguali (Jaccard ≥ 0,8) diventano uno, il più recente. Ricordi diversi non vengono mai cancellati.
+- **Resoconto del contesto**: `buildMessages` registra le sezioni entrate con i token, i ricordi, i file e cosa è rimasto fuori. Lo salva in kv `contextReport` e la vista Mente lo mostra come "Ultima risposta: cosa ho usato".
+- **Interfaccia**: nuova scheda **Progetti**. In chat, la barra del progetto ha "+ Chat", "Apri" ed "Esci".

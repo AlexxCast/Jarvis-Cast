@@ -371,6 +371,18 @@ export function selfInterrogate(db, env = {}, nowMs = Date.now(), tz = 'Europe/R
     if (heal.actions?.length) actionsTaken.push(...heal.actions);
   } catch { /* non bloccare selfInterrogate */ }
 
+  // 3b. Consolidamento della memoria una volta al giorno: i ricordi doppi dello stesso modulo diventano uno.
+  const day = atIso.slice(0, 10);
+  if (kvGet(db, 'lastConsolidation', '') !== day) {
+    kvSet(db, 'lastConsolidation', day);
+    try {
+      const merged = memory.consolidate(db);
+      const log = kvGet(db, 'consolidationLog', []);
+      kvSet(db, 'consolidationLog', [...log.slice(-13), { day, merged }]);
+      if (merged) actionsTaken.push(`memoria consolidata: ${merged} ricordi doppi uniti`);
+    } catch { /* non bloccare */ }
+  }
+
   // 3. Igiene periodica del grafo e delle automazioni (ogni 10 minuti, zero crediti):
   const lastTidy = Number(kvGet(db, 'lastAutoTidyMs', 0));
   if (nowMs - lastTidy > 10 * 60_000) {

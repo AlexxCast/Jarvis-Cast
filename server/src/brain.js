@@ -6,6 +6,7 @@ import * as agents from './agents.js';
 import * as devices from './devices.js';
 import * as jarvisCore from './jarvis_core.js';
 import * as workspace from './workspace.js';
+import * as projects from './projects.js';
 import { WEATHER_WORDS, weatherContext } from './weather.js';
 import * as web from './web.js';
 import * as router from './router.js';
@@ -95,6 +96,17 @@ export function noteImprovement(db, text, nowIso) {
 }
 
 /** Toglie i tic verbali ("Certamente, signore." a inizio di ogni risposta) e usa "Capo" come vuole la personalità. */
+const PROJECT_EXIT_RE = /^\W*(?:(?:ok|kestra|chestra)\s+)?(?:esci\s+dal\s+(?:progetto|workspace)|chiudi\s+(?:il\s+)?(?:progetto|workspace)|torna\s+(?:a\s+(?:kestra|jarvis)\s+)?(?:normale|standard))\W*$/i;
+const PROJECT_NEWCHAT_RE = /^\W*(?:(?:apri|inizia|fai|crea)\s+(?:una\s+)?)?nuova\s+chat\b(?:\s+(?:nel|del)\s+progetto)?\W*$/i;
+export const PROJECT_OPEN_RE = /^\W*(?:(?:ok|ehi|kestra|chestra)\s+)?(apri|entra\s+nel|vai\s+(?:nel|al)|riprendi|torna\s+(?:nel|al)|crea|fai|nuovo|apri\s+un\s+nuovo)\s+(?:il\s+|un\s+)?(?:nuovo\s+)?progetto\s+(?:chiamato\s+|di\s+nome\s+|sul(?:l[ao'])?\s+|di\s+|per\s+)?["“]?(.{2,60}?)["”]?\W*$/i;
+
+/** Cosa è entrato nel contesto dell'ultima risposta (vista Mente): sezioni, token, ricordi, file del progetto. */
+export function saveContextReport(db, report) {
+  kvSet(db, 'contextReport', report);
+  const hist = kvGet(db, 'contextReports', []);
+  kvSet(db, 'contextReports', [...hist.slice(-9), { at: report.at, session: report.session, model: report.model, used: report.used, budget: report.budget, sections: (report.sections || []).length }]);
+}
+
 export function tidyReply(text) {
   let s = String(text || '').trim()
     // Intestazioni copiate da vecchi prompt di progetto ("Verifica passphrase: niente più fili [OK]").
@@ -129,7 +141,9 @@ export function applyActions(db, actions, ctx) {
         // Un'azione che non cambia nulla (pasto senza alimenti, id inesistente) non è "fatta".
         if (!photo && a.type !== 'clear_recipe_session' && JSON.stringify(diary) === before) { out.failed.push(a.type); continue; }
       } else if (a.type === 'remember') {
-        const memId = memory.remember(db, a, ctx.nowIso);
+        const memId = ctx.project && projects.isProjectMemory(ctx.project, a.module)
+          ? projects.remember(db, ctx.project.id, a.text, ctx.nowIso)
+          : memory.remember(db, a, ctx.nowIso);
         if (!memId) { out.failed.push(a.type); continue; }
         out.rememberedIds.push(memId);
       }
@@ -219,32 +233,52 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   // Automatismo proposto al comando precedente: si salva da solo se l'utente non si lamenta (niente "Ha funzionato?").
   flows.implicitSkillFeedback(db, sessionId, userText, ms);
 
-  // Modalità Workspace Progetto Adattivo: uscita vocale o attivazione da file/contesto
-  let activeWs = workspace.getActiveWorkspace(db);
-  if (activeWs && /^\W*(?:esci\s+dal\s+(?:progetto|workspace)|chiudi\s+(?:il\s+)?(?:progetto|workspace)|torna\s+(?:a\s+jarvis\s+)?(?:normale|standard))\W*$/i.test(userText)) {
-    workspace.exitWorkspace(db);
-    return {
-      reply: `Uscito dal progetto "${activeWs.title}", signore. Sono tornato all'assetto standard.`,
-      expectReply: false, card: '', visual: null, photoRequest: null, model: 'jarvis-core', switched: false, actions: ['workspace_exit'], device: [], layoutChanged: true, touched: [], touchedLeaves: [],
-    };
+  // Progetti (come i progetti di Claude): entrata, uscita, nuova chat, creazione a voce o da file.
+  projects.migrateWorkspaces(db, nowIso, ms);
+  let proj = sessionId === 'main' ? projects.getActive(db) : null;
+  if (!proj && sessionId !== 'main') {
+    const c = projects.chatBySession(db, sessionId);
+    if (c) proj = { project: projects.getProject(db, c.project), chat: c };
+  }
+  const local = (reply, extra = {}) => {
+    if (reply) { addMessage(db, proj?.chat.session || 'main', 'user', userText, nowIso, null); addMessage(db, proj?.chat.session || 'main', 'assistant', reply, nowIso, { model: 'jarvis-core' }); }
+    return { reply, expectReply: false, card: '', visual: null, photoRequest: null, model: 'jarvis-core', switched: false, actions: [], device: [], layoutChanged: true, touched: ['progetti'], touchedLeaves: [], ...extra };
+  };
+  if (proj && PROJECT_EXIT_RE.test(userText)) {
+    projects.exitProject(db);
+    return local(`Sono uscita dal progetto "${proj.project.name}", Capo.`, { actions: ['project_exit'] });
+  }
+  if (proj && PROJECT_NEWCHAT_RE.test(userText)) {
+    proj = projects.enterProject(db, proj.project.id, { newChat: true }, nowIso, ms);
+    return local(`Nuova chat nel progetto "${proj.project.name}". Dimmi pure.`, { expectReply: true, actions: ['project_chat'] });
+  }
+  const openAsk = PROJECT_OPEN_RE.exec(userText);
+  if (openAsk && !fileList.length) {
+    const found = projects.findByName(db, openAsk[2]);
+    if (found) {
+      proj = projects.enterProject(db, found.id, {}, nowIso, ms);
+      return local(`Siamo nel progetto "${found.name}".`, { expectReply: true, actions: ['project_enter'] });
+    }
+    if (/^(?:crea|nuovo|fai|apri\s+un\s+nuovo)/i.test(openAsk[1])) {
+      const pid = projects.createProject(db, { name: openAsk[2].replace(/[.!?]+$/, '') }, nowIso, ms);
+      proj = projects.enterProject(db, pid, {}, nowIso, ms);
+      return local(`Ho creato il progetto "${proj.project.name}" e ci sono dentro. Dimmi le istruzioni, oppure carica i file dalla scheda Progetti.`, { expectReply: true, actions: ['project_create'] });
+    }
+    const names = db.all('SELECT name FROM projects ORDER BY updated DESC LIMIT 6').map(r => r.name);
+    if (names.length) return local(`Non trovo quel progetto. Ho: ${names.join(', ')}.`, { expectReply: true });
   }
   if (/\b(?:attiva\s+(?:modalit[aà]\s+)?(?:progetto|workspace)|adattati\s+a\s+quest[oa]|usa(?:lo)?\s+come\s+(?:progetto|workspace|contesto\s+progetto)|apri\s+(?:un\s+)?workspace)\b/i.test(userText)) {
     const pdfB64 = fileList.find(f => f.encoding === 'base64' && /\.pdf$/i.test(f.name))?.content || null;
     const textJoined = fileList.filter(f => f.encoding !== 'base64').map(f => `=== ${f.name} ===\n${f.content}`).join('\n\n');
-    activeWs = await workspace.enterWorkspace(db, env, deps.fetchFn, {
+    const ws = await workspace.enterWorkspace(db, env, deps.fetchFn, {
       contextText: [userText, textJoined].filter(Boolean).join('\n\n'),
       pdfBase64: pdfB64,
       nowMs: ms,
       tz,
     });
-    return {
-      reply: `Assetto adattato al progetto "${activeWs.title}" (${activeWs.kind}). Ho preparato la schermata dedicata e seguito le regole del contesto. Quando vuole tornare normale dica "esci dal progetto".`,
-      expectReply: false, card: '', visual: null, photoRequest: null, model: 'jarvis-core', switched: false, actions: ['workspace_enter'], device: [], layoutChanged: true, touched: ['compiti'], touchedLeaves: [],
-    };
+    return local(`Ho creato il progetto "${ws.title}" con le sue istruzioni e il materiale tra i file. Per uscire di' "esci dal progetto".`, { actions: ['project_create'] });
   }
-  if (activeWs && sessionId === 'main') {
-    sessionId = `proj:${activeWs.jobId}`;
-  }
+  if (proj) sessionId = proj.chat.session;
 
   // Se l'utente chiede di ridurre, sistemare o pulire il grafo (es. "il grafo della dieta è troppo grande, riducilo"),
   // l'agente locale GraphAgent lo compatta subito, così l'operazione avviene davvero anche se il modello non emette clean_graph.
@@ -312,17 +346,16 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
       pdfBase64 = null; // testo estratto: ora può leggerlo qualsiasi modello!
     }
   }
+  const projCtx = proj ? projects.projectContext(db, proj, probe) : null;
   const activeFocus = jarvisCore.getFocus(db, sessionId, ms);
   const navActive = jarvisCore.getNavMode(db, sessionId, ms);
   const focusLine = jarvisCore.focusPromptLine(db, sessionId, ms);
   const parts = {
-    core: activeWs
-      ? `${workspace.cleanProjectContext(activeWs.systemContext)}\n\nData e ora: ${nowHuman(ms, tz)}. Sei dentro la modalità progetto "${activeWs.title}". Segui rigorosamente queste istruzioni e mantieni i formati richiesti.`
-      : CORE_PROMPT(diary.profile.name, nowHuman(ms, tz)) + '\n\n' + mood.MOOD_PROMPT(mood.current(db, ms)),
-    brief: activeWs ? '' : dietBrief(diary, today),
-    rules: [focusLine, (!activeWs && dietOn) ? DIET_RULES : '', UI_WORDS.test(userText) ? ui.uiPrompt(ui.loadLayout(db)) : '', UI_WORDS.test(userText) ? coder.codePrompt(env, db) : '', DEVICE_WORDS.test(userText) ? appsPrompt(db) : '', (/\b(pc|computer|desktop|windows|dispositiv\w*)\b/i.test(userText) || activeFocus?.device === 'pc' || navActive) ? devices.devicesPrompt(db, ms) : '', phone.pendingContext(db, ms)].filter(Boolean).join('\n\n'),
-    blocks: (!activeWs && dietOn) ? dietContext(diary, today) : [],
-    memories: recalled.entries.map(m => `- [${m.id}] (${m.module}) ${m.text}`),
+    core: CORE_PROMPT(diary.profile.name, nowHuman(ms, tz)) + '\n\n' + mood.MOOD_PROMPT(mood.current(db, ms)) + (projCtx ? '\n\n' + projCtx.header : ''),
+    brief: projCtx && !dietOn ? '' : dietBrief(diary, today),
+    rules: [focusLine, dietOn ? DIET_RULES : '', UI_WORDS.test(userText) ? ui.uiPrompt(ui.loadLayout(db)) : '', UI_WORDS.test(userText) ? coder.codePrompt(env, db) : '', DEVICE_WORDS.test(userText) ? appsPrompt(db) : '', (/\b(pc|computer|desktop|windows|dispositiv\w*)\b/i.test(userText) || activeFocus?.device === 'pc' || navActive) ? devices.devicesPrompt(db, ms) : '', phone.pendingContext(db, ms)].filter(Boolean).join('\n\n'),
+    blocks: [...(dietOn ? dietContext(diary, today) : []), ...(projCtx ? projCtx.blocks : [])],
+    memories: recalled.entries.slice(0, projCtx ? 8 : 24).map(m => `- [${m.id}] (${m.module}) ${m.text}`),
     moduleIndex: [mods.length ? 'MODULI DI MEMORIA ESISTENTI: ' + mods.map(m => `${m.name}${m.description ? ` (${m.description})` : ''} [${m.entries}]`).join('; ') : '',
       memory.topicsIndex(db, mods.map(m => m.name).slice(0, 30))].filter(Boolean).join('\n').slice(0, 2500),
     agenda: agendaOn ? agenda.agendaContext(db, tz) : '',
@@ -336,10 +369,12 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
       (pdfExtractedText ? `\n\nCONTENUTO ESTRATTO DAL PDF:\n${pdfExtractedText}` : ''),
     image,
     pdfBase64,
+    report: {},
   };
 
   const storedUserText = fileList.length ? `[📎 ${fileList.map(f => f.name).join(', ')}] ${userText}` : userText;
   addMessage(db, sessionId, 'user', storedUserText, nowIso, image ? { image: true } : null);
+  if (proj) projects.touchChat(db, sessionId, userText, nowIso);
 
   let result;
   let remembered = [];
@@ -351,6 +386,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
       build: (model) => buildMessages(model, parts), fetchFn: deps.fetchFn, now: deps.now, tz,
     });
     let parsed = parseReply(res.text);
+    saveContextReport(db, { at: nowIso, session: sessionId, tier, project: projCtx?.report || null, recalled: recalled.entries.length, ...parts.report });
     // Il modello chiede di cercare su internet o leggere una pagina: lo facciamo e gli ridiamo la parola.
     const webAsk = parsed.actions.filter(a => a.type === 'web_search' || a.type === 'read_url').slice(0, 2);
     if (webAsk.length) {
@@ -373,7 +409,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
       const explicitMem = agents.MemoryAgent.extractExplicit(userText);
       if (explicitMem) parsed.actions.push({ type: 'remember', module: explicitMem.module, text: explicitMem.text });
     }
-    let done = applyActions(db, parsed.actions, { today, nowIso, ms, tz, hadPhoto: !!image });
+    let done = applyActions(db, parsed.actions, { today, nowIso, ms, tz, hadPhoto: !!image, project: proj?.project || null });
     if (cleanCmd && !done.applied.includes('clean_graph')) done.applied.push('clean_graph');
     // Promesse di lavoro "più tardi" ("lo preparo in background, ti avviso") senza nulla che parta davvero.
     if (LATER_RE.test(parsed.reply) && !done.jobs.length && !done.code.length && !done.device.length) {
@@ -386,7 +422,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
           });
           const fixed = parseReply(again.text);
           if (fixed.parsed && !LATER_RE.test(fixed.reply)) {
-            const redo = applyActions(db, fixed.actions, { today, nowIso, ms, tz, hadPhoto: !!image });
+            const redo = applyActions(db, fixed.actions, { today, nowIso, ms, tz, hadPhoto: !!image, project: proj?.project || null });
             parsed = { ...fixed, topics: fixed.topics?.length ? fixed.topics : parsed.topics };
             done = redo;
           }
@@ -553,7 +589,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
       const autoProj = jarvisCore.detectComplexProject(userText);
       if (autoProj) { done.jobs.push(autoProj); done.applied.push('start_job'); }
     }
-    for (const j of done.jobs) deps.startJob?.(j);
+    for (const j of done.jobs) deps.startJob?.(proj ? { ...j, project: proj.project.id } : j);
     for (const c of done.code) {
       try {
         if (!coder.enabled(env)) { done.applied.push('code_disabled'); continue; }
