@@ -973,13 +973,15 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
       devices.enqueueCommand(db, 'desktop', { kind: 'hotkey', target: 'f11' }, nowMs);
       return { reply: 'Attivo/disattivo lo schermo intero sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
-    if (/\b(scorri\s+gi[uù]|scendi)\b/i.test(withoutPc)) {
-      devices.enqueueCommand(db, 'desktop', { kind: 'hotkey', target: 'pagedown' }, nowMs);
-      return { reply: 'Scorro verso il basso sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+    if (/\b(scorri(?:\s+la\s+pagina|\s+gi[uù]|\s+verso\s+il\s+basso)?|scendi)\b/i.test(withoutPc) && !/\bsu\b|\balto\b/i.test(withoutPc)) {
+      devices.enqueueCommand(db, 'desktop', { kind: 'scroll', target: 'down' }, nowMs);
+      setNavMode(db, sessionId, true, 'pc', nowMs);
+      return { reply: 'Scorro la pagina verso il basso sul PC, signore.', expectReply: true, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
-    if (/\b(scorri\s+su|sali)\b/i.test(withoutPc)) {
-      devices.enqueueCommand(db, 'desktop', { kind: 'hotkey', target: 'pageup' }, nowMs);
-      return { reply: 'Scorro verso l\'alto sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+    if (/\b(scorri\s+(?:in\s+)?su|scorri\s+verso\s+l'alto|sali)\b/i.test(withoutPc)) {
+      devices.enqueueCommand(db, 'desktop', { kind: 'scroll', target: 'up' }, nowMs);
+      setNavMode(db, sessionId, true, 'pc', nowMs);
+      return { reply: 'Scorro la pagina verso l\'alto sul PC, signore.', expectReply: true, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
     if (/\b(cambia\s+finestra|alt\s+tab)\b/i.test(withoutPc)) {
       devices.enqueueCommand(db, 'desktop', { kind: 'hotkey', target: 'alt+tab' }, nowMs);
@@ -999,12 +1001,12 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
       setNavMode(db, sessionId, true, 'pc', nowMs);
       return { reply: 'Passo al prossimo elemento, signore.', expectReply: true, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
-    const findPageMatch = /^(?:cerca\s+nella\s+pagina|clicca\s+su|apri\s+il\s+link|vai\s+sul\s+titolo)\s+(.+)$/i.exec(withoutPc);
+    const findPageMatch = /^(?:cerca\s+nella\s+pagina|clicca(?:\s+su)?|apri\s+(?:il\s+link|la\s+voce|il\s+risultato)|vai\s+sul\s+titolo|seleziona(?:\s+su)?|su\s+questa\s+pagina\s+(?:cerca|clicca|apri))\s+(.+)$/i.exec(withoutPc);
     if (findPageMatch) {
       const q = findPageMatch[1].replace(/[.!?]+$/, '').trim();
       devices.enqueueCommand(db, 'desktop', { kind: 'find_on_page', target: q, args: 'open' }, nowMs);
       setNavMode(db, sessionId, true, 'pc', nowMs);
-      return { reply: `Cerco e seleziono "${q}" nella pagina, signore.`, expectReply: true, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+      return { reply: `Cerco e seleziono "${q}" nella pagina corrente, signore.`, expectReply: true, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
 
     // Chiusura programmi / app / siti / finestre sul PC ("chiudi chrome sul pc", "no no chiudi chrome", "chiudi tutto")
@@ -1045,8 +1047,10 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
       return { reply: `Eseguo il comando sul PC, signore.`, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
 
-    // Far partire un video, un film o una canzone su YouTube sul PC (quando parte il video chiude la navigazione continua)
-    if (/\b(fai\s+partire|fammi\s+partire|metti(?:mi)?|riproduci|cerca|ascolta|avvia)\b/i.test(withoutPc) && /\b(youtube|video|film|musica|canzon\w*|brano)\b/i.test(withoutPc)) {
+    // Far partire un video, un film o una canzone su YouTube sul PC (solo se NON chiede esplicitamente "non su youtube", "prime video" o ricerca "su chrome/google/online")
+    const blockYt = /\b(non\s+(?:su|da)\s+youtube|prime\s+video|su\s+chrome|su\s+google|online|su\s+questa\s+pagina)\b/i.test(withoutPc);
+    const cleanedForYt = withoutPc.replace(/\bprime\s+video\b/gi, '');
+    if (!blockYt && /\b(fai\s+partire|fammi\s+partire|metti(?:mi)?|riproduci|cerca|ascolta|avvia)\b/i.test(cleanedForYt) && /\b(youtube|video|film|musica|canzon\w*|brano)\b/i.test(cleanedForYt)) {
       setNavMode(db, sessionId, false);
       const r = dispatchPcPlayYoutube(db, withoutPc, nowMs);
       r.expectReply = false;

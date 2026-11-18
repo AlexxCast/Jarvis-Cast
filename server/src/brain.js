@@ -429,7 +429,11 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
     if (jarvisCore.isPcTarget(db, userText) || jarvisCore.isPcTarget(db, parsed.reply)) {
       done.device = [];
       if (!done.applied.includes('pc_action')) {
-        if (/\b(chiudi|chiudo)\s+(?:subito\s+)?(?:google\s+chrome|chrome|edge|spotify|vscode|youtube|prime(?:\s+video)?)\b/i.test(userText + ' ' + parsed.reply)) {
+        if (/\b(scorro|scorri)\b/i.test(userText + ' ' + parsed.reply)) {
+          const up = /\b(su|alto)\b/i.test(userText + ' ' + parsed.reply);
+          devices.enqueueCommand(db, 'desktop', { kind: 'scroll', target: up ? 'up' : 'down' }, ms);
+          done.applied.push('pc_action');
+        } else if (/\b(chiudi|chiudo)\s+(?:subito\s+)?(?:google\s+chrome|chrome|edge|spotify|vscode|youtube|prime(?:\s+video)?)\b/i.test(userText + ' ' + parsed.reply)) {
           const mCls = /\b(?:chiudi|chiudo)\s+(?:subito\s+)?(google\s+chrome|chrome|edge|spotify|vscode|youtube|prime(?:\s+video)?)\b/i.exec(userText + ' ' + parsed.reply);
           const clsTarget = /chrome/i.test(mCls[1]) ? 'chrome' : mCls[1];
           devices.enqueueCommand(db, 'desktop', { kind: 'close_app', target: clsTarget }, ms);

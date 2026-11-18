@@ -565,6 +565,14 @@ def execute_pc_command(cmd: dict, log_fn, cfg: dict = None) -> None:
             log_fn(f"Errore scrittura testo: {e}")
         return
 
+    if kind == "scroll" and os.name == "nt":
+        delta = 520 if str(target).lower() == "up" else -520
+        try:
+            ctypes.windll.user32.mouse_event(0x0800, 0, 0, delta, 0)
+        except Exception:
+            press_hotkey("pageup" if delta > 0 else "pagedown")
+        return
+
     if kind == "find_on_page" and target and os.name == "nt":
         try:
             press_hotkey("ctrl+f")
