@@ -101,3 +101,22 @@
 [2026-11-17 17:36:08] Demone Jarvis Desktop avviato in background.
 [2026-11-17 17:36:20] Eseguo comando [open_app]: chrome
 [2026-11-17 17:36:20] Chrome avviato (Profile 1)
+[2026-11-17 17:38:56] Eseguo comando [close_app]: chrome
+[2026-11-17 17:38:57] Chiuso processo: chrome.exe
+[2026-11-17 17:39:04] Eseguo comando [open_url]: https://www.primevideo.com
+[2026-11-17 17:39:04] Chrome avviato (Profile 1): https://www.primevideo.com
+[2026-11-17 17:41:55] Eseguo comando [play_youtube]: No Siamo sul telefono vabbè e cerca e l'uva boss su prime video
+[2026-11-17 17:41:57] Avvio video YouTube: No Siamo sul telefono vabbè e cerca e l'uva boss su prime video (https://www.youtube.com/watch?v=M2G1KmTHl1A&autoplay=1)
+[2026-11-17 17:41:57] Chrome avviato (Profile 1): https://www.youtube.com/watch?v=M2G1KmTHl1A&autoplay=1
+[2026-11-17 17:42:11] Eseguo comando [open_url]: https://www.youtube.com
+[2026-11-17 17:42:11] Chrome avviato (Profile 1): https://www.youtube.com
+[2026-11-17 17:42:40] Eseguo comando [open_url]: https://www.primevideo.com
+[2026-11-17 17:42:40] Chrome avviato (Profile 1): https://www.primevideo.com
+[2026-11-17 17:49:29] Eseguo comando [open_app]: anti-gravity e scrivigli sul progetto Jarvis cast e che
+[2026-11-17 17:49:29] App 'anti-gravity e scrivigli sul progetto Jarvis cast e che' non trovata sul PC (nessun popup aperto).
+[2026-11-17 17:50:02] Eseguo comando [antigravity_task]: Jarvis-Cast
+[2026-11-17 17:50:02] Avvio Antigravity su progetto 'G:\Jarvis-Cast' — Task: e invia correggi tutti gli errori attuali
+[2026-11-17 17:50:06] Screenshot dello schermo PC inviato in sovraimpressione.
+[2026-11-17 18:32:22] Errore heartbeat: <urlopen error [Errno 11001] getaddrinfo failed>
+[2026-11-18 10:22:35] Eseguo comando [open_url]: https://www.youtube.com
+[2026-11-18 10:22:35] Chrome avviato (Profile 1): https://www.youtube.com

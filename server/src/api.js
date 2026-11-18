@@ -10,6 +10,7 @@ import * as flows from './flows.js';
 import * as devices from './devices.js';
 import * as jarvisCore from './jarvis_core.js';
 import * as selfHeal from './self_heal.js';
+import * as workspace from './workspace.js';
 import * as places from './places.js';
 import * as agenda from './agenda.js';
 import * as ui from './ui.js';
@@ -49,6 +50,7 @@ function statePayload(db, ms, tz, env = {}) {
     liveCards: jarvisCore.listLiveCards(db, ms),
     timedActions: kvGet(db, 'timedActions', []).filter(t => Number(t.dueMs) > ms),
     skills: flows.listSkills(db),
+    activeWorkspace: workspace.getActiveWorkspace(db),
     legacyImported: kvGet(db, 'legacyImported', null),
     layout: ui.loadLayout(db),
     mood: mood.current(db, ms),
@@ -336,6 +338,31 @@ export async function handleApi(db, env, deps, request) {
       return j ? json({ ...j, steps: safeParse(j.steps) || [] }) : bad('non trovato', 404);
     }
     if (job && method === 'DELETE') { db.run('DELETE FROM jobs WHERE id = ?', job[1]); return json({ jobs: jobs.listJobs(db) }); }
+
+    if (path === '/api/workspace/enter' && method === 'POST') {
+      const b = await body(request);
+      const fileList = Array.isArray(b.files) ? b.files.slice(0, 4).filter(f => f && f.name && typeof f.content === 'string') : [];
+      const pdfB64 = fileList.find(f => f.encoding === 'base64' && /\.pdf$/i.test(f.name))?.content || null;
+      const textJoined = fileList.filter(f => f.encoding !== 'base64').map(f => `=== ${f.name} ===\n${f.content}`).join('\n\n');
+      const active = await workspace.enterWorkspace(db, env, deps.fetchFn, {
+        jobId: String(b.jobId || '').trim(),
+        title: String(b.title || '').trim(),
+        contextText: [b.text, textJoined].filter(Boolean).join('\n\n'),
+        pdfBase64: pdfB64,
+        nowMs: ms,
+        tz,
+      });
+      return json({ activeWorkspace: active, state: statePayload(db, env, ms, tz) });
+    }
+    if (path === '/api/workspace/exit' && method === 'POST') {
+      workspace.exitWorkspace(db);
+      return json({ activeWorkspace: null, state: statePayload(db, env, ms, tz) });
+    }
+    if (path === '/api/workspace/toggle' && method === 'POST') {
+      const b = await body(request);
+      const active = workspace.toggleWorkspaceItem(db, b.widgetIdx, b.itemIdx);
+      return json({ activeWorkspace: active });
+    }
 
     if (path === '/api/inbox' && method === 'GET') return json({ items: db.all('SELECT id, kind, text, at FROM inbox ORDER BY id DESC LIMIT 30') });
     if (path === '/api/fix-latenti' && method === 'GET') {

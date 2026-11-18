@@ -5,6 +5,7 @@ import * as flows from './flows.js';
 import * as agents from './agents.js';
 import * as devices from './devices.js';
 import * as jarvisCore from './jarvis_core.js';
+import * as workspace from './workspace.js';
 import { WEATHER_WORDS, weatherContext } from './weather.js';
 import * as web from './web.js';
 import * as router from './router.js';
@@ -178,6 +179,33 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   const userText = rawText || (image ? 'Guarda questa foto.' : (fileList.length ? `Analizza ${fileList.length === 1 ? 'questo file' : 'questi file'}: ${fileList.map(f => f.name).join(', ')}` : ''));
   if (!userText) return { reply: 'Non ho sentito nulla, signore.', expectReply: true, card: '', photoRequest: null };
 
+  // Modalità Workspace Progetto Adattivo: uscita vocale o attivazione da file/contesto
+  let activeWs = workspace.getActiveWorkspace(db);
+  if (activeWs && /^\W*(?:esci\s+dal\s+(?:progetto|workspace)|chiudi\s+(?:il\s+)?(?:progetto|workspace)|torna\s+(?:a\s+jarvis\s+)?(?:normale|standard))\W*$/i.test(userText)) {
+    workspace.exitWorkspace(db);
+    return {
+      reply: `Uscito dal progetto "${activeWs.title}", signore. Sono tornato all'assetto standard.`,
+      expectReply: false, card: '', visual: null, photoRequest: null, model: 'jarvis-core', switched: false, actions: ['workspace_exit'], device: [], layoutChanged: true, touched: [], touchedLeaves: [],
+    };
+  }
+  if (/\b(?:attiva\s+(?:modalit[aà]\s+)?(?:progetto|workspace)|adattati\s+a\s+quest[oa]|usa(?:lo)?\s+come\s+(?:progetto|workspace|contesto\s+progetto)|apri\s+(?:un\s+)?workspace)\b/i.test(userText)) {
+    const pdfB64 = fileList.find(f => f.encoding === 'base64' && /\.pdf$/i.test(f.name))?.content || null;
+    const textJoined = fileList.filter(f => f.encoding !== 'base64').map(f => `=== ${f.name} ===\n${f.content}`).join('\n\n');
+    activeWs = await workspace.enterWorkspace(db, env, deps.fetchFn, {
+      contextText: [userText, textJoined].filter(Boolean).join('\n\n'),
+      pdfBase64: pdfB64,
+      nowMs: ms,
+      tz,
+    });
+    return {
+      reply: `Assetto adattato al progetto "${activeWs.title}" (${activeWs.kind}). Ho preparato la schermata dedicata e seguito le regole del contesto. Quando vuole tornare normale dica "esci dal progetto".`,
+      expectReply: false, card: '', visual: null, photoRequest: null, model: 'jarvis-core', switched: false, actions: ['workspace_enter'], device: [], layoutChanged: true, touched: ['compiti'], touchedLeaves: [],
+    };
+  }
+  if (activeWs && sessionId === 'main') {
+    sessionId = `proj:${activeWs.jobId}`;
+  }
+
   // Se l'utente chiede di ridurre, sistemare o pulire il grafo (es. "il grafo della dieta è troppo grande, riducilo"),
   // l'agente locale GraphAgent lo compatta subito, così l'operazione avviene davvero anche se il modello non emette clean_graph.
   const cleanCmd = agents.GraphAgent.detectCleanCommand(userText);
@@ -247,10 +275,12 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   const activeFocus = jarvisCore.getFocus(db, sessionId, ms);
   const focusLine = jarvisCore.focusPromptLine(db, sessionId, ms);
   const parts = {
-    core: CORE_PROMPT(diary.profile.name, nowHuman(ms, tz)) + '\n\n' + mood.MOOD_PROMPT(mood.current(db, ms)),
-    brief: dietBrief(diary, today),
-    rules: [focusLine, dietOn ? DIET_RULES : '', UI_WORDS.test(userText) ? ui.uiPrompt(ui.loadLayout(db)) : '', UI_WORDS.test(userText) ? coder.codePrompt(env, db) : '', DEVICE_WORDS.test(userText) ? appsPrompt(db) : '', (/\b(pc|computer|desktop|windows|dispositiv\w*)\b/i.test(userText) || activeFocus?.device === 'pc') ? devices.devicesPrompt(db, ms) : '', phone.pendingContext(db, ms)].filter(Boolean).join('\n\n'),
-    blocks: dietOn ? dietContext(diary, today) : [],
+    core: activeWs
+      ? `${activeWs.systemContext}\n\nData e ora: ${nowHuman(ms, tz)}. Sei dentro la modalità progetto "${activeWs.title}". Segui rigorosamente queste istruzioni e mantieni i formati richiesti.`
+      : CORE_PROMPT(diary.profile.name, nowHuman(ms, tz)) + '\n\n' + mood.MOOD_PROMPT(mood.current(db, ms)),
+    brief: activeWs ? '' : dietBrief(diary, today),
+    rules: [focusLine, (!activeWs && dietOn) ? DIET_RULES : '', UI_WORDS.test(userText) ? ui.uiPrompt(ui.loadLayout(db)) : '', UI_WORDS.test(userText) ? coder.codePrompt(env, db) : '', DEVICE_WORDS.test(userText) ? appsPrompt(db) : '', (/\b(pc|computer|desktop|windows|dispositiv\w*)\b/i.test(userText) || activeFocus?.device === 'pc') ? devices.devicesPrompt(db, ms) : '', phone.pendingContext(db, ms)].filter(Boolean).join('\n\n'),
+    blocks: (!activeWs && dietOn) ? dietContext(diary, today) : [],
     memories: recalled.entries.map(m => `- [${m.id}] (${m.module}) ${m.text}`),
     moduleIndex: [mods.length ? 'MODULI DI MEMORIA ESISTENTI: ' + mods.map(m => `${m.name}${m.description ? ` (${m.description})` : ''} [${m.entries}]`).join('; ') : '',
       memory.topicsIndex(db, mods.map(m => m.name).slice(0, 30))].filter(Boolean).join('\n').slice(0, 2500),

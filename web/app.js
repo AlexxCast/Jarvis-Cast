@@ -557,10 +557,21 @@ function viewChat() {
     store.sending ? h('div', { class: 'msg assistant pending' }, 'Sto pensando…') : null);
   const ta = h('textarea', { rows: 1, placeholder: 'Scrivi a Jarvis…', 'aria-label': 'Messaggio', onkeydown: (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); const v = ta.value; ta.value = ''; send(v); } } });
   const attachBar = (store.pendingFiles && store.pendingFiles.length)
-    ? h('div', { class: 'attachments' }, store.pendingFiles.map((f, idx) =>
-      h('span', { class: 'chip attach-chip' },
-        `📎 ${f.name} (${Math.max(1, Math.round((f.size || f.content.length) / 1024))} KB) `,
-        h('button', { type: 'button', class: 'attach-rm', 'aria-label': 'Rimuovi ' + f.name, onclick: () => { store.pendingFiles.splice(idx, 1); render(); } }, '×'))))
+    ? h('div', { class: 'attachments' },
+      store.pendingFiles.map((f, idx) =>
+        h('span', { class: 'chip attach-chip' },
+          `📎 ${f.name} (${Math.max(1, Math.round((f.size || f.content.length) / 1024))} KB) `,
+          h('button', { type: 'button', class: 'attach-rm', 'aria-label': 'Rimuovi ' + f.name, onclick: () => { store.pendingFiles.splice(idx, 1); render(); } }, '×'))),
+      h('button', { type: 'button', class: 'btn primary', style: 'padding:4px 10px;font-size:.82rem', onclick: guard(async () => {
+        const files = store.pendingFiles.splice(0);
+        const text = ta.value.trim(); ta.value = '';
+        toast('Adatto Jarvis al file caricato…');
+        const out = await api('POST', '/workspace/enter', { text, files });
+        store.state = out.state;
+        store.chatOpen = true;
+        render();
+        toast(`Workspace attivo: ${out.activeWorkspace.title}`);
+      }) }, '🎯 Attiva come Workspace Progetto'))
     : null;
   const composer = h('div', { class: 'composer' },
     store.pendingImage ? h('img', { class: 'thumb', alt: 'Foto allegata', src: 'data:image/jpeg;base64,' + store.pendingImage, onclick: () => { store.pendingImage = null; render(); } }) : null,
@@ -583,7 +594,78 @@ function viewChat() {
     h('div', { class: 'row' }, h('b', { class: 'grow clip' }, `⚙ Progetto: ${activeProj.title}`), h('span', { class: 'tag warn num' }, `${activeProj.stats?.pct || 0}%`)),
     h('div', { class: 'bar' }, h('i', { style: `width:${activeProj.stats?.pct || 8}%` })),
     h('span', { class: 'muted small' }, `${activeProj.stats?.done || 0}/${activeProj.stats?.total || '?'} nodi completati · tocca per dettagli`))) : null;
-  return store.chatOpen ? [orb.el, list, attachBar, composer] : [codeBanner(), upcomingBanner, projBanner, renderLiveCards(true), widgets('jarvis'), orb.el, caption, attachBar, composer];
+  const ws = store.state?.activeWorkspace;
+  const wsPanel = ws ? renderAdaptiveWorkspace(ws) : null;
+  return store.chatOpen
+    ? [wsPanel, orb.el, list, attachBar, composer]
+    : [wsPanel, codeBanner(), upcomingBanner, projBanner, renderLiveCards(true), widgets('jarvis'), orb.el, caption, attachBar, composer];
+}
+
+function renderAdaptiveWorkspace(ws) {
+  const timerState = store.wsTimer || { running: false, endMs: 0, label: '' };
+  const tickTxt = timerState.running ? (() => {
+    const rem = Math.max(0, Math.round((timerState.endMs - Date.now()) / 1000));
+    const m = Math.floor(rem / 60), s = rem % 60;
+    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+  })() : '';
+
+  return h('div', { class: 'ws-panel' },
+    h('div', { class: 'row' },
+      h('div', { class: 'grow' },
+        h('div', { class: 'muted small' }, `🎯 MODALITÀ PROGETTO · ${String(ws.kind || 'progetto').toUpperCase()}`),
+        h('b', { style: 'font-size:1.02rem;color:#39ff14' }, ws.title)),
+      h('button', { class: 'btn danger', style: 'padding:5px 10px;font-size:.82rem', onclick: guard(async () => {
+        const out = await api('POST', '/workspace/exit');
+        store.state = out.state;
+        store.wsTimer = null;
+        render();
+        toast('Tornato all\'assetto standard di Jarvis.');
+      }) }, '✕ Esci')),
+    h('div', { class: 'ws-grid' }, (ws.widgets || []).map((w, wIdx) => {
+      if (w.type === 'timer') {
+        const mins = Number(w.minutes) || 25;
+        return h('div', { class: 'ws-card' },
+          h('div', { class: 'muted small' }, `⏱ ${w.title || 'Timer'}`),
+          h('div', { class: 'row', style: 'margin-top:4px' },
+            h('b', { class: 'num', style: 'font-size:1.1rem;color:#39ff14' }, timerState.running ? tickTxt : `${mins}:00`),
+            h('button', { class: 'btn', style: 'padding:3px 9px;font-size:.8rem', onclick: () => {
+              if (timerState.running) { store.wsTimer = { running: false, endMs: 0 }; clearInterval(store.wsTick); render(); return; }
+              store.wsTimer = { running: true, endMs: Date.now() + mins * 60_000 };
+              clearInterval(store.wsTick);
+              store.wsTick = setInterval(() => { if (!store.wsTimer?.running) return clearInterval(store.wsTick); render(); }, 1000);
+              render();
+            } }, timerState.running ? 'Ferma' : 'Avvia')));
+      }
+      if (w.type === 'progress') {
+        const pct = Math.min(100, Math.round(((Number(w.value) || 0) / Math.max(1, Number(w.max) || 100)) * 100));
+        return h('div', { class: 'ws-card' },
+          h('div', { class: 'muted small' }, w.title || 'Avanzamento'),
+          w.label ? h('div', { class: 'small', style: 'margin:2px 0' }, w.label) : null,
+          h('div', { class: 'bar' }, h('i', { style: `width:${pct}%` })));
+      }
+      if (w.type === 'checklist') {
+        return h('div', { class: 'ws-card ws-wide' },
+          h('div', { class: 'muted small', style: 'margin-bottom:4px' }, `☑ ${w.title || 'Fasi'}`),
+          (w.items || []).map((it, iIdx) => h('label', { class: 'ws-check' },
+            h('input', { type: 'checkbox', checked: !!it.done, onchange: guard(async () => {
+              const res = await api('POST', '/workspace/toggle', { widgetIdx: wIdx, itemIdx: iIdx });
+              store.state.activeWorkspace = res.activeWorkspace;
+              render();
+            }) }),
+            h('span', { style: it.done ? 'text-decoration:line-through;opacity:.6' : '' }, it.label))));
+      }
+      if (w.type === 'table' && Array.isArray(w.rows)) {
+        return h('div', { class: 'ws-card ws-wide' },
+          h('div', { class: 'muted small', style: 'margin-bottom:4px' }, `📋 ${w.title || 'Riferimento'}`),
+          w.rows.slice(0, 6).map(r => h('div', { class: 'ws-row-tbl small' }, Array.isArray(r) ? r.join(' → ') : String(r))));
+      }
+      if (w.type === 'actions' && Array.isArray(w.buttons)) {
+        return h('div', { class: 'ws-card ws-wide' },
+          h('div', { class: 'row wrap' }, w.buttons.slice(0, 5).map(btnTxt =>
+            h('button', { class: 'btn', style: 'padding:5px 9px;font-size:.8rem', onclick: () => { store.chatOpen = true; send(btnTxt); } }, btnTxt))));
+      }
+      return null;
+    })));
 }
 
 // ------------------------------------------------------------------ oggi
@@ -814,7 +896,14 @@ function viewAttivita() {
           h('span', { class: 'grow small' }, (x.role ? `[${x.role}] ` : '') + x.title),
           x.model ? h('span', { class: 'tag' }, x.model) : null))) : null,
         store.openJob === j.id && j.result ? h('p', { class: 'pre small', style: 'margin-top:6px;border-top:1px solid var(--line);padding-top:8px' }, j.result) : null,
-        h('div', { class: 'row', style: 'margin-top:4px' },
+        h('div', { class: 'row wrap', style: 'margin-top:4px' },
+          h('button', { class: 'btn primary', onclick: guard(async () => {
+            toast('Preparo la modalità Workspace del progetto…');
+            const out = await api('POST', '/workspace/enter', { jobId: j.id });
+            store.state = out.state;
+            store.chatOpen = true;
+            go('chat');
+          }) }, '🎯 Apri Workspace'),
           j.result ? h('button', { class: 'btn', onclick: () => { store.openJob = store.openJob === j.id ? null : j.id; render(); } }, store.openJob === j.id ? 'Chiudi risultato' : 'Leggi risultato') : null,
           j.status === 'done' ? h('button', { class: 'btn primary', onclick: guard(async () => {
             const res = await fetch('/api/jobs/' + j.id + '/document', { headers: { authorization: 'Bearer ' + store.token } });
