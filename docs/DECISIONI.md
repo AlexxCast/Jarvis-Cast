@@ -372,3 +372,34 @@ Diagnosi fatta leggendo i 1.589 messaggi salvati. Decisioni:
 - **Consolidamento giornaliero** (`memory.consolidate` in `selfInterrogate`): nello stesso modulo, ricordi quasi uguali (Jaccard ≥ 0,8) diventano uno, il più recente. Ricordi diversi non vengono mai cancellati.
 - **Resoconto del contesto**: `buildMessages` registra le sezioni entrate con i token, i ricordi, i file e cosa è rimasto fuori. Lo salva in kv `contextReport` e la vista Mente lo mostra come "Ultima risposta: cosa ho usato".
 - **Interfaccia**: nuova scheda **Progetti**. In chat, la barra del progetto ha "+ Chat", "Apri" ed "Esci".
+
+## Autonomia: iniziativa, notifiche, correzioni e grafica (fase 3, app v2.32, 18/11/2026)
+- **Motore di iniziativa** (`server/src/initiative.js`). Gira nel battito del Durable Object (allarme ogni 15 minuti, sempre attivo) e non usa modelli. Controlla:
+  - errori uguali ripetuti (almeno 3 in 2 ore);
+  - modelli tutti in pausa;
+  - compiti falliti, con "riprova il compito";
+  - scadenze scritte nei ricordi (3 giorni prima e il giorno prima);
+  - diario vuoto la sera (solo se la dieta è in uso);
+  - peso non registrato da più di 8 giorni.
+- **Regole degli avvisi**:
+  - ogni avviso ha una chiave con un intervallo minimo;
+  - tetto giornaliero di 3 avvisi (livello "bassa") o 8 (livello "normale");
+  - ore di silenzio, 23-7 di default: gli avvisi si accodano e arrivano riuniti al mattino;
+  - si regola tutto in Impostazioni › Iniziativa.
+- **Notifiche del telefono**: `device/KestraNotifications.kt` (NotificationListenerService) manda gruppi di notifiche a `POST /api/notify`.
+  - Il server non salva mai codici di verifica e password, e scarta le pubblicità.
+  - Un messaggio urgente (urgente, chiamami, aiuto…) avvisa subito, anche di notte. Una chiamata persa offre di richiamare.
+  - "Chi mi ha scritto?" mette nel contesto le ultime notifiche.
+  - Serve il permesso Android "Accesso alle notifiche", attivabile da Impostazioni › Iniziativa.
+- **Correzioni** (`server/src/lessons.js`, kv `lessons`):
+  - il modello ha l'azione `learn {rule}`;
+  - se il Capo corregge ("no, intendevo…") e il modello non scrive una regola, si salva lo scambio;
+  - un "no" detto per rispondere a una domanda di Kestra non conta come correzione;
+  - le regole pertinenti entrano nel contesto;
+  - in Mente si vedono e si possono cancellare.
+- **Grafica**:
+  - bordi viola più leggeri e testo secondario neutro;
+  - pulsanti elimina discreti;
+  - composer su due righe (campo e invio sopra, strumenti sotto);
+  - meno emoji nelle etichette;
+  - tutti i testi usano "Kestra" e il "tu" (prima c'erano "Jarvis" e il "Lei").

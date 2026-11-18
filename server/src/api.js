@@ -12,6 +12,8 @@ import * as jarvisCore from './jarvis_core.js';
 import * as selfHeal from './self_heal.js';
 import * as workspace from './workspace.js';
 import * as projects from './projects.js';
+import * as initiative from './initiative.js';
+import * as lessons from './lessons.js';
 import * as places from './places.js';
 import * as agenda from './agenda.js';
 import * as ui from './ui.js';
@@ -289,6 +291,8 @@ export async function handleApi(db, env, deps, request) {
         improvements: kvGet(db, 'improvementRequests', []).slice(-10),
         ignoredHeard: kvGet(db, 'ignoredHeard', []).slice(-5),
         projects: projects.listProjects(db).slice(0, 12),
+        lessons: lessons.list(db).slice(-12).reverse(),
+        initiative: { settings: initiative.settings(db), history: kvGet(db, 'initiativeHistory', []).slice(-8).reverse() },
       });
     }
     if (path === '/api/memory' && method === 'GET') {
@@ -348,6 +352,18 @@ export async function handleApi(db, env, deps, request) {
       return j ? json({ ...j, steps: safeParse(j.steps) || [] }) : bad('non trovato', 404);
     }
     if (job && method === 'DELETE') { db.run('DELETE FROM jobs WHERE id = ?', job[1]); return json({ jobs: jobs.listJobs(db) }); }
+
+    // ---------------------------------------------------------------- iniziativa, notifiche, lezioni
+    if (path === '/api/notify' && method === 'POST') {
+      // Notifiche lette dall'app Android: contesto per "chi mi ha scritto?" e avvisi se urgenti.
+      const b = await body(request);
+      return json(initiative.ingestNotifications(db, b.items, ms, tz));
+    }
+    if (path === '/api/initiative' && method === 'GET') return json({ settings: initiative.settings(db), history: kvGet(db, 'initiativeHistory', []).slice(-20).reverse() });
+    if (path === '/api/initiative' && method === 'POST') return json({ settings: initiative.saveSettings(db, await body(request)) });
+    if (path === '/api/lessons' && method === 'GET') return json({ lessons: lessons.list(db).slice().reverse() });
+    const lessonDel = /^\/api\/lessons\/([\w-]+)$/.exec(path);
+    if (lessonDel && method === 'DELETE') { lessons.forget(db, lessonDel[1]); return json({ lessons: lessons.list(db).slice().reverse() }); }
 
     // ---------------------------------------------------------------- progetti (come i progetti di Claude)
     if (path === '/api/projects' && method === 'GET') return json({ projects: projects.listProjects(db), active: projects.activeSummary(db) });

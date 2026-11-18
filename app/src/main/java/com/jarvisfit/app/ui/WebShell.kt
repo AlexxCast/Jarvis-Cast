@@ -53,6 +53,7 @@ import com.jarvisfit.app.device.AppLauncher
 import com.jarvisfit.app.device.Places
 import com.jarvisfit.app.device.PhoneAgent
 import com.jarvisfit.app.device.JarvisAccessibility
+import com.jarvisfit.app.device.KestraNotifications
 import com.jarvisfit.app.data.Store
 import com.jarvisfit.app.net.Cloud
 import com.jarvisfit.app.voice.JarvisService
@@ -153,6 +154,13 @@ class JarvisBridge(
 
     @JavascriptInterface
     fun phoneControlStatus(): Boolean = JarvisAccessibility.enabled(activity)
+
+    /** Accesso alle notifiche per il motore di iniziativa ("chi mi ha scritto?", messaggi urgenti). */
+    @JavascriptInterface
+    fun notificationAccess(): Boolean = KestraNotifications.enabled(activity)
+
+    @JavascriptInterface
+    fun openNotificationAccess() = activity.runOnUiThread { KestraNotifications.openSettings(activity) }
 
     @JavascriptInterface
     fun openPhoneControlSettings() = activity.runOnUiThread { PhoneAgent.openSettings(activity) }

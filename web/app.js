@@ -88,7 +88,7 @@ function markSpeaking(text) {
 // Registrazione della voce: l'app Android manda qui i passaggi e l'esito.
 window.jarvisVoiceEnroll = (done, msg) => {
   store.voiceEnroll = done ? '' : String(msg || '');
-  if (done) toast(msg ? String(msg) : 'Voce registrata: ora Jarvis la riconosce.');
+  if (done) toast(msg ? String(msg) : 'Voce registrata: ora Kestra la riconosce.');
   render();
 };
 window.jarvisStatus = (status) => { store.voice = String(status || 'OFF'); updateOrb(); };
@@ -97,21 +97,21 @@ window.jarvisStatus = (status) => { store.voice = String(status || 'OFF'); updat
 function runDeviceActions(list) {
   for (const a of list || []) {
     if (a.type === 'open_app') {
-      if (!native) { toast(`Per aprire ${a.name} serve l'app Android di Jarvis.`); continue; }
+      if (!native) { toast(`Per aprire ${a.name} serve l'app Android di Kestra.`); continue; }
       if (nativeCall('openApp', a.name) !== true) toast(`Non trovo l'app "${a.name}" su questo telefono.`);
     } else if (a.type === 'open_url' && /^https:\/\//i.test(a.url)) {
       if (native) nativeCall('openUrl', a.url); else window.open(a.url, '_blank', 'noopener');
     } else if (a.type === 'call') {
-      if (!native) { toast('Per telefonare serve l\'app Android di Jarvis.'); continue; }
+      if (!native) { toast('Per telefonare serve l\'app Android di Kestra.'); continue; }
       const r = nativeCall('callContact', a.name);
-      if (r === 'permesso') toast('Conceda a Jarvis i permessi Contatti e Telefono, poi ripeta.');
+      if (r === 'permesso') toast('Concedi a Kestra i permessi Contatti e Telefono, poi ripeti.');
       else if (r === 'sconosciuto') toast(`Non trovo "${a.name}" nella rubrica.`);
-      else if (r === null) toast('Per telefonare aggiorni l\'app Android di Jarvis.');
+      else if (r === null) toast('Per telefonare aggiorni l\'app Android di Kestra.');
       else if (!String(r).startsWith('ok')) toast('Il telefono non ha avviato la chiamata.');
     } else if (a.type === 'save_place') savePlaceHere(a.name);
     else if (a.type === 'phone_task') {
-      if (!native) { toast('Per usare il telefono serve l\'app Android di Jarvis.'); continue; }
-      if (nativeCall('runPhoneTask', a.goal) === 'spento') toast('Attivi "Jarvis: usa il telefono" in Accessibilità (sezione Altro).');
+      if (!native) { toast('Per usare il telefono serve l\'app Android di Kestra.'); continue; }
+      if (nativeCall('runPhoneTask', a.goal) === 'spento') toast('Attiva "Kestra: usa il telefono" in Accessibilità (sezione Altro).');
     } else if (a.type === 'start_live_call') {
       openLiveCall();
     }
@@ -268,7 +268,7 @@ function importBackupFile() {
     let obj;
     try { obj = JSON.parse(await file.text()); } catch { return toast('Il file non è un backup valido.'); }
     const diary = obj && obj.diary && Array.isArray(obj.diary.meals) ? obj.diary : obj;
-    if (!diary || !Array.isArray(diary.meals)) return toast('Il file non contiene dati di Jarvis.');
+    if (!diary || !Array.isArray(diary.meals)) return toast('Il file non contiene dati di Kestra.');
     const res = await api('POST', '/import/legacy', { diary });
     store.state = res.state;
     await loadHistory();
@@ -313,7 +313,7 @@ async function send(text) {
     }
     store.messages.push({ role: 'assistant', text: out.reply, card: out.card, model: out.model, visual: out.visual || null });
     if ((out.actions || []).some(a => String(a).startsWith('project_'))) { store.projects = null; store.projectDetail = null; await refresh(); await loadHistory(); }
-    if (out.photoRequest) toast('Jarvis chiede una foto: ' + out.photoRequest);
+    if (out.photoRequest) toast('Kestra chiede una foto: ' + out.photoRequest);
     if ((nativeJson('getConfig') || {}).speakReplies) nativeCall('speak', out.reply);
     markSpeaking(out.reply);
     runDeviceActions(out.device);
@@ -593,11 +593,11 @@ function viewChat() {
   const lastUser = [...store.messages].reverse().find(m => m.role === 'user');
   const caption = store.sending
     ? h('div', { class: 'caption pending' }, lastUser ? h('span', { class: 'you' }, lastUser.text) : null, 'Sto pensando…')
-    : h('div', { class: 'caption', 'aria-live': 'polite' }, lastReply ? lastReply.text : (native ? 'Dica "Jarvis" oppure scriva qui sotto.' : 'Scriva a Jarvis qui sotto.'),
+    : h('div', { class: 'caption', 'aria-live': 'polite' }, lastReply ? lastReply.text : (native ? 'Di\' "Kestra" oppure scrivi qui sotto.' : 'Scrivi a Kestra qui sotto.'),
       lastReply?.card ? h('span', { class: 'cardline' }, lastReply.card) : null,
       visualOf(lastReply));
   const list = h('div', { class: 'chat' },
-    store.messages.length ? null : h('p', { class: 'empty' }, 'Scriva o parli a Jarvis: pasti, allenamenti, promemoria, cose da ricordare, compiti da svolgere.'),
+    store.messages.length ? null : h('p', { class: 'empty' }, 'Scrivi o parla a Kestra: pasti, allenamenti, promemoria, progetti, cose da ricordare.'),
     store.messages.map(m => h('div', { class: 'msg ' + (m.role === 'user' ? 'user' : 'assistant') },
       (m.image ? '📷 ' : '') + m.text,
       m.card ? h('span', { class: 'cardline' }, m.card) : null,
@@ -608,7 +608,7 @@ function viewChat() {
   const ta = h('textarea', {
     rows: 1,
     value: store.draftText || '',
-    placeholder: 'Scrivi o registra con 🎙️ e invia quando sei pronto…',
+    placeholder: 'Scrivi a Kestra…',
     'aria-label': 'Messaggio',
     oninput: () => { store.draftText = ta.value; },
     onkeydown: (e) => {
@@ -630,14 +630,14 @@ function viewChat() {
       h('button', { type: 'button', class: 'btn primary', style: 'padding:4px 10px;font-size:.82rem', onclick: guard(async () => {
         const files = store.pendingFiles.splice(0);
         const text = ta.value.trim(); ta.value = '';
-        toast('Adatto Jarvis al file caricato…');
+        toast('Creo il progetto dal file…');
         const out = await api('POST', '/workspace/enter', { text, files });
         store.state = out.state;
         store.chatOpen = true;
         await loadHistory();
         render();
         toast(`Progetto creato: ${out.activeWorkspace.title}`);
-      }) }, '🎯 Attiva come Workspace Progetto'))
+      }) }, 'Crea un progetto da questi file'))
     : null;
   const isTutor = store.state?.activeWorkspace?.kind === 'tutor';
   if (!store.recLang) store.recLang = isTutor ? 'en-US' : 'it-IT';
@@ -650,7 +650,7 @@ function viewChat() {
     store.pendingImage ? h('img', { class: 'thumb', alt: 'Foto allegata', src: 'data:image/jpeg;base64,' + store.pendingImage, onclick: () => { store.pendingImage = null; render(); } }) : null,
     h('button', { class: 'btn icon', title: 'Allega file', 'aria-label': 'Allega file', onclick: () => pickFile() }, icon(ICONS.file)),
     h('button', { class: 'btn icon', 'aria-label': native ? 'Scatta una foto' : 'Allega una foto', onclick: () => pickPhoto(!!native) }, icon(ICONS.photo)),
-    h('button', { class: 'btn icon', title: 'Video Call Live con Jarvis', 'aria-label': 'Video Call Live', onclick: () => openLiveCall() }, icon(ICONS.video)),
+    h('button', { class: 'btn icon', title: 'Videochiamata con Kestra', 'aria-label': 'Video Call Live', onclick: () => openLiveCall() }, icon(ICONS.video)),
     native ? h('button', { class: 'btn icon', 'aria-label': 'Scegli dalla galleria', onclick: () => pickPhoto(false) }, icon(ICONS.gallery)) : null,
     h('button', { class: 'btn icon' + (store.recording ? ' danger' : ''), title: 'Registra bozza vocale (invii tu quando sei pronto)', 'aria-label': 'Registra bozza vocale', onclick: () => toggleDraftRecording(ta) }, icon(ICONS.mic)),
     h('button', { class: 'btn icon' + (store.chatOpen ? ' on' : ''), 'aria-label': store.chatOpen ? 'Chiudi la chat' : 'Apri la chat', 'aria-pressed': store.chatOpen ? 'true' : 'false', onclick: () => { store.chatOpen = !store.chatOpen; render(); if (store.chatOpen) scrollChat(); } }, icon(ICONS.chat)),
@@ -662,9 +662,9 @@ function viewChat() {
   const nextItem = nextTimed ? { title: nextTimed.command, when: new Date(nextTimed.dueMs).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) }
     : (nextRem && (!nextRem.dueMs || (nextRem.dueMs - Date.now()) < 36 * 3600_000) ? { title: nextRem.text, when: reminderWhen(nextRem) } : null);
   const upcomingBanner = nextItem && !store.chatOpen ? h('div', { class: 'codebar' }, h('div', { class: 'banner', style: 'cursor:pointer', onclick: () => go('attivita') },
-    h('div', { class: 'row' }, h('b', { class: 'grow clip' }, `📅 In arrivo: ${nextItem.title}`), h('span', { class: 'tag ok' }, nextItem.when)))) : null;
+    h('div', { class: 'row' }, h('b', { class: 'grow clip' }, `In arrivo: ${nextItem.title}`), h('span', { class: 'tag ok' }, nextItem.when)))) : null;
   const projBanner = activeProj && !store.chatOpen ? h('div', { class: 'codebar' }, h('div', { class: 'banner', style: 'cursor:pointer', onclick: () => go('attivita') },
-    h('div', { class: 'row' }, h('b', { class: 'grow clip' }, `⚙ Progetto: ${activeProj.title}`), h('span', { class: 'tag warn num' }, `${activeProj.stats?.pct || 0}%`)),
+    h('div', { class: 'row' }, h('b', { class: 'grow clip' }, `Compito in corso: ${activeProj.title}`), h('span', { class: 'tag warn num' }, `${activeProj.stats?.pct || 0}%`)),
     h('div', { class: 'bar' }, h('i', { style: `width:${activeProj.stats?.pct || 8}%` })),
     h('span', { class: 'muted small' }, `${activeProj.stats?.done || 0}/${activeProj.stats?.total || '?'} nodi completati · tocca per dettagli`))) : null;
   const ws = store.state?.activeWorkspace;
@@ -785,7 +785,7 @@ function renderAdaptiveWorkspace(ws) {
         await loadHistory(); render();
       }) }, '+ Chat'),
       h('button', { class: 'btn', style: 'padding:5px 10px;font-size:.82rem', onclick: () => { store.projectOpen = ws.id; store.projectDetail = null; go('progetti'); } }, 'Apri'),
-      h('button', { class: 'btn danger', style: 'padding:5px 10px;font-size:.82rem', onclick: guard(async () => {
+      h('button', { class: 'btn', style: 'padding:5px 10px;font-size:.82rem', onclick: guard(async () => {
         const out = await api('POST', '/projects/exit');
         store.state = out.state;
         store.wsTimer = null;
@@ -873,7 +873,7 @@ function viewOggi() {
         h('div', { class: 'grow' }, h('div', {}, m.meal), h('div', { class: 'muted clip' }, (m.items || []).map(i => i.name).join(', ') || m.description)),
         h('span', { class: 'num' }, fmt(kcalOf(m)) + ' kcal'),
         h('button', { class: 'btn icon ghost danger', 'aria-label': 'Elimina ' + m.meal, onclick: guard(() => act({ type: 'delete_meal', id: m.id })) }, icon(ICONS.trash)))))
-        : h('p', { class: 'empty' }, 'Nessun pasto registrato. Dica a Jarvis cosa ha mangiato.')),
+        : h('p', { class: 'empty' }, 'Nessun pasto registrato. Di\' a Kestra cosa hai mangiato.')),
     acts.length ? h('div', { class: 'card' }, h('h2', {}, 'Attività di oggi'), h('div', { class: 'list' }, acts.map(a => h('div', { class: 'item' },
       h('div', { class: 'grow' }, h('div', {}, a.type), h('div', { class: 'muted clip' }, `${fmt(a.durationMin)} min · ${a.description}`)),
       h('span', { class: 'num' }, fmt(a.kcalBurned) + ' kcal'),
@@ -885,7 +885,7 @@ function viewOggi() {
 function weightCard() {
   const input = h('input', { type: 'number', step: '0.1', inputmode: 'decimal', placeholder: 'kg', 'aria-label': 'Peso in kg' });
   return h('div', { class: 'card' }, h('h2', {}, 'Peso'), h('div', { class: 'row' }, input,
-    h('button', { class: 'btn', onclick: guard(async () => { const kg = Number(input.value); if (!(kg > 20)) return toast('Inserisca un peso valido.'); await act({ type: 'add_weight', kg, date: store.state.today.date }); toast('Peso registrato.'); }) }, 'Registra')));
+    h('button', { class: 'btn', onclick: guard(async () => { const kg = Number(input.value); if (!(kg > 20)) return toast('Inserisci un peso valido.'); await act({ type: 'add_weight', kg, date: store.state.today.date }); toast('Peso registrato.'); }) }, 'Registra')));
 }
 
 // ------------------------------------------------------------------ cucina
@@ -902,8 +902,8 @@ function viewCucina() {
         h('div', { class: 'grow clip' }, i.name, i.quantity ? h('span', { class: 'muted' }, ' · ' + i.quantity) : null),
         h('span', { class: 'tag' }, i.category),
         h('button', { class: 'btn icon ghost danger', 'aria-label': 'Rimuovi ' + i.name, onclick: guard(() => act({ type: 'remove_pantry_item', id: i.id })) }, icon(ICONS.trash)))))
-        : h('p', { class: 'empty' }, 'Dispensa vuota. Può anche mandare a Jarvis una foto del frigo o della spesa.'),
-      h('button', { class: 'btn', onclick: () => { go('chat'); send('Cosa posso cucinare con quello che ho in dispensa, restando nel mio target di oggi?'); } }, 'Chiedi a Jarvis cosa cucinare')),
+        : h('p', { class: 'empty' }, 'Dispensa vuota. Puoi mandare a Kestra una foto del frigo o della spesa.'),
+      h('button', { class: 'btn', onclick: () => { go('chat'); send('Cosa posso cucinare con quello che ho in dispensa, restando nel mio target di oggi?'); } }, 'Chiedi a Kestra cosa cucinare')),
     h('div', { class: 'card' }, h('h2', {}, 'Ricettario'),
       d.savedRecipes.length ? d.savedRecipes.map(r => h('details', {},
         h('summary', {}, h('span', { style: 'color:var(--text)' }, r.title), ` · ${fmt(r.totalKcal)} kcal (P${fmt(r.totalProtein)} C${fmt(r.totalCarbs)} G${fmt(r.totalFat)})`),
@@ -929,7 +929,7 @@ function viewLuoghi(s) {
   return h('div', { class: 'card' }, h('h2', {}, 'Luoghi'),
     h('p', { class: 'muted' }, 'Per i promemoria "quando arrivo a casa". Si salva la posizione in cui si trova adesso.'),
     native && perm !== 'always' ? h('div', { class: 'row wrap' },
-      h('p', { class: 'grow' }, perm === 'foreground' ? 'Per avvisarla anche ad app chiusa scelga "Consenti sempre" nella posizione.' : 'Jarvis non ha ancora il permesso della posizione.'),
+      h('p', { class: 'grow' }, perm === 'foreground' ? 'Per avvisarla anche ad app chiusa scelga "Consenti sempre" nella posizione.' : 'Kestra non ha ancora il permesso della posizione.'),
       h('button', { class: 'btn', onclick: () => { nativeCall('requestLocation'); setTimeout(render, 1500); } }, 'Concedi posizione')) : null,
     h('div', { class: 'row wrap' }, name, h('button', { class: 'btn primary', onclick: () => {
       if (!name.value.trim()) return toast('Dia un nome al luogo.');
@@ -938,7 +938,7 @@ function viewLuoghi(s) {
     places.length ? h('div', { class: 'list' }, places.map(p => h('div', { class: 'item' },
       h('div', { class: 'grow' }, h('div', {}, p.name), h('div', { class: 'muted num' }, `raggio ${p.radius} m`)),
       h('button', { class: 'btn icon ghost danger', 'aria-label': 'Elimina luogo', onclick: guard(async () => { s.places = (await api('DELETE', '/places/' + encodeURIComponent(p.key))).places; syncPlaces(s.places); render(); }) }, icon(ICONS.trash)))))
-      : h('p', { class: 'empty' }, 'Nessun luogo. Quando è a casa può dire: "Jarvis, salva questo posto come casa".'));
+      : h('p', { class: 'empty' }, 'Nessun luogo. Quando sei a casa puoi dire: "Kestra, salva questo posto come casa".'));
 }
 
 function formatWait(ms) {
@@ -1021,7 +1021,7 @@ function viewManualAutomationCard(s) {
 
 function viewAttivita() {
   const s = store.state;
-  const text = h('input', { placeholder: 'Cosa devo ricordarle?', 'aria-label': 'Testo del promemoria' });
+  const text = h('input', { placeholder: 'Cosa devo ricordarti?', 'aria-label': 'Testo del promemoria' });
   const due = h('input', { type: 'datetime-local', 'aria-label': 'Data e ora', value: s.now, style: 'max-width:220px' });
   const goal = h('textarea', { rows: 2, placeholder: 'Es. Pianifica i pasti della settimana con lista della spesa', 'aria-label': 'Compito' });
   return [
@@ -1036,16 +1036,16 @@ function viewAttivita() {
       s.reminders.length ? h('div', { class: 'list' }, s.reminders.map(r => h('div', { class: 'item' },
         h('div', { class: 'grow' }, h('div', {}, r.text), h('div', { class: 'muted num' }, reminderWhen(r))),
         h('button', { class: 'btn icon ghost danger', 'aria-label': 'Elimina promemoria', onclick: guard(async () => { s.reminders = (await api('DELETE', '/reminders/' + r.id)).reminders; render(); }) }, icon(ICONS.trash)))))
-        : h('p', { class: 'empty' }, 'Nessun promemoria. Può anche dire: "Jarvis, ricordami alle 18 di chiamare il dentista".')),
+        : h('p', { class: 'empty' }, 'Nessun promemoria. Puoi anche dire: "Kestra, ricordami alle 18 di chiamare il dentista".')),
     viewLuoghi(s),
     h('div', { class: 'card' },
-      h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Progetti e Compiti Multi-Agente'),
+      h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Compiti in background'),
         s.jobs.some(j => j.status === 'planning' || j.status === 'running') ? h('span', { class: 'tag warn' }, '● In esecuzione') : null),
-      h('p', { class: 'muted' }, 'Jarvis divide i progetti complessi in nodi-agente, li esegue in autonomia e mostra qui avanzamento e statistiche.'),
+      h('p', { class: 'muted' }, 'Kestra divide i lavori lunghi in passi, li esegue in autonomia e mostra qui avanzamento e risultati.'),
       goal, h('button', { class: 'btn primary', onclick: guard(async () => {
         if (!goal.value.trim()) return;
-        s.jobs = (await api('POST', '/jobs', { goal: goal.value })).jobs; goal.value = ''; render(); toast('Progetto avviato.');
-      }) }, 'Avvia Progetto')),
+        s.jobs = (await api('POST', '/jobs', { goal: goal.value })).jobs; goal.value = ''; render(); toast('Compito avviato.');
+      }) }, 'Avvia compito')),
     ...(s.jobs.length ? s.jobs.map(j => {
       const st = j.stats || { total: j.steps.length, done: j.steps.filter(x => x.status === 'done').length, pct: 0, files: [], models: [] };
       const pct = st.pct ?? (st.total ? Math.round((st.done / st.total) * 100) : 0);
@@ -1085,7 +1085,7 @@ function viewAttivita() {
             openDocViewer(j.title, html);
           }) }, 'Apri Documento / PDF') : null,
           h('button', { class: 'btn ghost danger', onclick: guard(async () => { s.jobs = (await api('DELETE', '/jobs/' + j.id)).jobs; render(); }) }, 'Elimina')));
-    }) : [h('p', { class: 'empty' }, 'Nessun progetto ancora. Chiedi a Jarvis in chat o avviane uno qui sopra.')]),
+    }) : [h('p', { class: 'empty' }, 'Nessun compito ancora. Chiedilo a Kestra in chat o avvialo qui sopra.')]),
   ];
 }
 const jobTag = (j) => h('span', { class: 'tag ' + ({ done: 'ok', failed: 'bad' }[j.status] || 'warn') }, { planning: 'pianifico', running: 'in corso', done: 'completato', failed: 'non riuscito' }[j.status] || j.status);
@@ -1216,8 +1216,8 @@ function viewDispositivi() {
   const customApp = h('input', { placeholder: 'Programma o URL da aprire sul PC (es. Chrome, code, https://...)', style: 'flex:1;min-width:190px' });
   return [
     h('div', { class: 'card' },
-      h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Manager Multi-Dispositivo (Jarvis Core)'), h('button', { class: 'btn', onclick: guard(reload) }, 'Aggiorna')),
-      h('p', { class: 'muted small' }, 'Controlla da qui o con la voce ("Jarvis apri Chrome sul PC", "metti in pausa sul PC") sia lo smartphone sia il computer desktop.'),
+      h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Dispositivi collegati'), h('button', { class: 'btn', onclick: guard(reload) }, 'Aggiorna')),
+      h('p', { class: 'muted small' }, 'Controlla da qui o con la voce ("Kestra, apri Chrome sul PC", "metti in pausa sul PC") sia lo smartphone sia il computer desktop.'),
       devs.length ? h('div', { class: 'list' }, devs.map(d => {
         const m = d.metrics || {};
         return h('div', { class: 'item' },
@@ -1275,7 +1275,7 @@ const ringName = (r) => RING_NAMES[r] || `livello ${r + 1}`;
 
 /** Come Jarvis archivia e usa i contesti: blocchi piccoli, uno per dipartimento, argomento o riassunto. */
 function viewMente() {
-  if (!store.mind) { api('GET', '/mind').then(m => { store.mind = m; render(); }).catch(e => toast(e.message)); return [h('p', { class: 'empty' }, 'Carico la mente di Jarvis…')]; }
+  if (!store.mind) { api('GET', '/mind').then(m => { store.mind = m; render(); }).catch(e => toast(e.message)); return [h('p', { class: 'empty' }, 'Carico la mente di Kestra…')]; }
   const m = store.mind;
   const chip = (text, cls = '') => h('span', { class: 'tag ' + cls }, text);
   const topicTree = (topics) => {
@@ -1297,8 +1297,12 @@ function viewMente() {
     h('div', { class: 'card' }, h('h2', {}, 'Nel contesto adesso'),
       m.active.length ? h('div', { class: 'chips' }, m.active.map(a => chip(a, 'ok'))) : h('p', { class: 'muted small' }, 'Solo il nucleo: nessun dipartimento aperto.')),
     contextCard(m),
+    h('div', { class: 'card' }, h('h2', {}, 'Cosa ho imparato dalle tue correzioni'),
+      (m.lessons || []).length ? h('div', { class: 'list' }, m.lessons.map(l => h('div', { class: 'item' }, h('span', { class: 'grow small' }, l.rule),
+        h('button', { class: 'btn icon ghost danger', 'aria-label': 'Dimentica questa regola', onclick: guard(async () => { await api('DELETE', '/lessons/' + l.id); store.mind = null; render(); }) }, icon(ICONS.trash)))))
+        : h('p', { class: 'muted small' }, 'Ancora niente. Quando mi correggi ("no, intendevo…") ricavo una regola e la uso le volte dopo.')),
     h('div', { class: 'card' }, h('h2', {}, 'Automazioni sul telefono'),
-      h('p', { class: 'muted small' }, 'Percorsi autonomi generati in automatico quando chiedi a Jarvis di usare un\'app (nodi verdi/viola sulla sfera).'),
+      h('p', { class: 'muted small' }, 'Percorsi autonomi generati in automatico quando chiedi a Kestra di usare un\'app (nodi verdi/viola sulla sfera).'),
       (m.automations && m.automations.length)
         ? h('div', { class: 'chips' }, m.automations.map(a => chip(a.label, 'ok')))
         : h('p', { class: 'muted small' }, 'Nessuna automazione attiva.')),
@@ -1346,11 +1350,11 @@ function contextCard(m) {
 function viewMemoria() {
   if (!store.memory) { api('GET', '/memory').then(m => { store.memory = m; render(); }).catch(e => toast(e.message)); return [h('p', { class: 'empty' }, 'Carico la memoria…')]; }
   const mod = h('input', { placeholder: 'Modulo (es. lavoro)', 'aria-label': 'Modulo', style: 'max-width:170px', list: 'mods' });
-  const text = h('input', { placeholder: 'Cosa deve ricordare Jarvis?', 'aria-label': 'Ricordo' });
+  const text = h('input', { placeholder: 'Cosa deve ricordare Kestra?', 'aria-label': 'Ricordo' });
   const reload = async () => { store.memory = await api('GET', '/memory'); render(); };
   return [
     h('div', { class: 'card' }, h('h2', {}, 'Memoria a moduli'),
-      h('p', { class: 'muted' }, 'Jarvis crea un modulo per ogni attività o argomento e lo riapre solo quando serve. Qui può aggiungere o cancellare ricordi a mano.'),
+      h('p', { class: 'muted' }, 'Kestra crea un modulo per ogni attività o argomento e lo riapre solo quando serve. Qui puoi aggiungere o cancellare ricordi a mano.'),
       h('datalist', { id: 'mods' }, store.memory.modules.map(m => h('option', { value: m.name }))),
       h('div', { class: 'row wrap' }, mod, text, h('button', { class: 'btn primary', onclick: guard(async () => { if (!text.value.trim()) return; await api('POST', '/memory', { module: mod.value || 'generale', text: text.value }); await reload(); }) }, 'Salva'))),
     store.memory.modules.length ? store.memory.modules.map(m => h('div', { class: 'card' },
@@ -1359,7 +1363,7 @@ function viewMemoria() {
       h('div', { class: 'list' }, store.memory.entries.filter(e => e.module === m.name).map(e => h('div', { class: 'item' },
         h('span', { class: 'grow' }, e.text),
         h('button', { class: 'btn icon ghost danger', 'aria-label': 'Dimentica', onclick: guard(async () => { await api('DELETE', '/memory/' + e.id); await reload(); }) }, icon(ICONS.trash)))))))
-      : [h('p', { class: 'empty' }, 'Ancora nessun ricordo. Provi a dire: "Jarvis, ricordati che…".')],
+      : [h('p', { class: 'empty' }, 'Ancora nessun ricordo. Prova a dire: "Kestra, ricordati che…".')],
   ];
 }
 
@@ -1371,7 +1375,7 @@ function viewModelli() {
   editor.value = JSON.stringify(m.models.map(x => ({ provider: x.provider, model: x.model, tiers: x.tiers, ctx: x.ctx, ...x.limits, free: x.free, prio: x.prio })), null, 1);
   return [
     h('div', { class: 'card' }, h('h2', {}, 'Provider'),
-      h('p', { class: 'muted' }, 'Le chiavi si impostano come segreti su Cloudflare. Jarvis usa solo i provider con la chiave e cambia modello all\'80% del limite.'),
+      h('p', { class: 'muted' }, 'Le chiavi si impostano come segreti su Cloudflare. Kestra usa solo i provider con la chiave e cambia modello all\'80% del limite.'),
       h('div', { class: 'row wrap' }, m.providers.map(p => h('span', { class: 'tag ' + (p.configured ? 'ok' : '') , title: p.env }, (p.configured ? '● ' : '○ ') + p.name)))),
     h('div', { class: 'card' }, h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Modelli'), h('button', { class: 'btn', onclick: guard(async () => { await api('POST', '/models/unblock'); await reload(); toast('Pause azzerate.'); }) }, 'Riattiva tutti')),
       h('div', { class: 'list' }, m.models.filter(x => x.configured).map(x => h('div', { class: 'item' },
@@ -1408,28 +1412,50 @@ function viewProfilo() {
     }) }, 'Salva'))];
 }
 
+/** Iniziativa: quanto Kestra può avvisarti da sola, ore di silenzio, notifiche del telefono. */
+function viewIniziativa() {
+  if (!store.initiative) { api('GET', '/initiative').then(r => { store.initiative = r; render(); }).catch(() => {}); return h('div', { class: 'card' }, h('h2', {}, 'Iniziativa'), h('p', { class: 'empty' }, 'Carico…')); }
+  const st = store.initiative.settings;
+  const save = guard(async (patch) => { store.initiative.settings = (await api('POST', '/initiative', patch)).settings; render(); });
+  const hours = Array.from({ length: 24 }, (_, i) => i);
+  const sel = (value, onchange, label) => h('select', { 'aria-label': label, style: 'width:auto;flex:none', onchange: (e) => onchange(Number(e.target.value)) }, hours.map(x => h('option', { value: x, selected: x === value }, `${String(x).padStart(2, '0')}:00`)));
+  const notifOk = native && nativeCall('notificationAccess') === true;
+  return h('div', { class: 'card' }, h('h2', {}, 'Iniziativa'),
+    h('p', { class: 'muted small' }, 'Kestra controlla da sola errori che si ripetono, compiti falliti, scadenze nei ricordi, obiettivi e notifiche urgenti, e ti avvisa senza che tu chieda.'),
+    h('div', { class: 'row wrap' }, [['off', 'Spenta'], ['bassa', 'Bassa'], ['normale', 'Normale']].map(([v, label]) =>
+      h('button', { class: 'btn' + (st.level === v ? ' primary' : ''), 'aria-pressed': String(st.level === v), onclick: () => save({ level: v }) }, label))),
+    h('div', { class: 'muted small' }, st.level === 'off' ? 'Spenta: solo i messaggi urgenti arrivano lo stesso.' : st.level === 'bassa' ? 'Bassa: al massimo 3 avvisi al giorno.' : 'Normale: al massimo 8 avvisi al giorno.'),
+    h('div', { class: 'row wrap', style: 'margin-top:8px' }, h('span', { class: 'small' }, 'Silenzio dalle'), sel(st.quietFrom, v => save({ quietFrom: v }), 'Inizio silenzio'), h('span', { class: 'small' }, 'alle'), sel(st.quietTo, v => save({ quietTo: v }), 'Fine silenzio')),
+    h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: st.notifications, onchange: (e) => save({ notifications: e.target.checked }) }), 'Usa le notifiche del telefono ("chi mi ha scritto?", messaggi urgenti)'),
+    native && typeof native.openNotificationAccess === 'function' && st.notifications ? h('div', { class: 'row wrap' },
+      h('p', { class: 'grow small' }, notifOk ? 'Accesso alle notifiche attivo. I codici di verifica e le pubblicità non vengono mai salvati.' : 'Per leggere le notifiche attiva "Kestra: legge le notifiche" nelle impostazioni di Android.'),
+      notifOk ? null : h('button', { class: 'btn', onclick: () => { nativeCall('openNotificationAccess'); setTimeout(render, 4000); } }, 'Attiva')) : null,
+    (store.initiative.history || []).length ? h('details', {}, h('summary', { class: 'small' }, 'Ultimi avvisi'),
+      h('div', { class: 'list' }, store.initiative.history.map(x => h('div', { class: 'item small' }, h('span', { class: 'muted num' }, ago(x.at).slice(5)), ' ', x.text)))) : null);
+}
+
 function viewImpostazioni() {
   const cfg = nativeJson('getConfig');
   const toggle = (label, key, method) => h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: cfg[key], onchange: (e) => { nativeCall(method, e.target.checked); setTimeout(render, 300); } }), label);
   return [
     native && cfg ? h('div', { class: 'card' }, h('h2', {}, 'Telefono'),
-      toggle('Ascolto continuo di "Jarvis" (anche a schermo spento)', 'listening', 'setListening'),
+      toggle('Ascolto continuo di "Kestra" (anche a schermo spento)', 'listening', 'setListening'),
       toggle('Leggi le risposte ad alta voce', 'speakReplies', 'setSpeakReplies'),
       toggle('Lascia il microfono alle altre app (Gemini, vocali, chiamate)', 'micGuard', 'setMicGuard'),
       h('div', {}, h('div', { class: 'small' }, 'Sensibilità quando lo chiama'),
-        h('div', { class: 'row wrap' }, [['Bassa', 0.2, 'solo "Ehi Jarvis" all\'inizio'], ['Media', 0.5, 'consigliata'], ['Alta', 0.85, 'risponde anche a nomi simili']].map(([label, v, hint]) =>
+        h('div', { class: 'row wrap' }, [['Bassa', 0.2, 'solo "Ehi Kestra" all\'inizio'], ['Media', 0.5, 'consigliata'], ['Alta', 0.85, 'risponde anche a nomi simili']].map(([label, v, hint]) =>
           h('button', { class: 'btn' + (Math.abs((cfg.sensitivity ?? 0.5) - v) < 0.2 ? ' primary' : ''), title: hint, onclick: () => { nativeCall('setSensitivity', v); setTimeout(render, 200); } }, label))),
-        h('div', { class: 'muted small' }, (cfg.sensitivity ?? 0.5) < 0.35 ? 'Bassa: risponde solo se inizia con "Jarvis" o "Ehi Jarvis".' : (cfg.sensitivity ?? 0.5) > 0.7 ? 'Alta: capisce anche "Jervis", "Giarvis" e il nome in mezzo alla frase.' : 'Media: il nome all\'inizio o alla fine; in mezzo al discorso decide dal contesto.')),
+        h('div', { class: 'muted small' }, (cfg.sensitivity ?? 0.5) < 0.35 ? 'Bassa: risponde solo se inizi con "Kestra" o "Ehi Kestra".' : (cfg.sensitivity ?? 0.5) > 0.7 ? 'Alta: capisce anche "Jervis", "Giarvis" e il nome in mezzo alla frase.' : 'Media: il nome all\'inizio o alla fine; in mezzo al discorso decide dal contesto.')),
       h('div', { class: 'row wrap' },
         h('p', { class: 'grow' }, nativeCall('phoneControlStatus') === true
-          ? 'Jarvis può usare il telefono al posto suo (tocca, scrive, legge). Si ferma prima di inviare, pagare o eliminare cose non richieste.'
-          : 'Per far usare il telefono a Jarvis ("scrivi a Marco che arrivo") attivi "Jarvis: usa il telefono" in Accessibilità.'),
+          ? 'Kestra può usare il telefono al posto tuo (tocca, scrive, legge). Si ferma prima di inviare, pagare o eliminare cose non richieste.'
+          : 'Per far usare il telefono a Kestra ("scrivi a Marco che arrivo") attiva "Kestra: usa il telefono" in Accessibilità.'),
         nativeCall('phoneControlStatus') === true ? null : h('button', { class: 'btn', onclick: () => nativeCall('openPhoneControlSettings') }, 'Apri Accessibilità')),
       typeof native.openOverlaySettings === 'function' ? h('div', {},
         cfg.overlayAllowed
-          ? toggle('Mostra Jarvis sopra le altre app (sfera, frasi e grafiche) quando lo chiamo', 'overlay', 'setOverlay')
+          ? toggle('Mostra Kestra sopra le altre app (sfera, frasi e grafiche) quando la chiamo', 'overlay', 'setOverlay')
           : h('div', { class: 'row wrap' },
-            h('p', { class: 'grow' }, 'Per vedere Jarvis e le sue grafiche sopra le altre app, senza che si apra la sua app, attivi "Mostra sopra altre app".'),
+            h('p', { class: 'grow' }, 'Per vedere Kestra e le sue grafiche sopra le altre app, senza aprire l\'app, attiva "Mostra sopra altre app".'),
             h('button', { class: 'btn', onclick: () => { nativeCall('openOverlaySettings'); setTimeout(render, 3000); } }, 'Attiva'))) : null,
       typeof native.setPhonePassword === 'function' || typeof native.enrollVoice === 'function' ? h('div', {},
         h('div', { class: 'small' }, 'Parola d\'ordine opzionale ("niente più fili")'),
@@ -1445,14 +1471,15 @@ function viewImpostazioni() {
             setTimeout(render, 200);
           } }, 'Salva parola d\'ordine')) : null) : null,
       typeof native.callPermission === 'function' ? h('div', { class: 'row wrap' },
-        h('p', { class: 'grow' }, nativeCall('callPermission') === true ? 'Jarvis può telefonare ai contatti della rubrica ("chiama Marco").' : 'Per le telefonate ("chiama Marco") Jarvis ha bisogno dei permessi Contatti e Telefono.'),
+        h('p', { class: 'grow' }, nativeCall('callPermission') === true ? 'Kestra può telefonare ai contatti della rubrica ("chiama Marco").' : 'Per le telefonate ("chiama Marco") Kestra ha bisogno dei permessi Contatti e Telefono.'),
         nativeCall('callPermission') === true ? null : h('button', { class: 'btn', onclick: () => { nativeCall('requestCallPermission'); setTimeout(render, 2500); } }, 'Concedi')) : null,
-      h('p', { class: 'muted' }, `App ${cfg.version || ''}. Quando un'altra app registra, Jarvis si mette in pausa e riprende da solo.`),
+      h('p', { class: 'muted' }, `App ${cfg.version || ''}. Quando un'altra app registra, Kestra si mette in pausa e riprende da sola.`),
       h('div', { class: 'row wrap' },
         h('button', { class: 'btn', onclick: guard(async () => { store.state.legacyImported = null; await importLegacyIfNeeded(); render(); }) }, 'Reimporta i dati del telefono'),
         h('button', { class: 'btn ghost danger', onclick: () => nativeCall('disconnectCloud') }, 'Torna all\'app classica'))) : null,
+    viewIniziativa(),
     h('div', { class: 'card' }, h('h2', {}, 'Dati'),
-      h('p', { class: 'muted' }, store.state.legacyImported ? `Dati della vecchia app importati il ${store.state.legacyImported.replace('T', ' alle ')}.` : 'I dati vivono sul suo server Cloudflare.'),
+      h('p', { class: 'muted' }, store.state.legacyImported ? `Dati della vecchia app importati il ${store.state.legacyImported.replace('T', ' alle ')}.` : 'I dati vivono sul tuo server Cloudflare.'),
       h('div', { class: 'row wrap' },
         h('button', { class: 'btn', onclick: guard(async () => {
           const data = await api('GET', '/export');
@@ -1477,7 +1504,7 @@ function viewLogin() {
   });
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
   return h('div', { class: 'card login' }, h('img', { src: '/logo.png', alt: '' }), h('h1', { style: 'text-align:center' }, 'Kestra Assistente'),
-    h('p', { class: 'muted', style: 'text-align:center' }, 'Inserisca il token scelto durante l\'installazione (JARVIS_TOKEN).'), input, h('button', { class: 'btn primary', onclick: submit }, 'Entra'));
+    h('p', { class: 'muted', style: 'text-align:center' }, 'Inserisci il token scelto durante l\'installazione (JARVIS_TOKEN).'), input, h('button', { class: 'btn primary', onclick: submit }, 'Entra'));
 }
 
 const TABS = [['chat', 'Kestra'], ['progetti', 'Progetti'], ['oggi', 'Oggi'], ['cucina', 'Cucina'], ['attivita', 'Attività'], ['altro', 'Altro']];
@@ -1607,7 +1634,7 @@ function openLiveCall() {
         image,
       });
       if (closed) return;
-      const reply = out.reply || 'Ho visto, signore.';
+      const reply = out.reply || 'Ho visto, Capo.';
       subEl.textContent = reply;
       store.messages.push({ role: 'user', text: `📹 [Live] ${promptText}`, image: true });
       store.messages.push({ role: 'assistant', text: reply, model: out.model });

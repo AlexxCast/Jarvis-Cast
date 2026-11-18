@@ -7,6 +7,8 @@ import * as devices from './devices.js';
 import * as jarvisCore from './jarvis_core.js';
 import * as workspace from './workspace.js';
 import * as projects from './projects.js';
+import * as initiative from './initiative.js';
+import * as lessons from './lessons.js';
 import { WEATHER_WORDS, weatherContext } from './weather.js';
 import * as web from './web.js';
 import * as router from './router.js';
@@ -148,6 +150,7 @@ export function applyActions(db, actions, ctx) {
         out.rememberedIds.push(memId);
       }
       else if (a.type === 'forget') memory.forget(db, a.id);
+      else if (a.type === 'learn') { if (!lessons.learn(db, a.rule || a.text, ctx.nowIso)) { out.failed.push(a.type); continue; } }
       else if (a.type === 'clean_graph') agents.GraphAgent.cleanBranch(db, a.branch || 'all', a.max_nodes);
       else if (a.type === 'add_reminder') { if (!agenda.addReminder(db, a, ctx.ms, ctx.tz)) { out.failed.push(a.type); continue; } }
       else if (a.type === 'done_reminder') agenda.doneReminder(db, a.id);
@@ -278,6 +281,13 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
     });
     return local(`Ho creato il progetto "${ws.title}" con le sue istruzioni e il materiale tra i file. Per uscire di' "esci dal progetto".`, { actions: ['project_create'] });
   }
+  if (/^\W*(?:(?:kestra|chestra)\W+)?riprova\s+(?:il\s+|l['’]\s*ultimo\s+)?compito\W*$/i.test(userText)) {
+    const j = db.get("SELECT id, title FROM jobs WHERE status = 'failed' ORDER BY updated DESC LIMIT 1");
+    if (!j) return local('Non ci sono compiti falliti da riprovare.');
+    db.run("UPDATE jobs SET status = 'planning', steps = '[]', result = '', updated = ? WHERE id = ?", nowIso, j.id);
+    deps.schedule?.(ms + 500);
+    return local(`Riprovo "${j.title}". Ti avviso a lavoro finito.`, { actions: ['job_retry'], touched: ['compiti'] });
+  }
   if (proj) sessionId = proj.chat.session;
 
   // Se l'utente chiede di ridurre, sistemare o pulire il grafo (es. "il grafo della dieta è troppo grande, riducilo"),
@@ -353,7 +363,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   const parts = {
     core: CORE_PROMPT(diary.profile.name, nowHuman(ms, tz)) + '\n\n' + mood.MOOD_PROMPT(mood.current(db, ms)) + (projCtx ? '\n\n' + projCtx.header : ''),
     brief: projCtx && !dietOn ? '' : dietBrief(diary, today),
-    rules: [focusLine, dietOn ? DIET_RULES : '', UI_WORDS.test(userText) ? ui.uiPrompt(ui.loadLayout(db)) : '', UI_WORDS.test(userText) ? coder.codePrompt(env, db) : '', DEVICE_WORDS.test(userText) ? appsPrompt(db) : '', (/\b(pc|computer|desktop|windows|dispositiv\w*)\b/i.test(userText) || activeFocus?.device === 'pc' || navActive) ? devices.devicesPrompt(db, ms) : '', phone.pendingContext(db, ms)].filter(Boolean).join('\n\n'),
+    rules: [focusLine, dietOn ? DIET_RULES : '', UI_WORDS.test(userText) ? ui.uiPrompt(ui.loadLayout(db)) : '', UI_WORDS.test(userText) ? coder.codePrompt(env, db) : '', DEVICE_WORDS.test(userText) ? appsPrompt(db) : '', lessons.contextBlock(db, probe), initiative.NOTIF_WORDS.test(userText) ? initiative.notificationsContext(db) : '', (/\b(pc|computer|desktop|windows|dispositiv\w*)\b/i.test(userText) || activeFocus?.device === 'pc' || navActive) ? devices.devicesPrompt(db, ms) : '', phone.pendingContext(db, ms)].filter(Boolean).join('\n\n'),
     blocks: [...(dietOn ? dietContext(diary, today) : []), ...(projCtx ? projCtx.blocks : [])],
     memories: recalled.entries.slice(0, projCtx ? 8 : 24).map(m => `- [${m.id}] (${m.module}) ${m.text}`),
     moduleIndex: [mods.length ? 'MODULI DI MEMORIA ESISTENTI: ' + mods.map(m => `${m.name}${m.description ? ` (${m.description})` : ''} [${m.entries}]`).join('; ') : '',
@@ -410,6 +420,14 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
       if (explicitMem) parsed.actions.push({ type: 'remember', module: explicitMem.module, text: explicitMem.text });
     }
     let done = applyActions(db, parsed.actions, { today, nowIso, ms, tz, hadPhoto: !!image, project: proj?.project || null });
+    // Correzione del Capo senza una regola dal modello: si impara comunque dallo scambio.
+    if (lessons.CORRECTION_RE.test(userText) && !parsed.actions.some(a => a?.type === 'learn')) {
+      const lastA = [...history].reverse().find(h => h.role === 'assistant');
+      const lastU = [...history].reverse().find(h => h.role === 'user');
+      // "No" in risposta a una domanda di Kestra è una risposta, non una correzione.
+      const answeredNo = lastA && /\?\s*$/.test(lastA.text) && /^\W*no\b/i.test(userText);
+      if (lastA && !answeredNo && userText.split(/\s+/).length >= 4) lessons.learnFromCorrection(db, { previousUser: lastU?.text, previousReply: lastA.text, correction: userText }, nowIso);
+    }
     if (cleanCmd && !done.applied.includes('clean_graph')) done.applied.push('clean_graph');
     // Promesse di lavoro "più tardi" ("lo preparo in background, ti avviso") senza nulla che parta davvero.
     if (LATER_RE.test(parsed.reply) && !done.jobs.length && !done.code.length && !done.device.length) {

@@ -47,6 +47,7 @@ AZIONI DISPONIBILI (campo "type"):
 - update_recipe_session {title, current_step, ingredients_needed, notes} · clear_recipe_session {}
 - save_recipe {title, items, instructions, total_kcal, total_protein, total_carbs, total_fat} · delete_recipe {id | title}
 - remember {module, text, description: descrizione del modulo se è nuovo} · forget {id}
+- learn {rule}: quando il Capo ti corregge o ti spiega come preferisce una cosa, scrivi una regola generale e breve per non ripetere l'errore (es. "Per la musica il Capo usa Joytify, non Spotify"). Va insieme alla risposta corretta.
 - clean_graph {branch: "dieta"|"sport"|"all"|nome_modulo, max_nodes: 3..10}: riduce, pulisce e riordina i nodi di un ramo del grafo (o di tutto il grafo) quando l'utente dice che un ramo è troppo grande o chiede di sistemarlo/ridurlo.
 - add_reminder {text, due: "yyyy-MM-ddTHH:mm" (la prima volta), repeat: ""|giorno|feriali|settimana|mese} · done_reminder {id} (per un promemoria che si ripete lo ferma per sempre)
 - add_reminder legato a un luogo {text, place: "casa"|"palestra"|..., when: arrivo|uscita, repeat: ""|sempre} (senza due). Se il luogo non è tra i LUOGHI SALVATI crealo lo stesso e chiedi all'utente di dirti "salva questo posto come <nome>" quando si trova lì.

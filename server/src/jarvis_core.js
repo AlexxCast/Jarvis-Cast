@@ -13,6 +13,7 @@ import * as memory from './memory.js';
 import * as router from './router.js';
 import * as agents from './agents.js';
 import * as selfHeal from './self_heal.js';
+import * as initiative from './initiative.js';
 import { nowIso as nowIsoOf } from './clock.js';
 
 const BASE_PC_RE = /\b(pc|computer|desktop|portatile|windows|gh?ideon|antigravit\w*|chrome|profilo\s+chrome|account\s+chrome)\b/i;
@@ -370,6 +371,12 @@ export function selfInterrogate(db, env = {}, nowMs = Date.now(), tz = 'Europe/R
     const heal = selfHeal.runDeterministicHeal(db, nowMs, tz);
     if (heal.actions?.length) actionsTaken.push(...heal.actions);
   } catch { /* non bloccare selfInterrogate */ }
+
+  // 3a. Motore di iniziativa: errori ripetuti, modelli esauriti, compiti falliti, scadenze, obiettivi (zero crediti).
+  try {
+    const sent = initiative.tick(db, nowMs, tz);
+    if (sent?.length) actionsTaken.push(`iniziativa: ${sent.length} avvisi`);
+  } catch { /* non bloccare */ }
 
   // 3b. Consolidamento della memoria una volta al giorno: i ricordi doppi dello stesso modulo diventano uno.
   const day = atIso.slice(0, 10);

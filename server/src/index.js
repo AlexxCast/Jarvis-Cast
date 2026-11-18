@@ -39,6 +39,8 @@ export class JarvisDO extends DurableObject {
   }
 
   async fetch(request) {
+    // Il battito parte alla prima richiesta e poi si mantiene da solo nell'allarme.
+    if (!this.beat) { this.beat = true; this.ctx.waitUntil(this.schedule(Date.now() + 15 * 60_000)); }
     return handleApi(this.db, this.env, this.deps(), request);
   }
 
@@ -47,7 +49,8 @@ export class JarvisDO extends DurableObject {
     const pulse = jarvisCore.selfInterrogate(this.db, this.env, Date.now(), deps.tz);
     const nextDue = agenda.fireDue(this.db, Date.now(), deps.tz);
     const delay = await jobs.advance(this.db, this.env, deps);
-    const candidates = [nextDue, pulse?.nextTimed, delay != null ? Date.now() + delay : null].filter(x => x != null);
+    // Battito: anche senza promemoria o compiti, Kestra si risveglia ogni 15 minuti per il motore di iniziativa.
+    const candidates = [nextDue, pulse?.nextTimed, delay != null ? Date.now() + delay : null, Date.now() + 15 * 60_000].filter(x => x != null);
     if (candidates.length) await this.ctx.storage.setAlarm(Math.max(Math.min(...candidates), Date.now() + 100));
   }
 }

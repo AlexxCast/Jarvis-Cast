@@ -77,7 +77,7 @@
         <service
             android:name=".device.JarvisAccessibility"
             android:exported="false"
-            android:label="Jarvis: usa il telefono"
+            android:label="Kestra: usa il telefono"
             android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE">
             <intent-filter>
                 <action android:name="android.accessibilityservice.AccessibilityService" />
@@ -85,6 +85,16 @@
             <meta-data
                 android:name="android.accessibilityservice"
                 android:resource="@xml/jarvis_accessibility" />
+        </service>
+
+        <service
+            android:name=".device.KestraNotifications"
+            android:exported="true"
+            android:label="Kestra: legge le notifiche"
+            android:permission="android.permission.BIND_NOTIFICATION_LISTENER_SERVICE">
+            <intent-filter>
+                <action android:name="android.service.notification.NotificationListenerService" />
+            </intent-filter>
         </service>
 
         <receiver
