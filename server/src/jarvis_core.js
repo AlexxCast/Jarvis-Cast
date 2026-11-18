@@ -1101,9 +1101,13 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
           defaults: { account: focus?.profile || 'alexx cast' },
           steps,
         }, nowMs);
-        if (proposed) res.reply += ' Ha funzionato? Se sì, me lo conferma così salvo ogni step negli automatismi?';
-        setNavMode(db, sessionId, true, 'pc', nowMs);
-        res.expectReply = true;
+        if (proposed) {
+          res.reply += ' Ha funzionato? Se sì, me lo conferma così salvo ogni step negli automatismi?';
+          res.expectReply = true;
+        } else {
+          setNavMode(db, sessionId, true, 'pc', nowMs);
+          res.expectReply = true;
+        }
         return res;
       }
     }

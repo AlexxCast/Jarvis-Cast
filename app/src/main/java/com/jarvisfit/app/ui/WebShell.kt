@@ -291,6 +291,14 @@ fun WebShell(onDisconnect: () -> Unit) {
                 }
             }
             webChromeClient = object : WebChromeClient() {
+                override fun onPermissionRequest(request: android.webkit.PermissionRequest) {
+                    val host = runCatching { android.net.Uri.parse(Settings.serverUrl).host }.getOrNull()
+                    if (request.origin?.host == host) {
+                        activity.runOnUiThread { request.grant(request.resources) }
+                    } else {
+                        request.deny()
+                    }
+                }
                 override fun onShowFileChooser(
                     view: WebView,
                     callback: ValueCallback<Array<Uri>>,

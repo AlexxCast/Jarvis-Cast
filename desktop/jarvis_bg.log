@@ -205,3 +205,4 @@
 [2026-11-18 11:50:41] Errore scrittura progetto: Unterminated string starting at: line 1 column 46 (char 45)
 [2026-11-18 11:50:46] Eseguo comando [write_project]: Aggiornamento dispensa da video
 [2026-11-18 11:50:46] Errore scrittura progetto: Unterminated string starting at: line 1 column 46 (char 45)
+[2026-11-18 12:21:57] Errore heartbeat: <urlopen error [Errno 11001] getaddrinfo failed>

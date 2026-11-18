@@ -384,7 +384,10 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
           defaults: { account: activeFocus?.profile || 'alexx cast' },
           steps: [{ kind: String(pcAct.kind || 'open_app'), target: tgt, args: pcAct.args || '', optional: false }, { kind: 'dynamic_media', param: 'media', optional: true }],
         }, ms);
-        if (proposed && !/\bfunzionato\b/i.test(parsed.reply)) parsed.reply += ' Ha funzionato? Se sì, me lo conferma così lo salvo negli automatismi?';
+        if (proposed && !/\bfunzionato\b/i.test(parsed.reply)) {
+          parsed.reply += ' Ha funzionato? Se sì, me lo conferma così lo salvo negli automatismi?';
+          parsed.expectReply = true;
+        }
       }
     } else if (devAct) {
       const tgt = String(devAct.name || devAct.url || devAct.goal || '').slice(0, 50);
@@ -397,7 +400,10 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
           device: 'telefono',
           steps: [{ kind: devAct.type, target: devAct.url || devAct.name, optional: false }],
         }, ms);
-        if (proposed && !/\bfunzionato\b/i.test(parsed.reply)) parsed.reply += ' Ha funzionato? Se sì, me lo conferma così lo salvo negli automatismi?';
+        if (proposed && !/\bfunzionato\b/i.test(parsed.reply)) {
+          parsed.reply += ' Ha funzionato? Se sì, me lo conferma così lo salvo negli automatismi?';
+          parsed.expectReply = true;
+        }
       }
     } else if (done.jobs?.length) {
       jarvisCore.setFocus(db, sessionId, { domain: 'progetti', device: null, target: done.jobs[0].title, action: 'progetto' }, ms);
@@ -429,7 +435,11 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
     if (jarvisCore.isPcTarget(db, userText) || jarvisCore.isPcTarget(db, parsed.reply)) {
       done.device = [];
       if (!done.applied.includes('pc_action')) {
-        if (/\b(scorro|scorri)\b/i.test(userText + ' ' + parsed.reply)) {
+        const primeTitleM = /\b(?:apri|apro|cerca|cerco|metti|metto)\s+(.{2,60}?)\s+(?:su|in)\s+prime(?:\s+video)?\b/i.exec(userText + ' ' + parsed.reply);
+        if (primeTitleM && primeTitleM[1]) {
+          devices.enqueueCommand(db, 'desktop', { kind: 'open_url', target: `https://www.primevideo.com/search/ref=atv_nb_sbox?phrase=${encodeURIComponent(primeTitleM[1].trim())}` }, ms);
+          done.applied.push('pc_action');
+        } else if (/\b(scorro|scorri)\b/i.test(userText + ' ' + parsed.reply)) {
           const up = /\b(su|alto)\b/i.test(userText + ' ' + parsed.reply);
           devices.enqueueCommand(db, 'desktop', { kind: 'scroll', target: up ? 'up' : 'down' }, ms);
           done.applied.push('pc_action');

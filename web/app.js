@@ -425,12 +425,12 @@ async function extractVideoStoryboard(file) {
     });
     const dur = Math.max(0.5, vid.duration || 2);
     const vw = vid.videoWidth || 640, vh = vid.videoHeight || 480;
-    const cellW = 512, cellH = Math.round(cellW * (vh / vw));
+    const cellW = 384, cellH = Math.round(cellW * (vh / vw));
     const canvas = document.createElement('canvas');
-    canvas.width = cellW * 2;
-    canvas.height = cellH * 2;
+    canvas.width = cellW * 3;
+    canvas.height = cellH * 3;
     const ctx = canvas.getContext('2d');
-    const spots = [0.15, 0.4, 0.65, 0.9];
+    const spots = [0.05, 0.16, 0.28, 0.4, 0.52, 0.64, 0.76, 0.88, 0.96];
     for (let i = 0; i < spots.length; i++) {
       vid.currentTime = Math.min(dur - 0.05, dur * spots[i]);
       await new Promise((res) => {
@@ -438,10 +438,10 @@ async function extractVideoStoryboard(file) {
         vid.addEventListener('seeked', done);
         setTimeout(done, 1200);
       });
-      const x = (i % 2) * cellW, y = Math.floor(i / 2) * cellH;
+      const x = (i % 3) * cellW, y = Math.floor(i / 3) * cellH;
       ctx.drawImage(vid, x, y, cellW, cellH);
     }
-    return canvas.toDataURL('image/jpeg', 0.82).split(',')[1];
+    return canvas.toDataURL('image/jpeg', 0.8).split(',')[1];
   } finally {
     URL.revokeObjectURL(url);
   }
@@ -603,7 +603,22 @@ function viewChat() {
       m.role === 'assistant' ? h('button', { type: 'button', class: 'btn icon ghost', style: 'padding:2px 6px;margin-left:6px;vertical-align:middle', title: 'Ascolta (IT/EN)', onclick: () => speakBilingual(m.text) }, '🔊') : null,
       m.model ? h('span', { class: 'meta' }, m.model.split(':').pop()) : null)),
     store.sending ? h('div', { class: 'msg assistant pending' }, 'Sto pensando…') : null);
-  const ta = h('textarea', { rows: 1, placeholder: 'Scrivi o registra con 🎙️ e invia quando sei pronto…', 'aria-label': 'Messaggio', onkeydown: (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); const v = ta.value; ta.value = ''; send(v); } } });
+  const ta = h('textarea', {
+    rows: 1,
+    value: store.draftText || '',
+    placeholder: 'Scrivi o registra con 🎙️ e invia quando sei pronto…',
+    'aria-label': 'Messaggio',
+    oninput: () => { store.draftText = ta.value; },
+    onkeydown: (e) => {
+      if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        if (store.recording) stopDraftRecording();
+        const v = ta.value || store.draftText || '';
+        ta.value = ''; store.draftText = '';
+        send(v);
+      }
+    },
+  });
   const attachBar = (store.pendingFiles && store.pendingFiles.length)
     ? h('div', { class: 'attachments' },
       store.pendingFiles.map((f, idx) =>
@@ -637,7 +652,7 @@ function viewChat() {
     h('button', { class: 'btn icon' + (store.recording ? ' danger' : ''), title: 'Registra bozza vocale (invii tu quando sei pronto)', 'aria-label': 'Registra bozza vocale', onclick: () => toggleDraftRecording(ta) }, icon(ICONS.mic)),
     h('button', { class: 'btn icon' + (store.chatOpen ? ' on' : ''), 'aria-label': store.chatOpen ? 'Chiudi la chat' : 'Apri la chat', 'aria-pressed': store.chatOpen ? 'true' : 'false', onclick: () => { store.chatOpen = !store.chatOpen; render(); if (store.chatOpen) scrollChat(); } }, icon(ICONS.chat)),
     ta,
-    h('button', { class: 'btn primary icon', 'aria-label': 'Invia', disabled: store.sending, onclick: () => { if (store.recording) stopDraftRecording(); const v = ta.value; ta.value = ''; send(v); } }, icon(ICONS.send)));
+    h('button', { class: 'btn primary icon', 'aria-label': 'Invia', disabled: store.sending, onclick: () => { if (store.recording) stopDraftRecording(); const v = ta.value || store.draftText || ''; ta.value = ''; store.draftText = ''; send(v); } }, icon(ICONS.send)));
   const activeProj = (store.state?.jobs || []).find(j => j.status === 'planning' || j.status === 'running');
   const nextRem = (store.state?.reminders || [])[0];
   const nextTimed = (store.state?.timedActions || [])[0];
@@ -732,7 +747,9 @@ function toggleDraftRecording(ta) {
         else interim += t;
       }
       if (finalChunk) baseText += finalChunk;
-      ta.value = (baseText + interim).trim();
+      const merged = (baseText + interim).trim();
+      store.draftText = merged;
+      ta.value = merged;
     };
     draftRecog.onerror = () => {};
     draftRecog.onend = () => {

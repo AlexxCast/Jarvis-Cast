@@ -536,6 +536,17 @@ export function planSkillExecution(skill, userText = '') {
       target = target.replace(new RegExp(`\\{${k}\\}`, 'gi'), String(v));
     }
     if (st.kind === 'dynamic_media' && overrides.media) {
+      if (skill.service === 'prime') {
+        const searchUrl = `https://www.primevideo.com/search/ref=atv_nb_sbox?phrase=${encodeURIComponent(overrides.media)}`;
+        const urlIdx = resolvedSteps.findIndex(x => x.kind === 'open_url');
+        if (urlIdx >= 0) resolvedSteps[urlIdx] = { ...resolvedSteps[urlIdx], target: searchUrl };
+        else resolvedSteps.push({ kind: 'open_url', target: searchUrl });
+        continue;
+      }
+      if (skill.service === 'youtube') {
+        resolvedSteps.push({ kind: 'play_youtube', target: overrides.media });
+        continue;
+      }
       needsModelForFinalStep = true;
       continue;
     }
