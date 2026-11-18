@@ -399,11 +399,11 @@ export function createOrb() {
     ctx.beginPath(); ctx.arc(center.sx, center.sy, cr * 1.28, spinRing, spinRing + Math.PI * 0.7); ctx.stroke();
     ctx.beginPath(); ctx.arc(center.sx, center.sy, cr * 1.28, spinRing + Math.PI, spinRing + Math.PI * 1.35); ctx.stroke();
 
-    // Simbolo di Kestra al centro del globo
+    // Simbolo di Kestra pulito a 3 punte al centro del globo
     const sr = cr * 0.68;
     const syTop = center.sy - sr * 0.95;
-    const syMid = center.sy - sr * 0.05;
-    const syBot = center.sy + sr * 0.9;
+    const syMid = center.sy - sr * 0.18;
+    const syBot = center.sy + sr * 0.92;
     const sxL = center.sx - sr * 0.62;
     const sxR = center.sx + sr * 0.62;
     ctx.save();
@@ -413,18 +413,17 @@ export function createOrb() {
     ctx.lineJoin = 'round';
     ctx.lineCap = 'round';
     ctx.beginPath();
-    ctx.moveTo(center.sx, syTop); ctx.lineTo(sxL, syMid); ctx.lineTo(sxR, syMid); ctx.closePath();
-    ctx.moveTo(sxL, syMid); ctx.lineTo(sxL + sr * 0.14, syBot); ctx.lineTo(center.sx, syMid + sr * 0.24);
-    ctx.lineTo(sxR - sr * 0.14, syBot); ctx.lineTo(sxR, syMid);
-    ctx.moveTo(sxL, syMid); ctx.lineTo(sxR - sr * 0.14, syBot);
-    ctx.moveTo(sxR, syMid); ctx.lineTo(sxL + sr * 0.14, syBot);
+    ctx.moveTo(sxL, syMid); ctx.lineTo(center.sx, syTop); ctx.lineTo(sxR, syMid);
+    ctx.moveTo(sxL, syMid); ctx.lineTo(sxL, syBot); ctx.lineTo(sxR, syMid);
+    ctx.moveTo(sxR, syMid); ctx.lineTo(sxR, syBot); ctx.lineTo(sxL, syMid);
+    ctx.moveTo(sxL, syMid); ctx.lineTo(center.sx, syBot); ctx.lineTo(sxR, syMid);
     ctx.stroke();
     ctx.strokeStyle = '#39ff14';
     ctx.lineWidth = Math.max(1.3, cr * 0.08);
     ctx.beginPath();
-    ctx.moveTo(center.sx - sr * 0.18, syTop + sr * 0.42); ctx.lineTo(center.sx - sr * 0.18, syTop + sr * 0.6);
-    ctx.moveTo(center.sx + sr * 0.18, syTop + sr * 0.42); ctx.lineTo(center.sx + sr * 0.18, syTop + sr * 0.6);
-    ctx.moveTo(center.sx, syTop + sr * 0.64); ctx.lineTo(center.sx, syTop + sr * 0.8);
+    ctx.moveTo(center.sx - sr * 0.17, syTop + sr * 0.40); ctx.lineTo(center.sx - sr * 0.17, syTop + sr * 0.58);
+    ctx.moveTo(center.sx + sr * 0.17, syTop + sr * 0.40); ctx.lineTo(center.sx + sr * 0.17, syTop + sr * 0.58);
+    ctx.moveTo(center.sx, syTop + sr * 0.64); ctx.lineTo(center.sx, syTop + sr * 0.82);
     ctx.stroke();
     ctx.restore();
 

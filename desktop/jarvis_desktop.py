@@ -831,15 +831,15 @@ class JarvisDesktopApp:
                     ky = cy + math.sin(ka) * r_mid
                     c.create_rectangle(kx - 3, ky - 3, kx + 3, ky + 3, outline="#39ff14", fill="#4c1d95")
 
-        c.create_oval(cx - 26, cy - 26, cx + 26, cy + 26, outline="#a855f7", fill="#05020a", width=2)
-        # Simbolo di Kestra al centro dell'HUD
-        c.create_polygon(cx, cy - 17, cx - 13, cy - 1, cx + 13, cy - 1, outline="#c084fc", fill="", width=1.8)
-        c.create_line(cx - 13, cy - 1, cx - 9, cy + 16, cx, cy + 3, cx + 9, cy + 16, cx + 13, cy - 1, fill="#c084fc", width=1.6)
-        c.create_line(cx - 13, cy - 1, cx + 9, cy + 16, fill="#c084fc", width=1.4)
-        c.create_line(cx + 13, cy - 1, cx - 9, cy + 16, fill="#c084fc", width=1.4)
-        c.create_line(cx - 4, cy - 9, cx - 4, cy - 5, fill="#39ff14", width=2)
-        c.create_line(cx + 4, cy - 9, cx + 4, cy - 5, fill="#39ff14", width=2)
-        c.create_line(cx, cy - 5, cx, cy - 2, fill="#39ff14", width=2)
+        c.create_oval(cx - 26, cy - 26, cx + 26, cy + 26, outline="#a855f7", fill="#040806", width=2)
+        # Simbolo pulito di Kestra a 3 punte
+        c.create_line(cx - 12, cy - 3, cx, cy - 17, cx + 12, cy - 3, fill="#c084fc", width=1.8)
+        c.create_line(cx - 12, cy - 3, cx - 12, cy + 16, cx + 12, cy - 3, fill="#c084fc", width=1.6)
+        c.create_line(cx + 12, cy - 3, cx + 12, cy + 16, cx - 12, cy - 3, fill="#c084fc", width=1.6)
+        c.create_line(cx - 12, cy - 3, cx, cy + 16, cx + 12, cy - 3, fill="#c084fc", width=1.6)
+        c.create_line(cx - 3, cy - 10, cx - 3, cy - 6, fill="#39ff14", width=2)
+        c.create_line(cx + 3, cy - 10, cx + 3, cy - 6, fill="#39ff14", width=2)
+        c.create_line(cx, cy - 5, cx, cy - 1, fill="#39ff14", width=2)
         self.root.after(45, self.draw_hud)
 
     def on_close(self) -> None:

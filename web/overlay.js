@@ -157,21 +157,20 @@ function frame(now) {
   ctx.beginPath(); ctx.arc(C, C, cr, 0, Math.PI * 2); ctx.stroke();
 
   const sr = cr * 0.66;
-  const syTop = C - sr * 0.95, syMid = C - sr * 0.05, syBot = C + sr * 0.9;
+  const syTop = C - sr * 0.95, syMid = C - sr * 0.18, syBot = C + sr * 0.92;
   const sxL = C - sr * 0.62, sxR = C + sr * 0.62;
-  ctx.strokeStyle = '#c084fc'; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  ctx.strokeStyle = '#c084fc'; ctx.lineWidth = 1.9; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
   ctx.beginPath();
-  ctx.moveTo(C, syTop); ctx.lineTo(sxL, syMid); ctx.lineTo(sxR, syMid); ctx.closePath();
-  ctx.moveTo(sxL, syMid); ctx.lineTo(sxL + sr * 0.14, syBot); ctx.lineTo(C, syMid + sr * 0.24);
-  ctx.lineTo(sxR - sr * 0.14, syBot); ctx.lineTo(sxR, syMid);
-  ctx.moveTo(sxL, syMid); ctx.lineTo(sxR - sr * 0.14, syBot);
-  ctx.moveTo(sxR, syMid); ctx.lineTo(sxL + sr * 0.14, syBot);
+  ctx.moveTo(sxL, syMid); ctx.lineTo(C, syTop); ctx.lineTo(sxR, syMid);
+  ctx.moveTo(sxL, syMid); ctx.lineTo(sxL, syBot); ctx.lineTo(sxR, syMid);
+  ctx.moveTo(sxR, syMid); ctx.lineTo(sxR, syBot); ctx.lineTo(sxL, syMid);
+  ctx.moveTo(sxL, syMid); ctx.lineTo(C, syBot); ctx.lineTo(sxR, syMid);
   ctx.stroke();
   ctx.strokeStyle = '#39ff14'; ctx.lineWidth = 1.8;
   ctx.beginPath();
-  ctx.moveTo(C - sr * 0.18, syTop + sr * 0.42); ctx.lineTo(C - sr * 0.18, syTop + sr * 0.6);
-  ctx.moveTo(C + sr * 0.18, syTop + sr * 0.42); ctx.lineTo(C + sr * 0.18, syTop + sr * 0.6);
-  ctx.moveTo(C, syTop + sr * 0.64); ctx.lineTo(C, syTop + sr * 0.8);
+  ctx.moveTo(C - sr * 0.17, syTop + sr * 0.40); ctx.lineTo(C - sr * 0.17, syTop + sr * 0.58);
+  ctx.moveTo(C + sr * 0.17, syTop + sr * 0.40); ctx.lineTo(C + sr * 0.17, syTop + sr * 0.58);
+  ctx.moveTo(C, syTop + sr * 0.64); ctx.lineTo(C, syTop + sr * 0.82);
   ctx.stroke();
   requestAnimationFrame(frame);
 }
