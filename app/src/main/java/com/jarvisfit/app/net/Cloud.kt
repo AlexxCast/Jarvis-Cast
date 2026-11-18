@@ -168,6 +168,8 @@ object Cloud {
                 val o = request("POST", "/api/phone/step", buildJsonObject {
                     put("goal", goal)
                     put("step", step)
+                    // Senza conferma prima di inviare o chiamare solo se il telefono ha appena riconosciuto la voce del Capo.
+                    put("voiceTrusted", com.jarvisfit.app.voice.VoiceId.isTrusted())
                     put("history", JsonArray(history.map { JsonPrimitive(it) }))
                     put("screen", buildJsonObject {
                         put("app", screen.app)

@@ -60,3 +60,10 @@ test('richieste: il PC chiede ogni 2 secondi mentre il Capo usa Kestra, più di 
   devices.enqueueCommand(db, 'desktop', { kind: 'open_app', target: 'Chrome' }, t0 + 12 * 60_000);
   assert.equal(devices.heartbeat(db, { kind: 'desktop' }, t0 + 12 * 60_000 + 5000).nextPollMs, 2000);
 });
+
+test('telefono: senza la voce riconosciuta Kestra chiede prima di inviare o chiamare', async () => {
+  const phone = await import('../src/phone.js');
+  assert.match(phone.systemFor(false), /NON è stata verificata[\s\S]*fermati con ask/);
+  assert.match(phone.systemFor(true), /appena riconosciuta: NON fermarti/);
+  assert.ok(!/niente più fili|\{\{CONFERMA\}\}/.test(phone.systemFor(false) + phone.systemFor(true)));
+});
