@@ -40,6 +40,35 @@ export function patchProfile(profile, patch) {
   return p;
 }
 
+const words = (v) => s(v).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').split(/[^a-z0-9]+/).filter(w => w.length >= 4);
+
+/**
+ * Trova il pasto da correggere. Prima per id; se il modello ha sbagliato o inventato l'id
+ * ("non l'ho trovato" era l'errore più frequente sulle correzioni), cerca nello stesso giorno
+ * (o oggi) il pasto più recente dello stesso tipo o con alimenti/descrizione in comune.
+ */
+export function findMeal(d, a, today) {
+  const byId = d.meals.find(x => x.id === s(a.id));
+  if (byId) return byId;
+  const date = s(a.date) && N.parseDate(s(a.date)) ? s(a.date) : today;
+  const sameDay = d.meals.filter(x => x.date === date);
+  if (!sameDay.length) return null;
+  const want = new Set([...words(a.description), ...words(a.hint), ...items(a).flatMap(i => words(i.name)), ...words(a.old_name)]);
+  const kind = s(a.meal).toLowerCase();
+  let best = null, bestScore = 0;
+  sameDay.forEach((m, idx) => {
+    const have = new Set([...words(m.description), ...(m.items || []).flatMap(i => words(i.name))]);
+    let score = 0;
+    for (const w of want) if (have.has(w) || [...have].some(h => h.startsWith(w.slice(0, 5)) || w.startsWith(h.slice(0, 5)))) score += 2;
+    if (kind && s(m.meal).toLowerCase() === kind) score += 3;
+    score += idx / 1000; // a parità vince il più recente
+    if (score > bestScore) { best = m; bestScore = score; }
+  });
+  if (bestScore >= 2) return best;
+  // Un solo pasto quel giorno e nessun indizio contrario: è quello.
+  return sameDay.length === 1 && !want.size && !kind ? sameDay[0] : null;
+}
+
 export const DIET_ACTIONS = new Set(['add_meal', 'update_meal', 'delete_meal', 'add_activity', 'delete_activity', 'add_weight', 'set_steps',
   'request_photo', 'update_profile', 'add_pantry_item', 'remove_pantry_item', 'update_recipe_session', 'clear_recipe_session', 'save_recipe', 'delete_recipe']);
 
@@ -53,7 +82,7 @@ export function applyDietAction(d, a, { today, nowIso, ms, hadPhoto = false }) {
       return null;
     }
     case 'update_meal': {
-      const m = d.meals.find(x => x.id === s(a.id));
+      const m = findMeal(d, a, today);
       if (!m) return null;
       if (s(a.date)) m.date = validDate(a.date, today);
       if (s(a.meal)) m.meal = s(a.meal);
@@ -62,7 +91,7 @@ export function applyDietAction(d, a, { today, nowIso, ms, hadPhoto = false }) {
       if (it.length) m.items = it;
       return null;
     }
-    case 'delete_meal': d.meals = d.meals.filter(x => x.id !== s(a.id)); return null;
+    case 'delete_meal': { const m = findMeal(d, a, today); if (m) d.meals = d.meals.filter(x => x !== m); return null; }
     case 'add_activity':
       d.activities.push({ id: newId('a', ms), date: validDate(a.date, today), type: s(a.activity_type) || 'allenamento', description: s(a.description), durationMin: n(a.duration_min), kcalBurned: n(a.kcal_burned) });
       return null;
@@ -250,7 +279,7 @@ export const DIET_RULES = `REGOLE DIETA E ALLENAMENTO
 - Pasti: stima grammi, kcal e macro e registra con add_meal. Se le quantità sono vaghe e contano, chiedi la quantità o una foto (request_photo).
 - Dopo aver registrato un pasto di' le kcal stimate e quante ne restano oggi rispetto al TARGET EFFETTIVO DI OGGI.
 - Pasti dimenticati o sgarri di giorni passati: registrali sulla data giusta, rassicura (il bilancio è settimanale) e spiega come si adatta il target dei prossimi giorni, senza digiuni.
-- Se si parla di un pasto già registrato usa update_meal con il suo id. Se manca il tipo di pasto, deducilo dall'ora.
+- Se si parla di un pasto già registrato usa update_meal con il suo id (dal diario qui sopra). Se non vedi l'id, metti date, meal e gli alimenti: il pasto si ritrova da solo. Se manca il tipo di pasto, deducilo dall'ora.
 - Allenamenti: add_activity con kcal bruciate stimate in modo prudente. Passi detti a voce: set_steps. Peso: add_weight.
 - Ricette: quando proponi o si cucina una ricetta usa subito update_recipe_session e aggiorna il passaggio a ogni turno; a fine cottura clear_recipe_session; "salva la ricetta" → save_recipe.
 - Adatta sempre le dosi di una ricetta al budget di oggi e a ciò che c'è in dispensa, spiegando le modifiche.

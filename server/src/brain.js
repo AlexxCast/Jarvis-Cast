@@ -79,6 +79,33 @@ const FAIL_LABELS = { show: 'mostrare la grafica', web_search: 'cercare su inter
 const failLabel = (t) => FAIL_LABELS[t] || `completare l'operazione "${t}"`;
 const REPAIR_PROMPT = (failed) => `CONTROLLO AUTOMATICO: nella tua risposta ${failed.length ? `queste azioni non erano valide e NON sono state eseguite: ${failed.join(', ')}` : 'dichiari di aver fatto qualcosa ma il campo "actions" è vuoto o incompleto'}. Finora NON è stato salvato nulla. Rimanda SOLO il JSON completo, con in "actions" tutte le azioni corrette e complete (per un pasto: items con name, grams, kcal, protein, carbs, fat; per update/delete: l'id esatto preso dal contesto). Se davvero non c'è nulla da salvare, lascia "actions" vuoto e scrivi una reply che NON dica di aver salvato o fatto qualcosa.`;
 
+/** Il modello rimanda a dopo ("in background", "ti avviso appena pronto", "sto elaborando"). */
+export const LATER_RE = /\b(in\s+background|ti\s+avviser[oò]|la\s+avviser[oò]|vi\s+avviser[oò]|appena\s+(?:sar[aà]\s+|è\s+)?pront[oa]|sto\s+(?:elaborando|preparando|completando|lavorando|analizzando)|avvio\s+(?:subito\s+)?(?:la|il|l')\s*(?:preparazione|creazione|elaborazione|raccolta|modifica|lavoro|analisi)|(?:le|ti|vi)\s+riporter[oò]|un\s+istante\s+e)\b/i;
+const LATER_SENTENCE_RE = /[^.!?]*\b(in\s+background|ti\s+avviser[oò]|la\s+avviser[oò]|appena\s+(?:sar[aà]\s+)?pront[oa]|avvio\s+(?:subito\s+)?(?:la|il|l')\s*modifica)\b[^.!?]*[.!?]?/gi;
+/** Richieste di cambiare l'app stessa (nuove funzioni, interfaccia): senza Jarvis programmatore non si possono promettere. */
+const FEATURE_RE = /\b(riprogramm\w*|implement\w*|modific\w*\s+(?:al\s+)?codice|codice\s+dell'app|nuova\s+funzion\w*|aggiung\w*\s+(?:una\s+)?funzion\w*|convertitore|interfaccia|pannello|pulsante)\b/i;
+const NOW_PROMPT = 'CONTROLLO AUTOMATICO: hai l\'immagine o il file davanti adesso. Non rimandare e non dire che lo farai in background: fai subito l\'analisi richiesta e metti in "actions" le azioni che servono (es. add_pantry_item per ogni prodotto). Rimanda SOLO il JSON completo.';
+
+/** Annota una miglioria chiesta dall'utente che Kestra non sa ancora fare (lista visibile in Mente). */
+export function noteImprovement(db, text, nowIso) {
+  const list = kvGet(db, 'improvementRequests', []);
+  const t = String(text || '').trim().slice(0, 300);
+  if (!t || list.some(x => x.text === t)) return;
+  kvSet(db, 'improvementRequests', [...list.slice(-49), { at: nowIso, text: t }]);
+}
+
+/** Toglie i tic verbali ("Certamente, signore." a inizio di ogni risposta) e usa "Capo" come vuole la personalità. */
+export function tidyReply(text) {
+  let s = String(text || '').trim()
+    // Intestazioni copiate da vecchi prompt di progetto ("Verifica passphrase: niente più fili [OK]").
+    .replace(/^\W*(?:verifica\s+)?passphrase\b[^\n]*?(?:\[ok\]|\n|$)/i, '')
+    .trim();
+  const stripped = s.replace(/^(?:certamente|certo|sicuro)[,!.]?\s*(?:signore|capo)?\s*[,!.]\s+(?=\S)/i, '');
+  if (stripped.length >= 3) s = stripped;
+  s = s.replace(/\bsignore\b/g, 'Capo').replace(/\bSignore\b/g, 'Capo');
+  return s ? s.charAt(0).toUpperCase() + s.slice(1) : s;
+}
+
 /** App installate sul telefono (le manda l'app Android), così un nome storpiato diventa l'app vera. */
 export function appsPrompt(db) {
   const apps = kvGet(db, 'apps', []);
@@ -169,7 +196,7 @@ export function applyActions(db, actions, ctx) {
  * Gestisce un messaggio dell'utente.
  * deps: { now, fetchFn, tz, defer(promise), startJob({title, goal}) }
  */
-export async function handleChat(db, env, deps, { text, image = null, files = [], sessionId = 'main', source = 'app' }) {
+export async function handleChat(db, env, deps, { text, image = null, files = [], sessionId = 'main', source = 'app', followup = false }) {
   const ms = deps.now();
   const tz = deps.tz;
   const today = todayOf(ms, tz);
@@ -177,7 +204,20 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   const fileList = Array.isArray(files) ? files.filter(f => f && f.name && typeof f.content === 'string') : [];
   const rawText = String(text || '').trim().slice(0, 4000);
   const userText = rawText || (image ? 'Guarda questa foto.' : (fileList.length ? `Analizza ${fileList.length === 1 ? 'questo file' : 'questi file'}: ${fileList.map(f => f.name).join(', ')}` : ''));
-  if (!userText) return { reply: 'Non ho sentito nulla, signore.', expectReply: true, card: '', photoRequest: null };
+  if (!userText) return { reply: 'Non ho sentito nulla, Capo.', expectReply: true, card: '', photoRequest: null };
+
+  // Conversazione aperta: frase sentita senza "Kestra". Se è la TV, la radio o qualcuno che parla con altri, silenzio.
+  if (followup && !image && !fileList.length) {
+    const addressed = await isFollowupAddressed(db, env, deps, userText, sessionId);
+    if (!addressed) {
+      const heard = kvGet(db, 'ignoredHeard', []);
+      kvSet(db, 'ignoredHeard', [...heard.slice(-19), { at: nowIso, text: userText.slice(0, 200) }]);
+      return { reply: '', ignored: true, expectReply: false, card: '', photoRequest: null, actions: [], device: [], touched: [], touchedLeaves: [] };
+    }
+  }
+
+  // Automatismo proposto al comando precedente: si salva da solo se l'utente non si lamenta (niente "Ha funzionato?").
+  flows.implicitSkillFeedback(db, sessionId, userText, ms);
 
   // Modalità Workspace Progetto Adattivo: uscita vocale o attivazione da file/contesto
   let activeWs = workspace.getActiveWorkspace(db);
@@ -277,7 +317,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   const focusLine = jarvisCore.focusPromptLine(db, sessionId, ms);
   const parts = {
     core: activeWs
-      ? `${activeWs.systemContext}\n\nData e ora: ${nowHuman(ms, tz)}. Sei dentro la modalità progetto "${activeWs.title}". Segui rigorosamente queste istruzioni e mantieni i formati richiesti.`
+      ? `${workspace.cleanProjectContext(activeWs.systemContext)}\n\nData e ora: ${nowHuman(ms, tz)}. Sei dentro la modalità progetto "${activeWs.title}". Segui rigorosamente queste istruzioni e mantieni i formati richiesti.`
       : CORE_PROMPT(diary.profile.name, nowHuman(ms, tz)) + '\n\n' + mood.MOOD_PROMPT(mood.current(db, ms)),
     brief: activeWs ? '' : dietBrief(diary, today),
     rules: [focusLine, (!activeWs && dietOn) ? DIET_RULES : '', UI_WORDS.test(userText) ? ui.uiPrompt(ui.loadLayout(db)) : '', UI_WORDS.test(userText) ? coder.codePrompt(env, db) : '', DEVICE_WORDS.test(userText) ? appsPrompt(db) : '', (/\b(pc|computer|desktop|windows|dispositiv\w*)\b/i.test(userText) || activeFocus?.device === 'pc' || navActive) ? devices.devicesPrompt(db, ms) : '', phone.pendingContext(db, ms)].filter(Boolean).join('\n\n'),
@@ -335,6 +375,35 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
     }
     let done = applyActions(db, parsed.actions, { today, nowIso, ms, tz, hadPhoto: !!image });
     if (cleanCmd && !done.applied.includes('clean_graph')) done.applied.push('clean_graph');
+    // Promesse di lavoro "più tardi" ("lo preparo in background, ti avviso") senza nulla che parta davvero.
+    if (LATER_RE.test(parsed.reply) && !done.jobs.length && !done.code.length && !done.device.length) {
+      if (image || fileList.length) {
+        // Ha già foto o file davanti: deve rispondere adesso, non rimandare.
+        try {
+          const again = await router.chat(db, env, {
+            tier, needsVision: !!image || !!pdfBase64, maxTokens: 2000, fetchFn: deps.fetchFn, now: deps.now, tz,
+            build: (model) => [...buildMessages(model, parts), { role: 'assistant', content: res.text.slice(0, 3000) }, { role: 'user', content: NOW_PROMPT }],
+          });
+          const fixed = parseReply(again.text);
+          if (fixed.parsed && !LATER_RE.test(fixed.reply)) {
+            const redo = applyActions(db, fixed.actions, { today, nowIso, ms, tz, hadPhoto: !!image });
+            parsed = { ...fixed, topics: fixed.topics?.length ? fixed.topics : parsed.topics };
+            done = redo;
+          }
+        } catch { /* resta la risposta, ma onesta qui sotto */ }
+        if (LATER_RE.test(parsed.reply)) parsed = { ...parsed, reply: 'Non sono riuscita a finire l\'analisi adesso, Capo. Riprova a mandarmelo tra un attimo.' };
+      } else if (FEATURE_RE.test(userText + ' ' + parsed.reply)) {
+        // Una funzione nuova dell'app: niente promessa, la segna tra le migliorie richieste (visibili in Mente).
+        noteImprovement(db, userText, nowIso);
+        done.applied.push('note_improvement');
+        parsed = { ...parsed, reply: `${parsed.reply.replace(LATER_SENTENCE_RE, '').trim()} Per ora non posso farlo da sola: l'ho segnato tra le migliorie richieste.`.trim() };
+      } else {
+        // Lavoro lungo: parte un compito vero in background, così l'avviso a fine lavoro arriva davvero.
+        const recent = history.slice(-4).map(h => `${h.role === 'user' ? 'Utente' : 'Kestra'}: ${h.text}`).join('\n');
+        done.jobs.push({ title: userText.slice(0, 60), goal: `${userText}\n\nContesto recente:\n${recent}`.slice(0, 2000) });
+        done.applied.push('start_job');
+      }
+    }
     // Dice di averlo fatto ma nessuna azione è andata a buon fine: una seconda richiesta per avere le azioni vere.
     const nothing = (d, t = []) => !d.applied.length && !d.device.length && !d.jobs.length && !d.code.length && !(t && t.length);
     // Le richieste da eseguire sul telefono (chiamate, app) hanno la loro rete di sicurezza più sotto.
@@ -384,10 +453,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
           defaults: { account: activeFocus?.profile || 'alexx cast' },
           steps: [{ kind: String(pcAct.kind || 'open_app'), target: tgt, args: pcAct.args || '', optional: false }, { kind: 'dynamic_media', param: 'media', optional: true }],
         }, ms);
-        if (proposed && !/\bfunzionato\b/i.test(parsed.reply)) {
-          parsed.reply += ' Ha funzionato? Se sì, me lo conferma così lo salvo negli automatismi?';
-          parsed.expectReply = true;
-        }
+        void proposed; // si conferma da solo al messaggio successivo (flows.implicitSkillFeedback)
       }
     } else if (devAct) {
       const tgt = String(devAct.name || devAct.url || devAct.goal || '').slice(0, 50);
@@ -400,10 +466,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
           device: 'telefono',
           steps: [{ kind: devAct.type, target: devAct.url || devAct.name, optional: false }],
         }, ms);
-        if (proposed && !/\bfunzionato\b/i.test(parsed.reply)) {
-          parsed.reply += ' Ha funzionato? Se sì, me lo conferma così lo salvo negli automatismi?';
-          parsed.expectReply = true;
-        }
+        void proposed;
       }
     } else if (done.jobs?.length) {
       jarvisCore.setFocus(db, sessionId, { domain: 'progetti', device: null, target: done.jobs[0].title, action: 'progetto' }, ms);
@@ -449,8 +512,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
           devices.enqueueCommand(db, 'desktop', { kind: 'close_app', target: clsTarget }, ms);
           done.applied.push('pc_action');
         } else if (/\b(video|film|youtube|musica|canzon\w*)\b/i.test(userText) && /\b(fai\s+partire|fammi\s+partire|metti|riproduci|avvia|cerca)\b/i.test(userText)) {
-          jarvisCore.dispatchPcPlayYoutube(db, userText, ms);
-          done.applied.push('pc_action');
+          if (jarvisCore.dispatchPcPlayYoutube(db, userText, ms)) done.applied.push('pc_action');
         } else {
           const mApp = /\b(?:apri|apro|avvia|avvio|eseguo\s+l'apertura\s+di)\s+(?:l'app\s+|il\s+programma\s+)?([a-z0-9]+)/i.exec(userText + ' ' + parsed.reply);
           if (mApp) {
@@ -503,7 +565,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
     }
     const keepListening = !!(navActive || done.applied.includes('pc_action') || done.device.some(d => d.type === 'phone_task' || d.type === 'open_app')) && !parsed.actions.some(a => a?.kind === 'play_youtube');
     if (done.applied.includes('pc_action') && !parsed.actions.some(a => a?.kind === 'play_youtube')) jarvisCore.setNavMode(db, sessionId, true, 'pc', ms);
-    result = { reply: parsed.reply, expectReply: parsed.expectReply || keepListening, card: parsed.card, visual: done.visual || null, photoRequest: done.photoRequest, model: res.key, switched: res.switched, actions: done.applied, device: done.device, tier, layoutChanged: !!done.ui, rememberedIds: done.rememberedIds, autoLeaves };
+    result = { reply: tidyReply(parsed.reply), expectReply: parsed.expectReply || keepListening, card: parsed.card, visual: done.visual || null, photoRequest: done.photoRequest, model: res.key, switched: res.switched, actions: done.applied, device: done.device, tier, layoutChanged: !!done.ui, rememberedIds: done.rememberedIds, autoLeaves };
     sess.model = res.key;
   } catch (e) {
     logEvent(db, nowIso, 'error', `chat: ${e.message} ${(e.tried || []).join(' | ')}`);
@@ -572,4 +634,38 @@ export async function isAddressed(db, env, deps, text) {
     ],
   });
   return /^\s*s[iìí]/i.test(res.text);
+}
+
+/**
+ * Frase sentita a conversazione aperta (senza dire "Kestra"): verdetto locale veloce.
+ * 'yes' = chiaramente rivolta all'assistente, 'ask' = decide il modello (TV, altre persone, frasi fuori contesto).
+ */
+export function followupVerdict(text, lastAssistant = '') {
+  const t = String(text || '').toLowerCase().replace(/[^a-z0-9àèéìòóù' ]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!t) return 'no';
+  const words = t.split(' ');
+  if (words.length <= 3) return 'yes';
+  if (/\?\s*$/.test(String(lastAssistant || '').trim()) && words.length <= 8) return 'yes';
+  if (words.length <= 12 && /^(?:e\s+|poi\s+|ora\s+|adesso\s+|allora\s+|no\s+|s[iì]\s+)?(?:apri|aprimi|metti|mettimi|aggiungi|segna|registra|togli|cancella|chiama|cerca|cercami|ricordami|ricorda|dimmi|mostrami|mostra|fai|fammi|leggi|leggimi|scrivi|manda|invia|imposta|spegni|accendi|quanto|quanti|quante|qual|quale|cosa|come|perch[eé]|dove|quando|puoi|sai|mi\s+(?:dici|serve|servono)|ho\s+(?:mangiato|bevuto|fatto))\b/.test(t)) return 'yes';
+  return 'ask';
+}
+
+/** Conversazione aperta: l'utente sta ancora parlando con Kestra o il microfono ha sentito altro (TV, altre persone)? */
+export async function isFollowupAddressed(db, env, deps, text, sessionId = 'main') {
+  const last = db.all('SELECT role, text FROM messages WHERE session = ? ORDER BY id DESC LIMIT 4', sessionId).reverse();
+  const lastAssistant = [...last].reverse().find(m => m.role === 'assistant')?.text || '';
+  const v = followupVerdict(text, lastAssistant);
+  if (v !== 'ask') return v === 'yes';
+  try {
+    const res = await router.chat(db, env, {
+      tier: 'fast', maxTokens: 5, fetchFn: deps.fetchFn, now: deps.now, tz: deps.tz,
+      build: () => [
+        { role: 'system', content: 'Kestra è un assistente vocale. Dopo una sua risposta il microfono resta aperto qualche secondo e trascrive ciò che sente, senza che l\'utente ripeta il nome. Ricevi gli ultimi scambi e la nuova frase trascritta. Rispondi SI se la frase è rivolta a Kestra (continua il discorso, risponde a una sua domanda, è una richiesta o un comando). Rispondi NO se sembra audio di TV, radio, video o serie, una persona che parla con altri, una frase che non c\'entra nulla con il discorso, o la voce di Kestra stessa. Rispondi solo SI oppure NO.' },
+        { role: 'user', content: `ULTIMI SCAMBI:\n${last.map(m => `${m.role === 'user' ? 'Utente' : 'Kestra'}: ${String(m.text).slice(0, 200)}`).join('\n')}\n\nNUOVA FRASE: ${String(text).slice(0, 400)}` },
+      ],
+    });
+    return !/^\W*no\b/i.test(res.text);
+  } catch {
+    return true; // nel dubbio non si perde una richiesta vera
+  }
 }

@@ -78,7 +78,7 @@ export async function handleApi(db, env, deps, request) {
         encoding: f.encoding === 'base64' ? 'base64' : 'text',
         content: String(f.content).slice(0, f.encoding === 'base64' ? 4_000_000 : 60000),
       })) : [];
-      const out = await handleChat(db, env, chatDeps, { text: b.text, image, files, sessionId: String(b.session || 'main').slice(0, 40), source: b.source === 'voice' ? 'voice' : 'app' });
+      const out = await handleChat(db, env, chatDeps, { text: b.text, image, files, sessionId: String(b.session || 'main').slice(0, 40), source: b.source === 'voice' ? 'voice' : 'app', followup: b.followup === true });
       const nextDue = agenda.fireDue(db, deps.now(), tz);
       if (nextDue) deps.schedule?.(nextDue);
       return json(out);

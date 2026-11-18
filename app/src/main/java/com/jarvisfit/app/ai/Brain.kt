@@ -42,6 +42,8 @@ object Brain {
         val photoRequest: String?,
         val cardInfo: String? = null,
         val device: List<Pair<String, String>> = emptyList(),
+        /** Il server ha giudicato la frase non rivolta a Kestra (TV, altre persone): nessuna risposta. */
+        val ignored: Boolean = false,
     )
 
     private val mutex = Mutex()

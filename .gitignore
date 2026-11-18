@@ -14,3 +14,5 @@ node_modules/
 .wrangler/
 .dev.vars
 __pycache__/
+desktop/config.local.json
+desktop/jarvis_bg.log

@@ -481,15 +481,33 @@ export function dispatchPcOpen(db, rawTarget, nowMs = Date.now()) {
   };
 }
 
-/** Invia al PC l'ordine di cercare e far partire direttamente un video o una canzone su YouTube. */
-export function dispatchPcPlayYoutube(db, rawQuery, nowMs = Date.now()) {
-  let q = String(rawQuery || '')
-    .replace(/\b(?:apri\s+youtube\s+e\s+|vai\s+su\s+youtube\s+e\s+|su\s+youtube|da\s+youtube|in\s+youtube)\b/gi, ' ')
-    .replace(/^(?:fai\s+partire|fammi\s+partire|metti(?:mi)?|riproduci|avvia|cerca|ascolta)\s+/i, ' ')
-    .replace(/^(?:un\s+video\s+di|un\s+video\s+su|una\s+canzone\s+di|musica\s+di)\s+/i, '')
-    .replace(/\s+/g, ' ')
+/**
+ * Dalla frase detta estrae solo cosa cercare ("metti Mannarino su YouTube sul PC" → "Mannarino").
+ * Prima veniva usata la frase intera, e su YouTube partivano ricerche come "No siamo sul telefono vabbè...".
+ */
+export function extractMediaQuery(raw) {
+  let q = String(raw || '').replace(/\s+/g, ' ').trim();
+  const m = /^.*\b(?:fai\s+partire|fammi\s+partire|metti(?:mi)?|riproduci|avvia|cerca(?:mi)?|ascolta|guarda)\s+(.+)$/i.exec(q);
+  if (m) q = m[1];
+  return q
+    .replace(/\b(?:apri\s+youtube\s+e|vai\s+su\s+youtube\s+e)\b/gi, ' ')
+    .replace(/\b(?:su|sul|sullo|da|dal|in|nel|con)\s+(?:youtube|pc|computer|desktop|gh?ideon)\b/gi, ' ')
+    .replace(/\b(?:per\s+favore|subito|adesso|di\s+nuovo|grazie|dai)\b/gi, ' ')
+    .replace(/^(?:un\s+video\s+(?:di|su)|una\s+canzone\s+di|la\s+canzone|il\s+video\s+(?:di\s+)?|musica\s+di|un\s+po'\s+di)\s+/i, '')
+    .replace(/^\s*youtube\s*$/i, '')
     .replace(/[.!?]+$/, '')
+    .replace(/\s+/g, ' ')
     .trim();
+}
+
+/**
+ * Invia al PC l'ordine di cercare e far partire direttamente un video o una canzone su YouTube.
+ * Ritorna null se la frase non è una richiesta YouTube pulita (altro servizio citato, frase troppo lunga):
+ * in quel caso decide il modello, invece di mandare su YouTube l'intera frase.
+ */
+export function dispatchPcPlayYoutube(db, rawQuery, nowMs = Date.now()) {
+  let q = extractMediaQuery(rawQuery);
+  if (/\b(prime|netflix|chrome|google|telefono|cellulare|whatsapp|instagram|joytify|spotify|account|profilo|pagina|scheda)\b/i.test(q) || q.split(' ').length > 8) return null;
   if (!q || /^(?:un\s+video|qualcosa|un\s+film|una\s+musica|musica|video|film(?:\s+su)?)$/i.test(q)) {
     q = /film/i.test(q) ? 'film completo ita' : 'musica rilassante mix';
   }
@@ -1051,10 +1069,13 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
     const blockYt = /\b(non\s+(?:su|da)\s+youtube|prime\s+video|su\s+chrome|su\s+google|online|su\s+questa\s+pagina)\b/i.test(withoutPc);
     const cleanedForYt = withoutPc.replace(/\bprime\s+video\b/gi, '');
     if (!blockYt && /\b(fai\s+partire|fammi\s+partire|metti(?:mi)?|riproduci|cerca|ascolta|avvia)\b/i.test(cleanedForYt) && /\b(youtube|video|film|musica|canzon\w*|brano)\b/i.test(cleanedForYt)) {
-      setNavMode(db, sessionId, false);
       const r = dispatchPcPlayYoutube(db, withoutPc, nowMs);
-      r.expectReply = false;
-      return r;
+      if (r) {
+        setNavMode(db, sessionId, false);
+        r.expectReply = false;
+        return r;
+      }
+      return null; // frase non pulita: decide il modello
     }
 
     // Apertura URL o ricerca sito/web sul PC ("cerca il sito amazon", "cerca meteo roma su google", "vai su wikipedia")
@@ -1101,13 +1122,9 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
           defaults: { account: focus?.profile || 'alexx cast' },
           steps,
         }, nowMs);
-        if (proposed) {
-          res.reply += ' Ha funzionato? Se sì, me lo conferma così salvo ogni step negli automatismi?';
-          res.expectReply = true;
-        } else {
-          setNavMode(db, sessionId, true, 'pc', nowMs);
-          res.expectReply = true;
-        }
+        // Niente più "Ha funzionato?": l'automatismo si salva da solo se il messaggio successivo non è una lamentela.
+        if (!proposed) setNavMode(db, sessionId, true, 'pc', nowMs);
+        res.expectReply = true;
         return res;
       }
     }

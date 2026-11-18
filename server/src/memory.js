@@ -220,7 +220,13 @@ export function isNoiseTopic(mod, label) {
   if (!s) return true;
   if (META_NOISE.test(s) || GENERIC_NOISE.test(s)) return true;
   if (mod === 'dieta' && DIET_NOISE.test(s)) return true;
-  if (mod && sameTopic(mod, s)) return true;
+  // Solo se l'etichetta È il nome del ramo ("comunicazione" dentro "comunicazioni"), non se lo contiene:
+  // "Programmazione a oggetti" sotto "programmazione" è un argomento vero.
+  if (mod) {
+    const k = topicKey(s), m = topicKey(mod);
+    if (k === m) return true;
+    if (Math.min(k.length, m.length) >= 4 && 1 - editDistance(k, m) / Math.max(k.length, m.length) >= 0.8) return true;
+  }
   return false;
 }
 

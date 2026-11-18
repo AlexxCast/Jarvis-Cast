@@ -342,3 +342,17 @@ Jarvis diceva "ho aggiornato il piano" o "chiamo Marcolino" senza farlo.
 - L'assistente e l'app si chiamano **Kestra** (pacchetto Android `com.jarvisfit.app` e firma invariati per preservare gli aggiornamenti sopra le vecchie installazioni; `app_name = "Kestra"`, wake word `kestra` + varianti fonetiche in `VoiceText.kt`).
 - Personalità (`context.js`): ladra/assassina scanzonata contestualizzata come IA brillante, agile e precisa, sempre leale e rispettosa verso l'utente (chiamato **"Capo"**).
 - Palette ufficiale **Viola (`#a855f7`) + Verde (`#39ff14`)** su sfondo nero `#05020a`, con il **simbolo ufficiale di Kestra** (diamante + lame incrociate viola e 3 trattini verdi) come logo app (`web/logo.png`, `ic_launcher.xml`), al centro del globo 3D (`web/orb.js`), dentro il cerchio dell'overlay pop-up a celle curve (`web/overlay.js`) e nell'HUD PC (`desktop/jarvis_desktop.py`).
+
+## Revisione affidabilità dai messaggi reali (v2.31, 18/11/2026)
+Diagnosi fatta leggendo i 1.589 messaggi salvati. Decisioni:
+- **Eco**: `Speaker` avvisa i listener quando Kestra inizia e finisce di parlare, da QUALSIASI fonte (risposte della web app via `WebShell.speak`, `PhoneAgent`, promemoria dell'inbox). `JarvisService` chiude il riconoscimento mentre parla e lo riapre 250 ms dopo la fine (+650 ms di coda). Il confronto con l'eco usa le ultime 4 frasi dette e una finestra misurata dalla FINE della frase, non dall'inizio.
+- **Parola di attivazione**: solo omofoni veri di "Kestra". Vietato rimettere parole italiane comuni (destra, finestra, questo, "estra"): facevano partire Kestra con la TV accesa. "chiedi a Kestra", "la serie di Kestra" → ambiguo, decide il contesto.
+- **Conversazione aperta**: le frasi dette senza nome dopo una risposta arrivano al server con `followup: true`. `followupVerdict` decide in locale (sì/comando → risponde); per il resto una chiamata da 5 token al modello veloce (SI/NO). Se NO: niente risposta, niente cronologia, la frase finisce in kv `ignoredHeard`. Dopo 2 frasi ignorate di fila Kestra torna in attesa della parola. In caso di errore risponde (fail open).
+- **Automatismi**: mai più "Ha funzionato?". La bozza si salva da sola se il messaggio successivo non è una lamentela (`implicitSkillFeedback`); una lamentela la scarta.
+- **Flow del telefono**: niente salvataggio a ogni passo. Un compito interrotto diventa un flow *provvisorio*, che rifà i passi da solo ma lascia al modello il "fatto" finale.
+- **Promesse a vuoto**: se la risposta promette "dopo/in background/ti avviso" e non c'è un compito vero, parte un `start_job` reale; se è una funzione nuova dell'app finisce in kv `improvementRequests` e Kestra lo dice. Foto e file si analizzano subito.
+- **PC/YouTube**: si cerca solo il titolo/artista (`extractMediaQuery`); frasi che parlano di Prime, Netflix, Chrome, telefono, account ecc. non finiscono su YouTube.
+- **Stile**: `tidyReply` toglie "Certamente, Capo." in testa e trasforma "signore" in "Capo".
+- **Progetti**: il contesto di progetto non può contenere passphrase/parola d'ordine (`cleanProjectContext`), e un'intestazione "Verifica passphrase … [OK]" viene tolta dalle risposte.
+- **Pasti**: `update_meal`/`delete_meal` con id sbagliato ritrovano il pasto dello stesso giorno per tipo o alimenti (`findMeal`); senza indizi non si tocca niente.
+- **Token del PC**: `jarvis_desktop.py` usa `config.local.json` (ignorato da git) e legge `config.json` solo la prima volta per migrare. `jarvis_bg.log` non è più nel repository. Il token stava nel repository: va ruotato.

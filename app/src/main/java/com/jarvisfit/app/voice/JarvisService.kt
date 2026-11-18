@@ -116,11 +116,40 @@ class JarvisService : LifecycleService(), SensorEventListener {
         if (sessionActive) runCatching { recognizer?.stopListening() }
     }
 
+    // Anti-eco: qualunque voce di Kestra (servizio, app aperta, promemoria, agente del telefono) spegne il microfono.
+    private var commandSession = false          // la sessione accesa è l'ascolto di un comando (non della parola chiave)
+    private var pausedForSpeech: String? = null // "wake" | "command": cosa riaccendere quando la voce finisce
+    private var ignoredFollowups = 0            // frasi della conversazione aperta giudicate non rivolte a Kestra
+    private val speechListener: (Boolean) -> Unit = { speaking -> main.post { onSpeechState(speaking) } }
+
+    private fun onSpeechState(speaking: Boolean) {
+        if (speaking) {
+            main.removeCallbacks(wakeStopRunnable)
+            main.removeCallbacks(commandStopRunnable)
+            if (sessionActive) {
+                pausedForSpeech = if (commandSession) "command" else "wake"
+                lastCommandPartial = ""
+                lastWakePartial = ""
+                wakeHeard = false
+                stopSession(cancel = true)
+            }
+            return
+        }
+        val mode = pausedForSpeech ?: return
+        pausedForSpeech = null
+        if (yielded || !Settings.listeningEnabled) return
+        main.postDelayed({
+            if (sessionActive || Speaker.isSpeaking()) return@postDelayed
+            if (mode == "command") listenForCommand() else if (!busy) startWakeWord()
+        }, 250)
+    }
+
     // ---------------------------------------------------------------- lifecycle
 
     override fun onCreate() {
         super.onCreate()
         Speaker.init(this)
+        Speaker.addListener(speechListener)
         tone = runCatching { ToneGenerator(AudioManager.STREAM_MUSIC, 70) }.getOrNull()
         (getSystemService(SENSOR_SERVICE) as SensorManager).let { sm ->
             sm.getDefaultSensor(Sensor.TYPE_STEP_COUNTER)?.let {
@@ -158,6 +187,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
     }
 
     override fun onDestroy() {
+        Speaker.removeListener(speechListener)
         shutdown()
         (getSystemService(SENSOR_SERVICE) as SensorManager).unregisterListener(this)
         guard?.stop()
@@ -277,7 +307,13 @@ class JarvisService : LifecycleService(), SensorEventListener {
         return false
     }
 
-    private fun beginSession(rec: SpeechRecognizer, intent: Intent) {
+    private fun beginSession(rec: SpeechRecognizer, intent: Intent, command: Boolean = false) {
+        if (Speaker.isSpeaking()) {
+            // La voce è partita nel frattempo: si riaccende quando finisce.
+            pausedForSpeech = if (command) "command" else "wake"
+            return
+        }
+        commandSession = command
         sessionActive = true
         lastRecognizerActivityMs = System.currentTimeMillis()
         guard?.sessionStarted()
@@ -344,10 +380,10 @@ class JarvisService : LifecycleService(), SensorEventListener {
         busy = false
         JarvisState.status.value = JarvisState.Status.WAITING
         JarvisState.error.value = ""
-        updateNotification("In ascolto di \"Jarvis\"")
+        updateNotification("In ascolto di \"Kestra\"")
 
         main.post {
-            if (yielded || busy || !Settings.listeningEnabled) return@post
+            if (yielded || busy || !Settings.listeningEnabled || sessionActive) return@post
             if (Speaker.isSpeaking()) {
                 restartWakeWordDelayed(500)
                 return@post
@@ -467,13 +503,14 @@ class JarvisService : LifecycleService(), SensorEventListener {
         putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1_800L)
         putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1_200L)
         if (Build.VERSION.SDK_INT >= 33) {
-            putStringArrayListExtra(RecognizerIntent.EXTRA_BIASING_STRINGS, arrayListOf("Jarvis", "Ehi Jarvis", "Ciao Jarvis", "Ok Jarvis", "Giarvis", "Jervis"))
+            putStringArrayListExtra(RecognizerIntent.EXTRA_BIASING_STRINGS, arrayListOf("Kestra", "Ehi Kestra", "Ciao Kestra", "Ok Kestra"))
         }
     }
 
     /** Decide cosa fare di una frase completa sentita in attesa. */
     private fun handleHeard(text: String) {
         wakeHeard = false
+        if (isSelfSpeechEcho(text)) { restartWakeWordDelayed(250); return }
         when (val w = VoiceText.wake(text, Settings.sensitivity)) {
             is VoiceText.Wake.Direct -> onWakeWordDetected(w.command)
             is VoiceText.Wake.Ambiguous -> {
@@ -514,8 +551,12 @@ class JarvisService : LifecycleService(), SensorEventListener {
     }
 
     private var inConversationMode = false
+    /** Il prossimo comando arriva dalla conversazione aperta (senza "Kestra"): va filtrato dal server. */
+    private var followupTurn = false
     private var lastConversationActivityTime = 0L
-    private val CONVERSATION_TIMEOUT_MS = 90_000L // 1 minuto e mezzo
+    // Dopo una risposta resta in ascolto senza parola chiave per 45 s (dall'ultima frase rivolta a Kestra).
+    // Ciò che sente in questa finestra passa dal filtro "è rivolto a me?" del server: TV e altre persone vengono ignorate.
+    private val CONVERSATION_TIMEOUT_MS = 45_000L
 
     private fun onGoogleDetected() {
         if (busy) return
@@ -591,6 +632,8 @@ class JarvisService : LifecycleService(), SensorEventListener {
         busy = true
         busySinceMs = System.currentTimeMillis()
         inConversationMode = true
+        followupTurn = false
+        ignoredFollowups = 0
         lastConversationActivityTime = System.currentTimeMillis()
 
         // 0. Ricorda se il telefono era a schermo spento o bloccato PRIMA di risvegliare lo schermo:
@@ -657,7 +700,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
             busy = false
             return
         }
-        if (yielded) return
+        if (yielded || sessionActive) return
         if (!micFreeOrYield { listenForCommand() }) return
         busy = true
         busySinceMs = System.currentTimeMillis()
@@ -745,7 +788,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1_400L)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1_100L)
         }
-        beginSession(rec, intent)
+        beginSession(rec, intent, command = true)
     }
 
     /**
@@ -755,11 +798,12 @@ class JarvisService : LifecycleService(), SensorEventListener {
     private fun isSelfSpeechEcho(recognizedText: String): Boolean {
         val low = recognizedText.lowercase().trim()
         if (low == "parola d'ordine" || low.startsWith("parola d'ordine non corretta")) return true
-        return VoiceText.isSelfEcho(
-            recognized = recognizedText,
-            lastSpoken = lastSpokenText,
-            msSinceSpoken = System.currentTimeMillis() - lastSpokenTime
-        )
+        val now = System.currentTimeMillis()
+        // Confronto con le ultime frasi dette, misurando il tempo dalla FINE della voce (prima dall'inizio:
+        // con una risposta lunga la finestra anti-eco era già scaduta quando il microfono la riascoltava).
+        val spoken = Speaker.recentSpoken()
+        if (spoken.any { (t, endMs) -> VoiceText.isSelfEcho(recognizedText, t, now - endMs, windowMs = 20_000L) }) return true
+        return VoiceText.isSelfEcho(recognized = recognizedText, lastSpoken = lastSpokenText, msSinceSpoken = now - lastSpokenTime, windowMs = 60_000L)
     }
 
     private fun handleSilence() {
@@ -875,10 +919,23 @@ class JarvisService : LifecycleService(), SensorEventListener {
         updateNotification("Sto pensando…")
         stopSession(cancel = false)
 
+        // Frase della conversazione aperta senza il nome: il server la ignora se non era rivolta a Kestra.
+        val isFollowup = followupTurn && !VoiceText.containsWake(text, Settings.sensitivity)
+        followupTurn = false
         lifecycleScope.launch {
             if (VoiceId.matchesPassword(text)) VoiceId.trustNow()
             val cloud = Settings.cloudEnabled
-            val reply = if (cloud) Cloud.chat(text) else Brain.handle(text)
+            val reply = if (cloud) Cloud.chat(text, followup = isFollowup) else Brain.handle(text)
+            if (reply.ignored) {
+                // TV, radio o persone nella stanza: nessuna risposta. Dopo due frasi ignorate di fila chiude la conversazione.
+                if (++ignoredFollowups >= 2) { inConversationMode = false; backToWaiting(); return@launch }
+                busy = false
+                followupTurn = true
+                JarvisState.status.value = JarvisState.Status.LISTENING
+                main.postDelayed({ if (inConversationMode && !busy) listenForCommand() }, 300)
+                return@launch
+            }
+            ignoredFollowups = 0
             JarvisState.exchanges.value = JarvisState.exchanges.value + 1
             if (cloud) scheduleInbox(20_000) // un promemoria appena creato può scadere a breve
             if (reply.photoRequest != null) notifyPhotoRequest(reply.photoRequest)
@@ -948,6 +1005,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
                     if (yielded) return@post
                     if (inConversationMode && reply.photoRequest == null) {
                         busy = false
+                        followupTurn = true
                         lastConversationActivityTime = System.currentTimeMillis()
                         tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 80)
                         // Conversazione flessibile: resta in ascolto finché l'utente non dice "grazie Jarvis", parla con altri o resta in silenzio.

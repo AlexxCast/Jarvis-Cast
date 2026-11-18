@@ -41,7 +41,7 @@ test('pasto registrato: azione applicata al diario e messaggi salvati', async ()
     { type: 'add_meal', date: '2026-11-12', meal: 'pranzo', items: [{ name: 'Pasta', grams: 100, kcal: 520, protein: 20, carbs: 80, fat: 10 }] },
   ] }));
   const out = await handleChat(db, ENV, deps(f), { text: 'ho mangiato 100 grammi di pasta a pranzo' });
-  assert.equal(out.reply, 'Registrato, signore.');
+  assert.equal(out.reply, 'Registrato, Capo.');
   assert.equal(out.card, 'Pranzo: 520 kcal');
   const d = loadDiary(db);
   assert.equal(d.meals.length, 1);
@@ -99,7 +99,7 @@ test('la sessione sopravvive al cambio di modello: stessa cronologia al nuovo pr
   assert.equal(first.model, 'gemini:gemini-flash-latest');
   geminiDown = true;
   const second = await handleChat(db, ENV, d, { text: 'dove vado domani?' });
-  assert.equal(second.reply, 'da groq');
+  assert.equal(second.reply, 'Da groq');
   assert.equal(second.switched, true);
   assert.match(second.model, /^groq:/);
   const sent = f.calls.at(-1).body.messages;
@@ -132,7 +132,7 @@ test('buildMessages: rispetta la finestra dei modelli piccoli tenendo il nucleo 
   const small = buildMessages({ ctx: 8000 }, parts);
   const big = buildMessages({ ctx: 1000000 }, parts);
   assert.ok(messagesTokens(small) <= 8000 * 0.6);
-  assert.match(small[0].content, /Sei JARVIS/);
+  assert.match(small[0].content, /Sei KESTRA/);
   assert.doesNotMatch(small[0].content, /P4 /);
   assert.equal(small.at(-1).content, 'domanda finale');
   assert.match(big[0].content, /P4 /);

@@ -140,11 +140,17 @@ export function recordTrace(db, { goal, step, screen, move, nowMs }) {
   if (step === 0) registerAutoGoal(db, goal, nowMs);
   if (move.do === 'ask') {
     if (trace && trace.goal === goal && !trace.partial && trace.steps.length >= 2) {
-      saveFlowFromTrace(db, { ...trace, steps: [...trace.steps, { do: 'done' }] }, nowMs);
+      saveFlowFromTrace(db, { ...trace, steps: [...trace.steps, { do: 'done' }] }, nowMs, { provisional: true });
     }
     return;
   }
   if (step === 0 || !trace || trace.goal !== goal) {
+    // Il compito precedente si è fermato senza "fatto" (es. l'utente ha chiuso appena è partita la canzone):
+    // lo si tiene come flow PROVVISORIO, purché non esista già un flow che lo copre.
+    if (trace && !trace.partial && trace.steps.length >= 2 && !trace.steps.some(s => s.composed)
+        && bestFlow(listFlows(db), trace.goal).score < PHONE_THRESHOLD) {
+      saveFlowFromTrace(db, { ...trace, steps: [...trace.steps, { do: 'done' }] }, nowMs, { provisional: true });
+    }
     // Un compito ripreso a metà non ha l'inizio: non diventa un flow (rovinerebbe quello buono).
     trace = { goal, app: '', steps: [], params: [], partial: step > 0, at: nowMs, traceId: `${nowMs}-${Math.random().toString(36).slice(2, 8)}` };
   }
@@ -177,13 +183,13 @@ export function recordTrace(db, { goal, step, screen, move, nowMs }) {
   kvSet(db, TRACE_KEY, trace);
   // Salva già il flow non appena ha almeno 2 passi validi dall'inizio, così anche se l'utente ferma l'azione
   // appena parte la canzone o non arriva il passo finale "done", la volta dopo è già automatico senza modelli.
-  if (!trace.partial && trace.steps.length >= 2) {
-    saveFlowFromTrace(db, { ...trace, steps: [...trace.steps, { do: 'done' }] }, nowMs);
-  }
+  // Niente più salvataggio a ogni passo: un compito ripetuto in automatico veniva salvato a metà ("apri la chat
+  // di Marco") e la volta dopo Kestra diceva "fatto" senza aver scritto né inviato il messaggio. Le tracce senza
+  // "fatto" diventano flow provvisori quando parte il compito successivo (vedi sopra).
 }
 
 /** Salva o aggiorna un flow a partire da una traccia completata. */
-export function saveFlowFromTrace(db, trace, nowMs) {
+export function saveFlowFromTrace(db, trace, nowMs, { provisional = false } = {}) {
   if (!trace || !Array.isArray(trace.steps) || trace.steps.length < 2) return null;
   const params = Array.isArray(trace.params) ? trace.params : [];
   const paramWords = new Set(params.flatMap(p => contentTokens(p)));
@@ -198,6 +204,8 @@ export function saveFlowFromTrace(db, trace, nowMs) {
   const flows = listFlows(db);
   const existing = flows.find(f => f.id === id);
   const sameTrace = existing && trace.traceId && existing.lastTraceId === trace.traceId;
+  // Una traccia provvisoria (a metà) non rovina un flow completo già imparato.
+  if (provisional && existing && !existing.provisional && (existing.steps || []).length >= trace.steps.length) return existing;
   const record = {
     id,
     app: trace.app || existing?.app || '',
@@ -210,6 +218,7 @@ export function saveFlowFromTrace(db, trace, nowMs) {
     fails: existing?.fails || 0,
     updatedAt: nowMs,
     ...(trace.traceId ? { lastTraceId: trace.traceId } : {}),
+    ...(provisional ? { provisional: true } : {}),
   };
   kvSet(db, FLOWS_KEY, [record, ...flows.filter(f => f.id !== id)].slice(0, MAX_FLOWS));
   kvSet(db, 'lastTouched', { at: String(nowMs), touched: ['automazioni'], leaves: ['f:' + id] });
@@ -329,14 +338,14 @@ export function tryFlowStep(db, { goal, step, screen, nowMs }) {
     return { do: spec.do, ...(spec.dir ? { dir: spec.dir } : {}), say: '', auto: true };
   }
   if (spec.do === 'done') {
-    // Se bisogna leggere e riferire qualcosa, l'ultima parola è del modello.
-    if (READ_WORDS.test(goal)) return stop();
+    // Se bisogna leggere e riferire qualcosa, o il flow è stato salvato a metà, l'ultima parola è del modello.
+    if (READ_WORDS.test(goal) || flow.provisional) return stop();
     // Gli usi li conta il salvataggio della traccia (recordTrace); qui il flow recupera fiducia.
     flow.fails = Math.max(0, (flow.fails || 0) - 1);
     flow.updatedAt = nowMs;
     save();
     stop();
-    return { do: 'done', say: 'Fatto, signore.', auto: true };
+    return { do: 'done', say: 'Fatto, Capo.', auto: true };
   }
   if (spec.do !== 'tap' && spec.do !== 'type') return stop();
   // Un testo composto dal modello (es. il corpo di un messaggio) va riscritto ogni volta.
@@ -463,17 +472,41 @@ export function confirmPendingSkill(db, sessionId = 'main', userText = '', nowMs
     return {
       saved: true,
       skill: saved,
-      reply: `Perfetto, signore! Ho salvato l'automatismo "${saved.name}" con ${saved.steps.length} step modulari. La prossima volta lo eseguirò in automatico (e potrà cambiare solo i singoli dati o fermarsi prima quando vuole).`,
+      reply: `Perfetto, Capo: "${saved.name}" ora è un automatismo, la prossima volta lo faccio da sola.`,
     };
   }
   if (CONFIRM_NO_RE.test(clean)) {
     kvSet(db, key, null);
     return {
       saved: false,
-      reply: 'Ricevuto, signore: non salvo questo tentativo negli automatismi.',
+      reply: 'Ricevuto, Capo: questo tentativo non lo tengo.',
     };
   }
   return null;
+}
+
+/** Lamentele che dicono che l'ultimo comando NON è andato come doveva. */
+export const COMPLAINT_RE = /\b(non\s+(?:ha\s+|hai\s+|è\s+|sta\s+|si\s+)?(?:funzion\w*|partit\w*|apert\w*|aperto|va\b|vedo|fatto|riuscit\w*)|sbagliat\w*|account\s+sbagliato|errore|di\s+nuovo|riprova|rifallo|non\s+è\s+quello|perch[eé]\s+(?:youtube|hai|non)|inutile|ancora\s+niente)\b/i;
+
+/**
+ * Apprendimento silenzioso degli automatismi: invece di chiedere "Ha funzionato?" a ogni comando,
+ * Kestra guarda il messaggio successivo. Se l'utente si lamenta, scarta la proposta; se passa ad altro
+ * (o conferma), la salva come verificata. Le conferme esplicite ("sì", "no") restano gestite da confirmPendingSkill.
+ * Ritorna { saved, skill } | { discarded: true } | null.
+ */
+export function implicitSkillFeedback(db, sessionId = 'main', userText = '', nowMs = Date.now()) {
+  const key = `pendingSkill:${sessionId}`;
+  const pending = kvGet(db, key, null);
+  if (!pending) return null;
+  if ((nowMs - Number(pending.createdAt || 0)) > PENDING_SKILL_TTL_MS) { kvSet(db, key, null); return null; }
+  const clean = String(userText || '').trim();
+  if (!clean || CONFIRM_YES_RE.test(clean) || CONFIRM_NO_RE.test(clean)) return null;
+  if (COMPLAINT_RE.test(clean)) { kvSet(db, key, null); return { discarded: true }; }
+  const list = listSkills(db).filter(s => s.id !== pending.id);
+  const saved = { ...pending, verified: true, implicit: true, uses: 1, updatedAt: nowMs };
+  kvSet(db, SKILLS_KEY, [saved, ...list].slice(0, MAX_FLOWS));
+  kvSet(db, key, null);
+  return { saved: true, skill: saved };
 }
 
 /**
