@@ -632,9 +632,19 @@ function speakBilingual(text, onDone) {
     else segs.push({ text: p, lang });
   }
   if (!segs.length) { onDone?.(); return; }
+  const voices = window.speechSynthesis.getVoices?.() || [];
+  const pickMaleWebVoice = (langPrefix) => {
+    const pool = voices.filter(v => String(v.lang || '').toLowerCase().startsWith(langPrefix));
+    const maleRe = /\b(male|cosimo|luca|marco|diego|giorgio|david|daniel|george|guy|ryan|andrew|mark)\b/i;
+    const femaleRe = /\b(female|elsa|alice|federica|paola|zira|samantha|victoria|jenny|aria|susan)\b/i;
+    return pool.find(v => maleRe.test(v.name) && !femaleRe.test(v.name)) || pool.find(v => !femaleRe.test(v.name)) || null;
+  };
   segs.forEach((sg, idx) => {
     const u = new SpeechSynthesisUtterance(sg.text);
     u.lang = sg.lang;
+    const mv = pickMaleWebVoice(sg.lang.slice(0, 2));
+    if (mv) u.voice = mv;
+    u.pitch = 0.86;
     u.rate = sg.lang === 'en-US' ? 0.92 : 1.0;
     if (idx === segs.length - 1) { u.onend = () => onDone?.(); u.onerror = () => onDone?.(); }
     window.speechSynthesis.speak(u);

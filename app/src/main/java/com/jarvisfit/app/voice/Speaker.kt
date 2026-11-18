@@ -126,6 +126,23 @@ object Speaker {
         return if (out.isEmpty()) listOf(text to Locale.ITALIAN) else out
     }
 
+    private fun pickMaleVoice(engine: TextToSpeech, locale: Locale): android.speech.tts.Voice? {
+        val lang = locale.language
+        val candidates = runCatching {
+            (engine.voices ?: emptySet()).filter { it.locale.language == lang && !it.isNetworkConnectionRequired }
+        }.getOrDefault(emptyList())
+        if (candidates.isEmpty()) return null
+        val maleHints = listOf("male", "#male", "-itd-", "-tpd-", "-iom-", "-iol-", "-rjs-", "cosimo", "luca", "diego", "david", "daniel", "george", "guy", "ryan")
+        val femaleHints = listOf("female", "#female", "-itc-", "-itb-", "-sfg-", "-tpf-", "elsa", "alice", "federica", "zira", "samantha", "jenny", "aria")
+        return candidates.firstOrNull { v ->
+            val n = v.name.lowercase()
+            maleHints.any { n.contains(it) } && femaleHints.none { n.contains(it) }
+        } ?: candidates.firstOrNull { v ->
+            val n = v.name.lowercase()
+            femaleHints.none { n.contains(it) }
+        }
+    }
+
     /** Parla e chiama [onDone] quando l'audio è terminato (garantito, anche in caso di errore). */
     fun speak(text: String, onDone: (() -> Unit)? = null) {
         val cleaned = cleanTextForSpeech(text)
@@ -149,7 +166,9 @@ object Speaker {
             val isFirst = idx == 0
             val isLast = idx == segments.lastIndex
             runCatching {
-                engine.language = segLocale
+                val maleVoice = pickMaleVoice(engine, segLocale)
+                if (maleVoice != null) engine.voice = maleVoice else engine.language = segLocale
+                engine.setPitch(0.86f)
                 engine.setSpeechRate(if (segLocale == Locale.US) 0.92f else 1.0f)
             }
             val queueMode = if (isFirst) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
