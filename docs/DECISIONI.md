@@ -337,3 +337,8 @@ Jarvis diceva "ho aggiornato il piano" o "chiamo Marcolino" senza farlo.
 ## HUD Celle Curve a Scatti & Navigazione Continua (`orb.js`, `jarvis_desktop.py`, `navMode`, v2.28)
 - `web/orb.js` e `desktop/jarvis_desktop.py` condividono l'estetica HUD a nucleo centrale `JARVIS` con celle curve concentriche, caselle dei nodi figli incastonate e rotazione a scatti cadenzati (`steppedAngle`).
 - Quando si controlla a distanza PC o Telefono, `navMode:<sessionId>` mantiene `expectReply: true` (ricezione continua in tempo reale per scorrere, cliccare, cercare nella pagina con `find_on_page`) finché non parte un video (`play_youtube`) o l'utente dice `"a posto così"`.
+
+## Identità e Tema Ufficiale: Kestra (v2.27 / v42)
+- L'assistente e l'app si chiamano **Kestra** (pacchetto Android `com.jarvisfit.app` e firma invariati per preservare gli aggiornamenti sopra le vecchie installazioni; `app_name = "Kestra"`, wake word `kestra` + varianti fonetiche in `VoiceText.kt`).
+- Personalità (`context.js`): ladra/assassina scanzonata contestualizzata come IA brillante, agile e precisa, sempre leale e rispettosa verso l'utente (chiamato **"Capo"**).
+- Palette ufficiale **Viola (`#a855f7`) + Verde (`#39ff14`)** su sfondo nero `#05020a`, con il **simbolo ufficiale di Kestra** (diamante + lame incrociate viola e 3 trattini verdi) come logo app (`web/logo.png`, `ic_launcher.xml`), al centro del globo 3D (`web/orb.js`), dentro il cerchio dell'overlay pop-up a celle curve (`web/overlay.js`) e nell'HUD PC (`desktop/jarvis_desktop.py`).

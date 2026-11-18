@@ -115,15 +115,15 @@ function frame(now) {
     const rot = steppedAngle(t + ringIdx * 0.35, hudFreq * (1 + ringIdx * 0.2), 0.34, ringIdx % 2 === 0 ? 1 : -1);
     const a0 = slotIdx * slotSpan + pad + rot;
     const a1 = a0 + arcLen;
-    const bCol = b.auto ? autoCol : GREEN;
-    const alpha = (0.48 + hb * 0.45 + (modeName === 'THINKING' ? 0.2 : 0)) * g;
+    const bCol = (i % 2 === 0 || b.auto) ? [168, 85, 247] : GREEN;
+    const alpha = (0.5 + hb * 0.45 + (modeName === 'THINKING' ? 0.2 : 0)) * g;
 
     // Cella curva attorno al nucleo
     ctx.beginPath();
     ctx.arc(C, C, rOut, a0, a1);
     ctx.arc(C, C, rIn, a1, a0, true);
     ctx.closePath();
-    ctx.fillStyle = rgba(bCol, Math.min(0.26, alpha * 0.28), hb);
+    ctx.fillStyle = rgba(bCol, Math.min(0.28, alpha * 0.3), hb);
     ctx.fill();
     ctx.strokeStyle = rgba(bCol, Math.min(0.96, alpha), hb);
     ctx.lineWidth = 1.6;
@@ -140,7 +140,7 @@ function frame(now) {
       ctx.translate(kx, ky);
       ctx.rotate(ka + Math.PI / 2);
       ctx.fillStyle = rgba(bCol, Math.min(0.85, 0.4 + hb * 0.5), hb);
-      ctx.strokeStyle = rgba(LEAF, Math.min(0.98, 0.7 + g * 0.25), hb);
+      ctx.strokeStyle = rgba(GREEN, Math.min(0.98, 0.75 + g * 0.25), hb);
       ctx.lineWidth = 1.1;
       ctx.beginPath();
       ctx.rect(-4.5, -3, 9, 6);
@@ -150,16 +150,29 @@ function frame(now) {
     }
   }
 
-  // Nucleo centrale JARVIS
-  ctx.fillStyle = 'rgba(5, 14, 6, 0.97)';
+  // Nucleo centrale con il simbolo ufficiale di Kestra
+  ctx.fillStyle = 'rgba(5, 2, 10, 0.97)';
   ctx.beginPath(); ctx.arc(C, C, cr, 0, Math.PI * 2); ctx.fill();
-  ctx.strokeStyle = rgba(GREEN, 0.96 * g); ctx.lineWidth = 2.6;
+  ctx.strokeStyle = rgba([168, 85, 247], 0.96 * g); ctx.lineWidth = 2.6;
   ctx.beginPath(); ctx.arc(C, C, cr, 0, Math.PI * 2); ctx.stroke();
-  ctx.font = `700 ${Math.max(8, Math.round(cr * 0.42))}px system-ui, sans-serif`;
-  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
-  ctx.fillStyle = rgba([220, 255, 210], 0.94 * g);
-  ctx.fillText('JARVIS', C, C);
-  ctx.textBaseline = 'alphabetic';
+
+  const sr = cr * 0.66;
+  const syTop = C - sr * 0.95, syMid = C - sr * 0.05, syBot = C + sr * 0.9;
+  const sxL = C - sr * 0.62, sxR = C + sr * 0.62;
+  ctx.strokeStyle = '#c084fc'; ctx.lineWidth = 2; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  ctx.beginPath();
+  ctx.moveTo(C, syTop); ctx.lineTo(sxL, syMid); ctx.lineTo(sxR, syMid); ctx.closePath();
+  ctx.moveTo(sxL, syMid); ctx.lineTo(sxL + sr * 0.14, syBot); ctx.lineTo(C, syMid + sr * 0.24);
+  ctx.lineTo(sxR - sr * 0.14, syBot); ctx.lineTo(sxR, syMid);
+  ctx.moveTo(sxL, syMid); ctx.lineTo(sxR - sr * 0.14, syBot);
+  ctx.moveTo(sxR, syMid); ctx.lineTo(sxL + sr * 0.14, syBot);
+  ctx.stroke();
+  ctx.strokeStyle = '#39ff14'; ctx.lineWidth = 1.8;
+  ctx.beginPath();
+  ctx.moveTo(C - sr * 0.18, syTop + sr * 0.42); ctx.lineTo(C - sr * 0.18, syTop + sr * 0.6);
+  ctx.moveTo(C + sr * 0.18, syTop + sr * 0.42); ctx.lineTo(C + sr * 0.18, syTop + sr * 0.6);
+  ctx.moveTo(C, syTop + sr * 0.64); ctx.lineTo(C, syTop + sr * 0.8);
+  ctx.stroke();
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

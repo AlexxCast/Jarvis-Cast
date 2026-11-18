@@ -721,15 +721,15 @@ class JarvisDesktopApp:
         self.running = True
         self.online = False
 
-        self.root.title("JARVIS • Desktop System Manager")
+        self.root.title("KESTRA • Desktop System Manager")
         self.root.geometry("650x520")
-        self.root.configure(bg="#000000")
+        self.root.configure(bg="#05020a")
 
         # Header
-        hdr = tk.Frame(root, bg="#000000", pady=10, padx=14)
+        hdr = tk.Frame(root, bg="#05020a", pady=10, padx=14)
         hdr.pack(fill="x")
-        tk.Label(hdr, text="◉ JARVIS CORE • DESKTOP", font=("Consolas", 14, "bold"), fg="#39ff14", bg="#000000").pack(side="left")
-        self.status_lbl = tk.Label(hdr, text="○ In attesa di connessione", font=("Segoe UI", 9, "bold"), fg="#39ff14", bg="#000000")
+        tk.Label(hdr, text="◉ KESTRA CORE • DESKTOP", font=("Consolas", 14, "bold"), fg="#a855f7", bg="#05020a").pack(side="left")
+        self.status_lbl = tk.Label(hdr, text="○ In attesa di connessione", font=("Segoe UI", 9, "bold"), fg="#39ff14", bg="#05020a")
         self.status_lbl.pack(side="right")
 
         # Telemetria
@@ -808,9 +808,11 @@ class JarvisDesktopApp:
             (54, 68, [(40, 80, 3), (170, 90, 2), (290, 55, 2)], 1.35, -1),
             (73, 84, [(0, 65, 2), (110, 75, 2), (220, 85, 3)], 0.85, 1),
         ]
-        for r_in, r_out, arcs, mult, d in rings:
+        for idx_r, (r_in, r_out, arcs, mult, d) in enumerate(rings):
             rot = stepped(t * mult, 20) * d
             r_mid = (r_in + r_out) / 2
+            col = "#a855f7" if idx_r % 2 == 0 else "#39ff14"
+            fill_c = "#1a082e" if idx_r % 2 == 0 else "#072207"
             for start, span, kids in arcs:
                 a0 = math.radians(start + rot)
                 a1 = math.radians(start + span + rot)
@@ -822,15 +824,22 @@ class JarvisDesktopApp:
                 for k in range(steps, -1, -1):
                     ang = a0 + (a1 - a0) * (k / steps)
                     pts.extend([cx + math.cos(ang) * r_in, cy + math.sin(ang) * r_in])
-                c.create_polygon(pts, outline="#39ff14", fill="#072207", width=1.4)
+                c.create_polygon(pts, outline=col, fill=fill_c, width=1.4)
                 for j in range(kids):
                     ka = a0 + (a1 - a0) * ((j + 1) / (kids + 1))
                     kx = cx + math.cos(ka) * r_mid
                     ky = cy + math.sin(ka) * r_mid
-                    c.create_rectangle(kx - 3, ky - 3, kx + 3, ky + 3, outline="#ccffcc", fill="#196619")
+                    c.create_rectangle(kx - 3, ky - 3, kx + 3, ky + 3, outline="#39ff14", fill="#4c1d95")
 
-        c.create_oval(cx - 26, cy - 26, cx + 26, cy + 26, outline="#39ff14", fill="#000000", width=2)
-        c.create_text(cx, cy, text="JARVIS", fill="#d4ffd4", font=("Consolas", 9, "bold"))
+        c.create_oval(cx - 26, cy - 26, cx + 26, cy + 26, outline="#a855f7", fill="#05020a", width=2)
+        # Simbolo di Kestra al centro dell'HUD
+        c.create_polygon(cx, cy - 17, cx - 13, cy - 1, cx + 13, cy - 1, outline="#c084fc", fill="", width=1.8)
+        c.create_line(cx - 13, cy - 1, cx - 9, cy + 16, cx, cy + 3, cx + 9, cy + 16, cx + 13, cy - 1, fill="#c084fc", width=1.6)
+        c.create_line(cx - 13, cy - 1, cx + 9, cy + 16, fill="#c084fc", width=1.4)
+        c.create_line(cx + 13, cy - 1, cx - 9, cy + 16, fill="#c084fc", width=1.4)
+        c.create_line(cx - 4, cy - 9, cx - 4, cy - 5, fill="#39ff14", width=2)
+        c.create_line(cx + 4, cy - 9, cx + 4, cy - 5, fill="#39ff14", width=2)
+        c.create_line(cx, cy - 5, cx, cy - 2, fill="#39ff14", width=2)
         self.root.after(45, self.draw_hud)
 
     def on_close(self) -> None:

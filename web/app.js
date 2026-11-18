@@ -1338,11 +1338,11 @@ function viewLogin() {
     await Promise.all([loadHistory(), loadGraph(false)]); render(); scrollChat();
   });
   input.addEventListener('keydown', (e) => { if (e.key === 'Enter') submit(); });
-  return h('div', { class: 'card login' }, h('img', { src: '/logo.png', alt: '' }), h('h1', { style: 'text-align:center' }, 'Jarvis Assistente'),
+  return h('div', { class: 'card login' }, h('img', { src: '/logo.png', alt: '' }), h('h1', { style: 'text-align:center' }, 'Kestra Assistente'),
     h('p', { class: 'muted', style: 'text-align:center' }, 'Inserisca il token scelto durante l\'installazione (JARVIS_TOKEN).'), input, h('button', { class: 'btn primary', onclick: submit }, 'Entra'));
 }
 
-const TABS = [['chat', 'Jarvis'], ['oggi', 'Oggi'], ['cucina', 'Cucina'], ['attivita', 'Attività'], ['altro', 'Altro']];
+const TABS = [['chat', 'Kestra'], ['oggi', 'Oggi'], ['cucina', 'Cucina'], ['attivita', 'Attività'], ['altro', 'Altro']];
 function go(tab, sub) { store.tab = tab; if (sub) { if (sub !== store.sub) { store.mind = null; store.memory = null; } store.sub = sub; } render(); if (tab === 'chat') scrollChat(); }
 
 function render() {
@@ -1356,7 +1356,7 @@ function render() {
       store.error ? h('button', { class: 'btn primary', onclick: boot }, 'Riprova') : null));
   }
   const listening = !!(nativeJson('getConfig') || {}).listening;
-  const title = { chat: 'Jarvis', oggi: 'Oggi', cucina: 'Cucina', attivita: 'Attività', altro: 'Altro' }[store.tab];
+  const title = { chat: 'Kestra', oggi: 'Oggi', cucina: 'Cucina', attivita: 'Attività', altro: 'Altro' }[store.tab];
   app.append(h('header', { class: 'top' }, h('h1', {}, title),
     native ? h('span', { class: 'muted small' }, listening ? 'in ascolto' : 'ascolto spento') : null, native ? h('span', { class: 'dot' + (listening ? ' on' : '') }) : null));
   if (store.tab === 'chat') app.append(...viewChat().filter(Boolean));

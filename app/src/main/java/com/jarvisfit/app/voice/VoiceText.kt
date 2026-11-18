@@ -16,10 +16,10 @@ object VoiceText {
      * ("sì, il pranzo") NON deve essere scartata.
      */
     private val selfSignatureRegex = Regex(
-        "^(?:certamente signore|subito signore|ricevuto signore|ottimo lavoro signore|ho avviato la riproduzione|" +
-            "signore ho riscontrato|parola d ordine|apro joytify|riprendo subito|fatto signore|eseguo subito|" +
-            "eccomi signore|mi dica|sono qui signore|a sua disposizione|comandi signore|la ascolto|" +
-            "dica pure signore|pronto signore|sempre operativo|ai suoi ordini|tutto orecchi signore)\\b"
+        "^(?:certamente capo|agli ordini capo|subito capo|colpo riuscito|ci penso io capo|certamente signore|subito signore|ricevuto signore|ottimo lavoro signore|ho avviato la riproduzione|" +
+            "capo ho riscontrato|signore ho riscontrato|parola d ordine|apro joytify|riprendo subito|fatto capo|fatto signore|eseguo subito|" +
+            "eccomi capo|eccomi signore|dimmi capo|sono qui capo|a tua disposizione|comandi capo|ti ascolto|" +
+            "dica pure signore|pronta capo|sempre operativa|ai tuoi ordini|tutto orecchi)\\b"
     )
 
     fun isSelfEcho(recognized: String, lastSpoken: String, msSinceSpoken: Long, windowMs: Long = 15_000L): Boolean {
@@ -81,9 +81,9 @@ object VoiceText {
      * "giarvis", "jarvi", "garvis"... Tutte queste valgono già con la sensibilità media; il contesto
      * (nome all'inizio, alla fine o giudicato dal server) evita le false chiamate.
      */
-    private val wakeToken = Regex("\\b(jarvis|jarvi|giarvis|jervis|gervis|jarvys|jarviss|jarbis|giarvi|garvis|charvis|jarvas|giarviz|jarviz|jarves|giarves|giarbis|jervi|giervis|harvis|giorvis|jarvees|ciarvis|sarvis|garbis|darvis|carvis|zarvis|iarvis|arvis|giardi|giarri|ciardi)\\b")
+    private val wakeToken = Regex("\\b(kestra|chestra|questra|cestra|khestra|keistra|kesra|kestre|kestro|estra|jarvis|jarvi|giarvis|jervis|gervis|jarvys|jarviss|jarbis|giarvi|garvis|charvis|jarvas|giarviz|jarviz|jarves|giarves|giarbis|jervi|giervis|harvis|giorvis|jarvees|ciarvis|sarvis|garbis|darvis|carvis|zarvis|iarvis|arvis|giardi|giarri|ciardi)\\b")
     /** Sensibilità alta: accetta anche come il riconoscimento vocale storpia spesso il nome detto a voce bassa o da lontano. */
-    private val wakeTokenLoose = Regex("\\b(jarvis|jarvi|giarvis|jervis|gervis|jarvys|jarviss|jarbis|giarvi|garvis|charvis|jarvas|giarviz|jarviz|jarves|giarves|giarbis|jervi|giervis|harvis|giorvis|jarvees|travis|davis|chavis|service|servis|ciarvis|sarvis|harvey|garbis|darvis|carvis|zarvis|iarvis|arvis|giardi|giarri|ciardi|giar|jarv|giarv|sciarvis|cervi|servi|chavez)\\b")
+    private val wakeTokenLoose = Regex("\\b(kestra|chestra|questra|cestra|khestra|keistra|kesra|kestre|kestro|estra|castra|destra|finestra|jarvis|jarvi|giarvis|jervis|gervis|jarvys|jarviss|jarbis|giarvi|garvis|charvis|jarvas|giarviz|jarviz|jarves|giarves|giarbis|jervi|giervis|harvis|giorvis|jarvees|travis|davis|chavis|service|servis|ciarvis|sarvis|harvey|garbis|darvis|carvis|zarvis|iarvis|arvis|giardi|giarri|ciardi|giar|jarv|giarv|sciarvis|cervi|servi|chavez)\\b")
 
     /** Parole che possono precedere il nome quando lo si chiama ("ehi Jarvis", "senti Jarvis"). */
     private val callWords = setOf(

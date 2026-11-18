@@ -21,8 +21,8 @@ const PC_SCREEN_RE = /\b(mostra(?:mi)?\s+lo\s+schermo|fa(?:mmi|i)\s+vedere\s+lo\
 const SELF_HEAL_RE = /\b(auto[\s-]*(?:diagnos\w*|corregg\w*|ripar\w*|heal\w*)|sistema\s+i\s+problemi|impara\s+dagli\s+errori|analizza\s+(?:i\s+)?fix\s+latenti|stato\s+apprendimento)\b/i;
 const LIVE_CALL_RE = /\b(video\s*chiamat\w*|video\s*call|modalit[aà]\s+live|live\s+vision|in\s+diretta|dal\s+vivo|ti\s+devo\s+far\s+vedere|devo\s+farti\s+vedere|guarda\s+con\s+la\s+(?:tele)?camera)\b/i;
 const ANTIGRAVITY_RE = /\b(?:antigravit\w*|anti\s+gravit\w*)\b/i;
-const TIMED_ACTION_RE = /^\W*(?:ehi\s+|ciao\s+|ok\s+)?(?:jarvis\s+)?tra\s+(\d{1,3})\s*(second\w*|minut\w*|or[ae])\s+(.{2,240})$/i;
-const TIMER_RE = /^\W*(?:ehi\s+|ciao\s+|ok\s+)?(?:jarvis\s+)?(?:metti|imposta|avvia|fai\s+partire|crea)\s+(?:un\s+)?(timer|conto\s+alla\s+rovescia|cronometro)\s*(?:di|da)?\s*(?:(\d{1,3})\s*(second\w*|minut\w*|or[ae]))?(?:\s+(?:per|di|chiamato)\s+(.{2,100}))?\W*$/i;
+const TIMED_ACTION_RE = /^\W*(?:ehi\s+|ciao\s+|ok\s+)?(?:(?:kestra|chestra|questra|jarvis)\s+)?tra\s+(\d{1,3})\s*(second\w*|minut\w*|or[ae])\s+(.{2,240})$/i;
+const TIMER_RE = /^\W*(?:ehi\s+|ciao\s+|ok\s+)?(?:(?:kestra|chestra|questra|jarvis)\s+)?(?:metti|imposta|avvia|fai\s+partire|crea)\s+(?:un\s+)?(timer|conto\s+alla\s+rovescia|cronometro)\s*(?:di|da)?\s*(?:(\d{1,3})\s*(second\w*|minut\w*|or[ae]))?(?:\s+(?:per|di|chiamato)\s+(.{2,100}))?\W*$/i;
 const PASSPHRASE_RE = /^\W*(?:la\s+parola\s+d'ordine\s+[eè]\s+|parola\s+d'ordine\s+)?niente\s+pi[uù]\s+fili\W*$/i;
 const SELF_PROMPT_ECHO_RE = /^\W*(?:parola\s+d'ordine(?:\s+non\s+corretta.*)?|certamente\s+signore.*|subito\s+signore.*|ricevuto\s+signore.*|ottimo\s+lavoro\s+signore.*|ho\s+avviato\s+la\s+riproduzione.*|signore\s+ho\s+riscontrato.*)\W*$/i;
 
@@ -595,7 +595,7 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
     };
   }
 
-  const clean = raw.replace(/^\W*(ehi|ciao|ok)?\W*jarvis\W*/i, '').replace(/\bniente\s+pi[uù]\s+fili\b/gi, '').trim();
+  const clean = raw.replace(/^\W*(ehi|ciao|ok)?\W*(kestra|chestra|questra|cestra|jarvis)\W*/i, '').replace(/\bniente\s+pi[uù]\s+fili\b/gi, '').trim();
   if (!clean) return null;
 
   // 0b. Chiusura esplicita della navigazione continua ("a posto così", "basta così", "stop navigazione")

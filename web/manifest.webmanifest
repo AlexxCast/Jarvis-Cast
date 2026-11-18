@@ -1,10 +1,10 @@
 {
-  "name": "Jarvis Assistente",
-  "short_name": "Jarvis",
+  "name": "Kestra Assistente",
+  "short_name": "Kestra",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#050f05",
-  "theme_color": "#050f05",
+  "background_color": "#05020a",
+  "theme_color": "#090412",
   "lang": "it",
   "icons": [{ "src": "/logo.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }]
 }
