@@ -21,52 +21,49 @@ export const PROVIDERS = {
 };
 
 export const DEFAULT_MODELS = [
+  // Aggiornato il 18/11/2026 dai cataloghi ufficiali (Gemini, Groq, Cerebras, NVIDIA, OpenRouter).
+  // Se un provider ritira un modello risponde 404: il router lo mette in pausa per 24 ore e passa al successivo.
+
   // --- Google Gemini (gratuiti, finestra 1M, visione e ragionamento) ---
   { provider: 'gemini', model: 'gemini-flash-latest',      tiers: ['fast', 'smart', 'vision'], ctx: 1000000, rpm: 10, rpd: 250,  tpm: 250000, free: true, prio: 10 },
+  { provider: 'gemini', model: 'gemini-3.8-flash',         tiers: ['fast', 'smart', 'vision'], ctx: 1000000, rpm: 10, rpd: 250,  tpm: 250000, free: true, prio: 11 },
   { provider: 'gemini', model: 'gemini-flash-lite-latest', tiers: ['fast', 'vision'],          ctx: 1000000, rpm: 15, rpd: 1000, tpm: 250000, free: true, prio: 12 },
-  { provider: 'gemini', model: 'gemini-2.5-pro',           tiers: ['smart', 'vision'],         ctx: 1000000, rpm: 5,  rpd: 100,  tpm: 250000, free: true, prio: 14 },
-  { provider: 'gemini', model: 'gemini-2.5-flash',         tiers: ['fast', 'smart', 'vision'], ctx: 1000000, rpm: 10, rpd: 250,  tpm: 250000, free: true, prio: 15 },
-  { provider: 'gemini', model: 'gemini-2.0-flash',         tiers: ['fast', 'smart', 'vision'], ctx: 1000000, rpm: 15, rpd: 1500, tpm: 1000000, free: true, prio: 16 },
-  { provider: 'gemini', model: 'gemini-2.0-flash-lite',    tiers: ['fast', 'vision'],          ctx: 1000000, rpm: 30, rpd: 1500, tpm: 1000000, free: true, prio: 18 },
+  { provider: 'gemini', model: 'gemini-3.6-flash',         tiers: ['fast', 'smart', 'vision'], ctx: 1000000, rpm: 10, rpd: 250,  tpm: 250000, free: true, prio: 13 },
+  { provider: 'gemini', model: 'gemini-3.1-pro-preview',   tiers: ['smart', 'vision'],         ctx: 1000000, rpm: 5,  rpd: 50,   tpm: 250000, free: true, prio: 14 },
+  { provider: 'gemini', model: 'gemini-3.5-flash-lite',    tiers: ['fast', 'vision'],          ctx: 1000000, rpm: 15, rpd: 1000, tpm: 250000, free: true, prio: 15 },
+  { provider: 'gemini', model: 'gemini-2.5-pro',           tiers: ['smart', 'vision'],         ctx: 1000000, rpm: 5,  rpd: 100,  tpm: 250000, free: true, prio: 16 },
+  { provider: 'gemini', model: 'gemini-2.5-flash',         tiers: ['fast', 'smart', 'vision'], ctx: 1000000, rpm: 10, rpd: 250,  tpm: 250000, free: true, prio: 17 },
+  { provider: 'gemini', model: 'gemini-3.1-flash-lite',    tiers: ['fast', 'vision'],          ctx: 1000000, rpm: 15, rpd: 1000, tpm: 250000, free: true, prio: 18 },
 
-  // --- Groq (ultra-veloci LPU, gratuiti) ---
-  { provider: 'groq', model: 'llama-3.3-70b-versatile',                        tiers: ['fast', 'smart'],           ctx: 128000, rpm: 30, rpd: 1000,  tpm: 12000, tpd: 100000, free: true, prio: 20 },
-  { provider: 'groq', model: 'openai/gpt-oss-120b',                            tiers: ['fast', 'smart'],           ctx: 128000, rpm: 30, rpd: 1000,  tpm: 7500,  tpd: 200000, free: true, prio: 22 },
-  { provider: 'groq', model: 'openai/gpt-oss-20b',                             tiers: ['fast'],                    ctx: 128000, rpm: 30, rpd: 2000,  tpm: 7500,  tpd: 300000, free: true, prio: 23 },
-  { provider: 'groq', model: 'meta-llama/llama-4-maverick-17b-128e-instruct',  tiers: ['fast', 'smart', 'vision'], ctx: 128000, rpm: 30, rpd: 1000,  tpm: 30000, tpd: 500000, free: true, prio: 24 },
-  { provider: 'groq', model: 'meta-llama/llama-4-scout-17b-16e-instruct',      tiers: ['fast', 'smart', 'vision'], ctx: 128000, rpm: 30, rpd: 1000,  tpm: 30000, tpd: 500000, free: true, prio: 25 },
-  { provider: 'groq', model: 'qwen/qwen3-32b',                                 tiers: ['fast', 'smart'],           ctx: 128000, rpm: 60, rpd: 1000,  tpm: 60000, tpd: 500000, free: true, prio: 26 },
-  { provider: 'groq', model: 'moonshotai/kimi-k2-instruct',                    tiers: ['smart'],                   ctx: 128000, rpm: 60, rpd: 1000,  tpm: 30000, tpd: 300000, free: true, prio: 27 },
-  { provider: 'groq', model: 'llama-3.1-8b-instant',                           tiers: ['fast'],                    ctx: 128000, rpm: 30, rpd: 14400, tpm: 6000,  tpd: 500000, free: true, prio: 28 },
+  // --- Groq (velocissimi, gratuiti) ---
+  { provider: 'groq', model: 'qwen/qwen3.8-27b',           tiers: ['fast', 'smart'], ctx: 131072, rpm: 30, rpd: 1000, tpm: 6000,  tpd: 500000, free: true, prio: 20 },
+  { provider: 'groq', model: 'llama-3.3-70b-versatile',    tiers: ['fast', 'smart'], ctx: 131072, rpm: 30, rpd: 1000, tpm: 12000, tpd: 100000, free: true, prio: 21 },
+  { provider: 'groq', model: 'openai/gpt-oss-120b',        tiers: ['fast', 'smart'], ctx: 131072, rpm: 30, rpd: 1000, tpm: 7500,  tpd: 200000, free: true, prio: 22 },
+  { provider: 'groq', model: 'minimaxai/minimax-m2.7',     tiers: ['smart'],         ctx: 196608, rpm: 30, rpd: 1000, tpm: 6000,  tpd: 200000, free: true, prio: 23 },
+  { provider: 'groq', model: 'openai/gpt-oss-20b',         tiers: ['fast'],          ctx: 131072, rpm: 30, rpd: 2000, tpm: 7500,  tpd: 300000, free: true, prio: 24 },
+  { provider: 'groq', model: 'meta-models/muse-spark-open', tiers: ['fast', 'smart'], ctx: 131072, rpm: 30, rpd: 1000, tpm: 6000, tpd: 200000, free: true, prio: 25 },
+  { provider: 'groq', model: 'llama-3.1-8b-instant',       tiers: ['fast'],          ctx: 131072, rpm: 30, rpd: 14400, tpm: 6000, tpd: 500000, free: true, prio: 28 },
 
-  // --- Cerebras (ultra-veloci, gratuiti) ---
+  // --- Cerebras (ultra-veloci, gratuiti, 1M token al giorno) ---
   { provider: 'cerebras', model: 'gpt-oss-120b',  tiers: ['fast', 'smart'], ctx: 64000, rpm: 30, rpd: 14400, tpm: 60000, tpd: 1000000, free: true, prio: 30 },
-  { provider: 'cerebras', model: 'qwen-3-32b',    tiers: ['fast', 'smart'], ctx: 64000, rpm: 30, rpd: 14400, tpm: 60000, tpd: 1000000, free: true, prio: 34 },
-  { provider: 'cerebras', model: 'llama3.1-8b',   tiers: ['fast'],          ctx: 8000,  rpm: 30, rpd: 14400, tpm: 60000, tpd: 1000000, free: true, prio: 38 },
+  { provider: 'cerebras', model: 'qwen-3.8-27b',  tiers: ['fast', 'smart'], ctx: 64000, rpm: 30, rpd: 14400, tpm: 60000, tpd: 1000000, free: true, prio: 31 },
 
-  // --- SambaNova Cloud (gratuito con crediti/tier free, velocissimo su open-weights) ---
+  // --- SambaNova Cloud (crediti gratuiti) ---
   { provider: 'sambanova', model: 'Meta-Llama-3.3-70B-Instruct', tiers: ['fast', 'smart'], ctx: 128000, rpm: 30, free: true, prio: 39 },
-  { provider: 'sambanova', model: 'DeepSeek-R1-Distill-Llama-70B', tiers: ['smart'],       ctx: 128000, rpm: 20, free: true, prio: 39 },
 
-  // --- Nvidia NIM (ottimi per codice, calcoli, 1M context e architettura) ---
-  { provider: 'nvidia', model: 'nvidia/nemotron-3-super-120b-a12b',   tiers: ['fast', 'smart'], ctx: 256000, rpm: 40, free: true, prio: 40 },
-  { provider: 'nvidia', model: 'meta/llama-3.1-405b-instruct',        tiers: ['smart'],         ctx: 128000, rpm: 40, free: true, prio: 40 },
-  { provider: 'nvidia', model: 'qwen/qwen-2.5-coder-32b-instruct',    tiers: ['fast', 'smart'], ctx: 128000, rpm: 40, free: true, prio: 41 },
-  { provider: 'nvidia', model: 'nvidia/llama-3.1-nemotron-70b-instruct', tiers: ['smart'],      ctx: 128000, rpm: 40, free: true, prio: 42 },
-  { provider: 'nvidia', model: 'meta/llama-3.1-70b-instruct',         tiers: ['fast', 'smart'], ctx: 128000, rpm: 40, free: true, prio: 43 },
-  { provider: 'nvidia', model: 'meta/llama-3.2-90b-vision-instruct',  tiers: ['vision'],        ctx: 128000, rpm: 40, free: true, prio: 44 },
-  { provider: 'nvidia', model: 'mistralai/mistral-large-2-instruct',  tiers: ['smart'],         ctx: 128000, rpm: 40, free: true, prio: 45 },
+  // --- NVIDIA NIM (gratuito a crediti: i più grandi per i ragionamenti) ---
+  { provider: 'nvidia', model: 'nvidia/nemotron-3-ultra-550b-a55b', tiers: ['smart'],         ctx: 1000000, rpm: 40, free: true, prio: 35 },
+  { provider: 'nvidia', model: 'z-ai/glm-5.3',                      tiers: ['smart'],         ctx: 128000,  rpm: 40, free: true, prio: 36 },
+  { provider: 'nvidia', model: 'nvidia/nemotron-3-super-120b-a12b', tiers: ['fast', 'smart'], ctx: 256000,  rpm: 40, free: true, prio: 40 },
+  { provider: 'nvidia', model: 'openai/gpt-oss-20b',                tiers: ['fast'],          ctx: 128000,  rpm: 40, free: true, prio: 44 },
 
-  // --- OpenRouter Free (aggregatore modelli gratuiti + meta-router openrouter/free) ---
-  { provider: 'openrouter', model: 'openrouter/free',                                 tiers: ['fast', 'smart', 'vision'], ctx: 64000,  rpm: 20, rpd: 200, free: true, prio: 50 },
-  { provider: 'openrouter', model: 'google/gemma-4-31b-it:free',                      tiers: ['fast', 'smart', 'vision'], ctx: 128000, rpm: 20, rpd: 200, free: true, prio: 51 },
-  { provider: 'openrouter', model: 'nvidia/nemotron-3-super-120b-a12b:free',          tiers: ['fast', 'smart'],           ctx: 128000, rpm: 20, rpd: 200, free: true, prio: 51 },
-  { provider: 'openrouter', model: 'google/gemini-2.0-flash-exp:free',                tiers: ['fast', 'smart', 'vision'], ctx: 128000, rpm: 20, rpd: 200, free: true, prio: 52 },
-  { provider: 'openrouter', model: 'meta-llama/llama-4-maverick:free',                tiers: ['fast', 'smart', 'vision'], ctx: 128000, rpm: 20, rpd: 200, free: true, prio: 52 },
-  { provider: 'openrouter', model: 'qwen/qwen3-coder:free',                           tiers: ['fast', 'smart'],           ctx: 128000, rpm: 20, rpd: 200, free: true, prio: 53 },
-  { provider: 'openrouter', model: 'qwen/qwen3-235b-a22b:free',                       tiers: ['smart'],                   ctx: 64000,  rpm: 20, rpd: 200, free: true, prio: 53 },
-  { provider: 'openrouter', model: 'deepseek/deepseek-r1:free',                       tiers: ['smart'],                   ctx: 64000,  rpm: 20, rpd: 200, free: true, prio: 54 },
-  { provider: 'openrouter', model: 'mistralai/mistral-small-3.1-24b-instruct:free',   tiers: ['fast', 'vision'],          ctx: 64000,  rpm: 20, rpd: 200, free: true, prio: 55 },
+  // --- OpenRouter Free (50 richieste al giorno in tutto senza credito) ---
+  { provider: 'openrouter', model: 'nvidia/nemotron-3-ultra-550b-a55b:free', tiers: ['smart'],                   ctx: 1000000, rpm: 20, rpd: 50, free: true, prio: 50 },
+  { provider: 'openrouter', model: 'thinkingmachines/inkling-2-small:free',  tiers: ['fast', 'smart', 'vision'], ctx: 1000000, rpm: 20, rpd: 50, free: true, prio: 51 },
+  { provider: 'openrouter', model: 'nvidia/nemotron-3.5-super-vl:free',      tiers: ['fast', 'vision'],          ctx: 1000000, rpm: 20, rpd: 50, free: true, prio: 52 },
+  { provider: 'openrouter', model: 'baidu/ernie-5.5-flash-preview:free',     tiers: ['fast', 'smart'],           ctx: 1000000, rpm: 20, rpd: 50, free: true, prio: 53 },
+  { provider: 'openrouter', model: 'google/gemma-4-31b-it:free',             tiers: ['fast', 'smart', 'vision'], ctx: 262000,  rpm: 20, rpd: 50, free: true, prio: 54 },
+  { provider: 'openrouter', model: 'openrouter/free',                        tiers: ['fast', 'smart', 'vision'], ctx: 64000,   rpm: 20, rpd: 50, free: true, prio: 58 },
 
   // --- Mistral AI ---
   { provider: 'mistral', model: 'mistral-small-latest', tiers: ['fast', 'vision'], ctx: 128000, rpm: 60, tpm: 500000, free: true, prio: 60 },

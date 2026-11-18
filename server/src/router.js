@@ -60,12 +60,12 @@ function saveState(db, s, ms) {
 }
 
 /** Modelli ad alta capacità (70B–405B, Pro, Coder, R1): preferiti sui compiti architetturali e multi-agente complessi. */
-export const isHeavyModel = (m) => /(2\.5-pro|405b|235b|120b|large|deepseek-r1|coder|codestral|gpt-4\.1$)/i.test(m.model);
+export const isHeavyModel = (m) => /(ultra|550b|glm-5|pro-preview|2\.5-pro|minimax|405b|235b|120b|large|deepseek-r1|coder|codestral|gpt-4\.1$)/i.test(m.model);
 
 /** Legge un PDF nativamente tramite Gemini generateContent (supporta sia PDF testuali sia scansioni). */
 export async function readPdfWithGemini(env, fetchFn, pdfBase64, promptText) {
   if (!env.GEMINI_API_KEY || !pdfBase64) return null;
-  const models = ['gemini-2.5-flash', 'gemini-flash-latest', 'gemini-2.0-flash'];
+  const models = ['gemini-flash-latest', 'gemini-3.8-flash', 'gemini-2.5-flash'];
   for (const model of models) {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`;

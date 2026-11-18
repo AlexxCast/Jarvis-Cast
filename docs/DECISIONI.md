@@ -431,3 +431,6 @@ Richiesta del Capo: un contesto allargato e schematico che dia continuità alle 
 - Iniziativa: il giorno dopo un piano ("domani ho l'esame"), tra le 9 e le 21, chiede com'è andata una volta; se il Capo ne ha già parlato, non chiede.
 - `test/conversazioni.test.js`: conversazioni su più giorni e più chat, riassunto dopo 30 messaggi, una frase che tocca più cassetti, messaggi strani e modello che risponde male.
 - Punteggio di significato con mediana e deviazione mediana (robusto con pochi o tanti ricordi pertinenti).
+
+### Modelli gratuiti aggiornati (2026-11-18)
+Richiesta del Capo: altri modelli gratuiti, più potenti. Elenco predefinito (`models.js`) rifatto dai cataloghi ufficiali del 18/11/2026: tolti i Gemini 2.0 (spenti); aggiunti Gemini 3.8 Flash e 3.1 Pro (anteprima, gratis con pochi messaggi al giorno), Qwen3.8-27B e MiniMax M2.7 su Groq, Cerebras (gpt-oss-120b, Qwen3.8), NVIDIA Nemotron 3 Ultra 550B e GLM-5.3, OpenRouter gratuiti (Nemotron Ultra, Inkling 2 Small, Gemma 4 31B, ERNIE 5.5 Flash). Per i compiti "smart" il router preferisce i modelli pesanti (`isHeavyModel`); se un modello viene ritirato risponde 404 e resta in pausa 24 ore. Attenzione: un elenco salvato a mano in Modelli (kv `models`) sostituisce questi predefiniti.
