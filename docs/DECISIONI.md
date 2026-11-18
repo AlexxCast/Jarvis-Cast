@@ -418,3 +418,8 @@ Regola: niente scritture nel database a ogni richiesta frequente (battiti, polli
 
 ### Conferma prima di inviare o chiamare (2026-11-18)
 Scelta del Capo: l'agente del telefono invia messaggi e avvia chiamate senza chiedere solo quando il telefono ha appena verificato il Capo (oggi: parola d'ordine detta negli ultimi 10 minuti, `VoiceId.isTrusted()`); altrimenti si ferma con ask dicendo a chi e cosa invia. Il telefono manda `voiceTrusted` a `/api/phone/step`, il server sceglie la regola con `phone.systemFor`. Rimossa dal prompt la parola d'ordine scritta in chiaro. App 2.33 (versionCode 35).
+
+### Ricordi per significato e cassetti chiesti dal modello (2026-11-18)
+Dubbio del Capo: senza parole chiave i cassetti giusti possono restare fuori, e una frase può toccare più cassetti. Scelta: niente IA intermedia a ogni messaggio (latenza e crediti), invece:
+- `semantic.js`: impronta (embedding Gemini `gemini-embedding-001`, 256 numeri, riserva `text-embedding-004`) per ogni ricordo, colonna `memories.vec`, calcolata una volta (40 per battito, 10 dopo ogni chat). A ogni messaggio un'impronta sola (tetto 1,5 s). In `memory.recall` il significato si somma alle parole; il punteggio è relativo (quanto il ricordo spicca rispetto agli altri), così non dipende dalla scala del modello. Se Gemini non risponde resta la ricerca per parole.
+- Azione `recall {module?, query?}`: il modello, vedendo l'indice dei cassetti, può chiedere quello che manca e risponde di nuovo (come `web_search`).

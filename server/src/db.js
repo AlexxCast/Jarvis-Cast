@@ -49,6 +49,7 @@ const ADDED_COLUMNS = [
   "ALTER TABLE reminders ADD COLUMN place_event TEXT NOT NULL DEFAULT ''",
   "ALTER TABLE topics ADD COLUMN parent TEXT NOT NULL DEFAULT ''",
   "ALTER TABLE jobs ADD COLUMN project TEXT NOT NULL DEFAULT ''",
+  "ALTER TABLE memories ADD COLUMN vec TEXT NOT NULL DEFAULT ''",
 ];
 
 /** Firma dello schema: se nel database c'è già la stessa, la migrazione non tocca nulla (zero scritture all'avvio). */

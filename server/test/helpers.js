@@ -11,6 +11,12 @@ export function makeDb() {
 export function fakeFetch(handler) {
   const calls = [];
   const fn = async (url, init) => {
+    // Le impronte di significato (embedding) hanno un canale a parte: non contano tra le chiamate ai modelli.
+    if (/:batchEmbedContents/.test(String(url))) {
+      fn.embedCalls.push(JSON.parse(init.body));
+      const out = fn.embed ? fn.embed(JSON.parse(init.body)) : null;
+      return new Response(JSON.stringify(out || {}), { status: out ? 200 : 404 });
+    }
     const body = JSON.parse(init.body);
     calls.push({ url, body, headers: init.headers });
     let out = await handler(url, body, calls.length);
@@ -18,6 +24,7 @@ export function fakeFetch(handler) {
     return new Response(JSON.stringify(out.json ?? {}), { status: out.status ?? 200, headers: out.headers ?? {} });
   };
   fn.calls = calls;
+  fn.embedCalls = [];
   return fn;
 }
 

@@ -506,6 +506,7 @@ test('meteo: con una città nella frase Jarvis riceve i dati veri di Open-Meteo'
   const seen = [];
   let system = '';
   const fetchFn = async (url, init) => {
+    if (String(url).includes(':batchEmbedContents')) return new Response('{}', { status: 404 }); // niente impronte in questo test
     seen.push(String(url));
     if (String(url).includes('geocoding-api')) return new Response(JSON.stringify({ results: [{ name: 'Klagenfurt', country: 'Austria', latitude: 46.62, longitude: 14.3 }] }));
     if (String(url).includes('api.open-meteo.com')) return new Response(JSON.stringify({
@@ -640,6 +641,7 @@ test('internet: il modello può chiedere una ricerca, che viene fatta e poi risp
   const db = makeDb();
   let n = 0, second = '';
   const fetchFn = async (url, init) => {
+    if (String(url).includes(':batchEmbedContents')) return new Response('{}', { status: 404 }); // niente impronte in questo test
     if (String(url).includes(':generateContent')) return new Response(JSON.stringify({ candidates: [{ content: { parts: [{ text: 'La nuova versione è uscita il 3 novembre.' }] } }] }));
     n++;
     if (n === 1) return new Response(JSON.stringify({ choices: [{ message: { content: reply({ reply: 'Controllo.', actions: [{ type: 'web_search', query: 'ultima versione Android' }] }) } }] }));
