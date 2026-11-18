@@ -83,12 +83,27 @@ export function applyDietAction(d, a, { today, nowIso, ms, hadPhoto = false }) {
       if (a.field && !PROFILE_NUMBERS.concat(PROFILE_TEXT).includes(a.field)) return null;
       d.profile = patchProfile(d.profile, a.field ? { [a.field]: a.value } : (a.profile || {}));
       return null;
-    case 'add_pantry_item':
-      if (s(a.name)) d.pantry.push({ id: newId('p', ms), name: s(a.name), quantity: s(a.quantity), category: s(a.category) || 'generale', addedAt: today });
+    case 'add_pantry_item': {
+      const nm = s(a.name);
+      if (nm) {
+        const hit = d.pantry.find(x => x.name.toLowerCase() === nm.toLowerCase());
+        if (hit) {
+          if (s(a.quantity)) hit.quantity = s(a.quantity);
+          if (s(a.category)) hit.category = s(a.category);
+          hit.addedAt = today;
+        } else {
+          d.pantry.push({ id: newId('p', ms), name: nm, quantity: s(a.quantity), category: s(a.category) || 'generale', addedAt: today });
+        }
+      }
       return null;
+    }
     case 'remove_pantry_item': {
       const id = s(a.id), name = s(a.name).toLowerCase();
-      d.pantry = d.pantry.filter(x => !((id && x.id === id) || (name && x.name.toLowerCase() === name)));
+      if (a.all === true || name === 'tutto' || name === 'dispensa') {
+        d.pantry = [];
+        return null;
+      }
+      d.pantry = d.pantry.filter(x => !((id && x.id === id) || (name && (x.name.toLowerCase() === name || x.name.toLowerCase().includes(name) || name.includes(x.name.toLowerCase())))));
       return null;
     }
     case 'update_recipe_session': {

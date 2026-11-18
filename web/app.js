@@ -375,6 +375,17 @@ function pickFile() {
           canvas.getContext('2d').drawImage(bmp, 0, 0, canvas.width, canvas.height);
           store.pendingImage = canvas.toDataURL('image/jpeg', 0.82).split(',')[1];
         } catch { toast(`Impossibile leggere l'immagine ${file.name}.`); }
+      } else if (file.type.startsWith('video/') || /\.(mp4|mov|webm|mkv|avi)$/i.test(file.name)) {
+        toast(`Estraggo 4 fotogrammi dal video ${file.name}…`);
+        try {
+          const b64 = await extractVideoStoryboard(file);
+          if (b64) {
+            store.pendingImage = b64;
+            store.pendingFiles = [...(store.pendingFiles || []).filter(x => x.name !== file.name), { name: file.name, size: file.size, content: `[Video "${file.name}" convertito in griglia 2x2 di 4 fotogrammi chiave nell'immagine allegata: analizza tutti gli oggetti/alimenti visibili]` }].slice(0, 4);
+          } else {
+            toast(`Impossibile estrarre fotogrammi da ${file.name}.`);
+          }
+        } catch { toast(`Impossibile leggere il video ${file.name}.`); }
       } else if (file.type === 'application/pdf' || /\.pdf$/i.test(file.name)) {
         toast(`Estraggo testo dal PDF ${file.name}…`);
         const pdf = await extractPdfContent(file);
@@ -398,6 +409,42 @@ function pickFile() {
     render();
   });
   input.click();
+}
+
+async function extractVideoStoryboard(file) {
+  const url = URL.createObjectURL(file);
+  const vid = document.createElement('video');
+  vid.muted = true;
+  vid.playsInline = true;
+  vid.preload = 'auto';
+  vid.src = url;
+  try {
+    await new Promise((res, rej) => {
+      vid.onloadedmetadata = () => res();
+      vid.onerror = () => rej(new Error('video error'));
+    });
+    const dur = Math.max(0.5, vid.duration || 2);
+    const vw = vid.videoWidth || 640, vh = vid.videoHeight || 480;
+    const cellW = 512, cellH = Math.round(cellW * (vh / vw));
+    const canvas = document.createElement('canvas');
+    canvas.width = cellW * 2;
+    canvas.height = cellH * 2;
+    const ctx = canvas.getContext('2d');
+    const spots = [0.15, 0.4, 0.65, 0.9];
+    for (let i = 0; i < spots.length; i++) {
+      vid.currentTime = Math.min(dur - 0.05, dur * spots[i]);
+      await new Promise((res) => {
+        const done = () => { vid.removeEventListener('seeked', done); res(); };
+        vid.addEventListener('seeked', done);
+        setTimeout(done, 1200);
+      });
+      const x = (i % 2) * cellW, y = Math.floor(i / 2) * cellH;
+      ctx.drawImage(vid, x, y, cellW, cellH);
+    }
+    return canvas.toDataURL('image/jpeg', 0.82).split(',')[1];
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
 
 function pickPhoto(camera = false) {

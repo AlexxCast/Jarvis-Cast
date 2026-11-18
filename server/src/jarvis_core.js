@@ -560,7 +560,7 @@ export function dispatchPcScreenView(db, nowMs = Date.now()) {
  * Riconosce comandi diretti al PC Desktop, Antigravity, diagnostica, cattura schermo o parola d'ordine
  * e li esegue localmente tramite il nucleo proprietario Jarvis Core (zero chiamate a modelli esterni).
  */
-export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, sessionId = 'main') {
+export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, sessionId = 'main', tz = 'Europe/Rome') {
   const raw = String(userText || '').trim();
   if (!raw) return null;
 

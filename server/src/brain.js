@@ -215,7 +215,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   jarvisCore.selfInterrogate(db, env, ms, tz);
 
   // 1. JARVIS CORE (IA proprietaria interna): gestisce direttamente controllo multi-dispositivo (PC/Telefono), Antigravity, timer e diagnostica.
-  const coreHit = (!image && !fileList.length) ? jarvisCore.handleCoreIntent(db, userText, ms, env, sessionId) : null;
+  const coreHit = (!image && !fileList.length) ? jarvisCore.handleCoreIntent(db, userText, ms, env, sessionId, tz) : null;
   if (coreHit) {
     if (coreHit.scheduleAt) deps.schedule?.(coreHit.scheduleAt);
     if (coreHit.reply) {

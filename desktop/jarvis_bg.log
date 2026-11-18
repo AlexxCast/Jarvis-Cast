@@ -166,3 +166,42 @@
 [2026-11-18 11:34:18] Eseguo comando [play_youtube]: ora su questa pagina Vai su prime video Ma su questa pagina scorri la pagina
 [2026-11-18 11:34:19] Avvio video YouTube: ora su questa pagina Vai su prime video Ma su questa pagina scorri la pagina (https://www.youtube.com/watch?v=1Kn2H0QUQoU&autoplay=1)
 [2026-11-18 11:34:19] Chrome avviato (Profile 1): https://www.youtube.com/watch?v=1Kn2H0QUQoU&autoplay=1
+[2026-11-18 11:38:16] Eseguo comando [open_app]: subito
+[2026-11-18 11:38:16] App 'subito' non trovata sul PC (nessun popup aperto).
+[2026-11-18 11:38:40] Eseguo comando [open_app]: Chrome
+[2026-11-18 11:38:40] Chrome avviato (Profile 1)
+[2026-11-18 11:38:49] Eseguo comando [open_url]: https://www.primevideo.com
+[2026-11-18 11:38:49] Chrome avviato (Profile 1): https://www.primevideo.com
+[2026-11-18 11:39:10] Eseguo comando [open_app]: Chrome
+[2026-11-18 11:39:10] Chrome avviato (Profile 1)
+[2026-11-18 11:39:10] Eseguo comando [open_url]: https://www.primevideo.com
+[2026-11-18 11:39:10] Chrome avviato (Profile 1): https://www.primevideo.com
+[2026-11-18 11:39:54] Eseguo comando [type_text]: El uva boss
+[2026-11-18 11:48:41] Eseguo comando [write_project]: Analizza video dispensa
+[2026-11-18 11:48:41] Errore scrittura progetto: Unterminated string starting at: line 1 column 46 (char 45)
+[2026-11-18 11:48:45] Eseguo comando [write_project]: Analizza video dispensa
+[2026-11-18 11:48:45] Errore scrittura progetto: Unterminated string starting at: line 1 column 46 (char 45)
+[2026-11-18 11:48:50] Eseguo comando [write_project]: Analizza video dispensa
+[2026-11-18 11:48:50] Errore scrittura progetto: Unterminated string starting at: line 1 column 46 (char 45)
+[2026-11-18 11:48:56] Eseguo comando [write_project]: Analizza video dispensa
+[2026-11-18 11:48:56] Eseguo comando [write_project]: Analizza video dispensa
+[2026-11-18 11:48:56] Errore scrittura progetto: Unterminated string starting at: line 1 column 46 (char 45)
+[2026-11-18 11:48:56] Errore scrittura progetto: Unterminated string starting at: line 1 column 56 (char 55)
+[2026-11-18 11:49:04] Eseguo comando [write_project]: Analizza video dispensa
+[2026-11-18 11:49:04] Errore scrittura progetto: Unterminated string starting at: line 1 column 46 (char 45)
+[2026-11-18 11:49:06] Eseguo comando [write_project]: Analizza video dispensa
+[2026-11-18 11:49:06] Errore scrittura progetto: Unterminated string starting at: line 1 column 46 (char 45)
+[2026-11-18 11:50:10] Eseguo comando [write_project]: Aggiornamento dispensa da video
+[2026-11-18 11:50:10] Errore scrittura progetto: Unterminated string starting at: line 1 column 46 (char 45)
+[2026-11-18 11:50:17] Eseguo comando [write_project]: Aggiornamento dispensa da video
+[2026-11-18 11:50:17] Errore scrittura progetto: Unterminated string starting at: line 1 column 46 (char 45)
+[2026-11-18 11:50:30] Eseguo comando [write_project]: Aggiornamento dispensa da video
+[2026-11-18 11:50:30] Errore scrittura progetto: Unterminated string starting at: line 1 column 46 (char 45)
+[2026-11-18 11:50:33] Eseguo comando [write_project]: Aggiornamento dispensa da video
+[2026-11-18 11:50:33] Errore scrittura progetto: Unterminated string starting at: line 1 column 46 (char 45)
+[2026-11-18 11:50:37] Eseguo comando [write_project]: Aggiornamento dispensa da video
+[2026-11-18 11:50:37] Errore scrittura progetto: Unterminated string starting at: line 1 column 46 (char 45)
+[2026-11-18 11:50:41] Eseguo comando [write_project]: Aggiornamento dispensa da video
+[2026-11-18 11:50:41] Errore scrittura progetto: Unterminated string starting at: line 1 column 46 (char 45)
+[2026-11-18 11:50:46] Eseguo comando [write_project]: Aggiornamento dispensa da video
+[2026-11-18 11:50:46] Errore scrittura progetto: Unterminated string starting at: line 1 column 46 (char 45)

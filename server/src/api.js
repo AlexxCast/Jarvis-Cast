@@ -352,11 +352,11 @@ export async function handleApi(db, env, deps, request) {
         nowMs: ms,
         tz,
       });
-      return json({ activeWorkspace: active, state: statePayload(db, env, ms, tz) });
+      return json({ activeWorkspace: active, state: statePayload(db, ms, tz, env) });
     }
     if (path === '/api/workspace/exit' && method === 'POST') {
       workspace.exitWorkspace(db);
-      return json({ activeWorkspace: null, state: statePayload(db, env, ms, tz) });
+      return json({ activeWorkspace: null, state: statePayload(db, ms, tz, env) });
     }
     if (path === '/api/workspace/toggle' && method === 'POST') {
       const b = await body(request);
