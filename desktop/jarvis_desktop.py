@@ -9,6 +9,7 @@ i comandi multi-dispositivo mandati dallo smartphone o dal PC ("Jarvis apri Chro
 
 import ctypes
 import json
+import math
 import os
 import platform
 import shutil
@@ -114,11 +115,11 @@ CLOSE_EXE_MAP = {
 
 VK_MAP = {
     "ctrl": 0x11, "alt": 0x12, "shift": 0x10, "win": 0x5B,
-    "tab": 0x09, "enter": 0x0D, "esc": 0x1B, "space": 0x20,
+    "tab": 0x09, "enter": 0x0D, "esc": 0x1B, "space": 0x20, "backspace": 0x08,
     "left": 0x25, "up": 0x26, "right": 0x27, "down": 0x28,
     "pageup": 0x21, "pagedown": 0x22,
     "f4": 0x73, "f5": 0x74, "f11": 0x7A,
-    "c": 0x43, "d": 0x44, "t": 0x54, "v": 0x56, "w": 0x57, "x": 0x58, "z": 0x5A,
+    "a": 0x41, "c": 0x43, "d": 0x44, "f": 0x46, "t": 0x54, "v": 0x56, "w": 0x57, "x": 0x58, "z": 0x5A,
 }
 
 
@@ -564,6 +565,24 @@ def execute_pc_command(cmd: dict, log_fn, cfg: dict = None) -> None:
             log_fn(f"Errore scrittura testo: {e}")
         return
 
+    if kind == "find_on_page" and target and os.name == "nt":
+        try:
+            press_hotkey("ctrl+f")
+            time.sleep(0.12)
+            subprocess.run(["clip"], input=target.encode("utf-16le"), check=False)
+            time.sleep(0.08)
+            press_hotkey("ctrl+v")
+            time.sleep(0.1)
+            press_hotkey("enter")
+            time.sleep(0.15)
+            press_hotkey("esc")
+            if args == "open":
+                time.sleep(0.08)
+                press_hotkey("enter")
+        except Exception as e:
+            log_fn(f"Errore ricerca in pagina: {e}")
+        return
+
     if kind == "hotkey" and target:
         press_hotkey(target)
         return
@@ -746,14 +765,65 @@ class JarvisDesktopApp:
             bg="#39ff14", fg="#000000", relief="flat", padx=12, pady=5, command=self.send_command,
         ).pack(side="right")
 
-        # Log attività e risposte
-        self.log_box = tk.Text(root, bg="#000000", fg="#39ff14", font=("Consolas", 9), relief="solid", bd=1, height=14, wrap="word")
-        self.log_box.pack(fill="both", expand=True, padx=14, pady=(0, 12))
+        # HUD Futuristico a Celle Curve + Log attività
+        mid = tk.Frame(root, bg="#000000", padx=14)
+        mid.pack(fill="both", expand=True, pady=(0, 12))
+        self.hud = tk.Canvas(mid, width=180, height=180, bg="#000000", highlightthickness=1, highlightbackground="#1a4d1a")
+        self.hud.pack(side="left", padx=(0, 10), anchor="n")
+        self.hud_speed = 0.75
+        self.log_box = tk.Text(mid, bg="#000000", fg="#39ff14", font=("Consolas", 9), relief="solid", bd=1, height=14, wrap="word")
+        self.log_box.pack(side="right", fill="both", expand=True)
         self.log("Jarvis Desktop pronto. Chiudendo questa finestra il servizio continua in background.")
 
         self.root.protocol("WM_DELETE_WINDOW", self.on_close)
+        self.draw_hud()
         self.thread = threading.Thread(target=self.heartbeat_loop, daemon=True)
         self.thread.start()
+
+    def draw_hud(self) -> None:
+        if not self.running:
+            return
+        c = self.hud
+        c.delete("all")
+        cx, cy = 90, 90
+        t = time.time() * self.hud_speed
+
+        def stepped(val, step_deg=22):
+            i = math.floor(val)
+            f = val - i
+            m = (f / 0.35) ** 2 * (3 - 2 * (f / 0.35)) if f < 0.35 else 1.0
+            return (i + m) * step_deg
+
+        # Celle curve concentriche con caselle nodi figli che girano a scatti
+        rings = [
+            (36, 48, [(15, 70, 2), (125, 85, 2), (245, 75, 1)], 1.0, 1),
+            (54, 68, [(40, 80, 3), (170, 90, 2), (290, 55, 2)], 1.35, -1),
+            (73, 84, [(0, 65, 2), (110, 75, 2), (220, 85, 3)], 0.85, 1),
+        ]
+        for r_in, r_out, arcs, mult, d in rings:
+            rot = stepped(t * mult, 20) * d
+            r_mid = (r_in + r_out) / 2
+            for start, span, kids in arcs:
+                a0 = math.radians(start + rot)
+                a1 = math.radians(start + span + rot)
+                pts = []
+                steps = 10
+                for k in range(steps + 1):
+                    ang = a0 + (a1 - a0) * (k / steps)
+                    pts.extend([cx + math.cos(ang) * r_out, cy + math.sin(ang) * r_out])
+                for k in range(steps, -1, -1):
+                    ang = a0 + (a1 - a0) * (k / steps)
+                    pts.extend([cx + math.cos(ang) * r_in, cy + math.sin(ang) * r_in])
+                c.create_polygon(pts, outline="#39ff14", fill="#072207", width=1.4)
+                for j in range(kids):
+                    ka = a0 + (a1 - a0) * ((j + 1) / (kids + 1))
+                    kx = cx + math.cos(ka) * r_mid
+                    ky = cy + math.sin(ka) * r_mid
+                    c.create_rectangle(kx - 3, ky - 3, kx + 3, ky + 3, outline="#ccffcc", fill="#196619")
+
+        c.create_oval(cx - 26, cy - 26, cx + 26, cy + 26, outline="#39ff14", fill="#000000", width=2)
+        c.create_text(cx, cy, text="JARVIS", fill="#d4ffd4", font=("Consolas", 9, "bold"))
+        self.root.after(45, self.draw_hud)
 
     def on_close(self) -> None:
         self.running = False

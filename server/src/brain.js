@@ -228,7 +228,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
       memory.noteUse(db, coreHit.touched, ms);
     }
     return {
-      reply: coreHit.reply, expectReply: false, card: '', visual: coreHit.visual || null, photoRequest: null,
+      reply: coreHit.reply, expectReply: !!coreHit.expectReply, card: '', visual: coreHit.visual || null, photoRequest: null,
       model: 'jarvis-core', switched: false, actions: coreHit.actions, device: coreHit.device,
       tier: 'local', layoutChanged: false, touched: coreHit.touched, touchedLeaves: coreHit.touchedLeaves,
     };
@@ -273,13 +273,14 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
     }
   }
   const activeFocus = jarvisCore.getFocus(db, sessionId, ms);
+  const navActive = jarvisCore.getNavMode(db, sessionId, ms);
   const focusLine = jarvisCore.focusPromptLine(db, sessionId, ms);
   const parts = {
     core: activeWs
       ? `${activeWs.systemContext}\n\nData e ora: ${nowHuman(ms, tz)}. Sei dentro la modalità progetto "${activeWs.title}". Segui rigorosamente queste istruzioni e mantieni i formati richiesti.`
       : CORE_PROMPT(diary.profile.name, nowHuman(ms, tz)) + '\n\n' + mood.MOOD_PROMPT(mood.current(db, ms)),
     brief: activeWs ? '' : dietBrief(diary, today),
-    rules: [focusLine, (!activeWs && dietOn) ? DIET_RULES : '', UI_WORDS.test(userText) ? ui.uiPrompt(ui.loadLayout(db)) : '', UI_WORDS.test(userText) ? coder.codePrompt(env, db) : '', DEVICE_WORDS.test(userText) ? appsPrompt(db) : '', (/\b(pc|computer|desktop|windows|dispositiv\w*)\b/i.test(userText) || activeFocus?.device === 'pc') ? devices.devicesPrompt(db, ms) : '', phone.pendingContext(db, ms)].filter(Boolean).join('\n\n'),
+    rules: [focusLine, (!activeWs && dietOn) ? DIET_RULES : '', UI_WORDS.test(userText) ? ui.uiPrompt(ui.loadLayout(db)) : '', UI_WORDS.test(userText) ? coder.codePrompt(env, db) : '', DEVICE_WORDS.test(userText) ? appsPrompt(db) : '', (/\b(pc|computer|desktop|windows|dispositiv\w*)\b/i.test(userText) || activeFocus?.device === 'pc' || navActive) ? devices.devicesPrompt(db, ms) : '', phone.pendingContext(db, ms)].filter(Boolean).join('\n\n'),
     blocks: (!activeWs && dietOn) ? dietContext(diary, today) : [],
     memories: recalled.entries.map(m => `- [${m.id}] (${m.module}) ${m.text}`),
     moduleIndex: [mods.length ? 'MODULI DI MEMORIA ESISTENTI: ' + mods.map(m => `${m.name}${m.description ? ` (${m.description})` : ''} [${m.entries}]`).join('; ') : '',
@@ -486,7 +487,9 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
         done.applied.push(c.type);
       } catch (e) { logEvent(db, nowIso, 'error', `${c.type}: ${e.message}`); }
     }
-    result = { reply: parsed.reply, expectReply: parsed.expectReply, card: parsed.card, visual: done.visual || null, photoRequest: done.photoRequest, model: res.key, switched: res.switched, actions: done.applied, device: done.device, tier, layoutChanged: !!done.ui, rememberedIds: done.rememberedIds, autoLeaves };
+    const keepListening = !!(navActive || done.applied.includes('pc_action') || done.device.some(d => d.type === 'phone_task' || d.type === 'open_app')) && !parsed.actions.some(a => a?.kind === 'play_youtube');
+    if (done.applied.includes('pc_action') && !parsed.actions.some(a => a?.kind === 'play_youtube')) jarvisCore.setNavMode(db, sessionId, true, 'pc', ms);
+    result = { reply: parsed.reply, expectReply: parsed.expectReply || keepListening, card: parsed.card, visual: done.visual || null, photoRequest: done.photoRequest, model: res.key, switched: res.switched, actions: done.applied, device: done.device, tier, layoutChanged: !!done.ui, rememberedIds: done.rememberedIds, autoLeaves };
     sess.model = res.key;
   } catch (e) {
     logEvent(db, nowIso, 'error', `chat: ${e.message} ${(e.tried || []).join(' | ')}`);

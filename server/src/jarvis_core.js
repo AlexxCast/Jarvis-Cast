@@ -53,6 +53,23 @@ const WEB_SERVICES = {
 const LIVE_CARDS_KEY = 'liveCards';
 const LIVE_KINDS = new Set(['countdown', 'stopwatch', 'progress', 'counter', 'metric', 'checklist']);
 const FOCUS_TTL_MS = 15 * 60_000;
+const NAV_TTL_MS = 10 * 60_000;
+
+export function getNavMode(db, sessionId = 'main', nowMs = Date.now()) {
+  const n = kvGet(db, `navMode:${sessionId}`, null);
+  if (!n || !n.active || (nowMs - Number(n.updatedAt || 0)) > NAV_TTL_MS) return null;
+  return n;
+}
+
+export function setNavMode(db, sessionId = 'main', active = false, device = 'pc', nowMs = Date.now()) {
+  if (!active) {
+    kvSet(db, `navMode:${sessionId}`, null);
+    return null;
+  }
+  const next = { active: true, device, updatedAt: nowMs };
+  kvSet(db, `navMode:${sessionId}`, next);
+  return next;
+}
 
 /** Legge il puntatore gerarchico di contesto attivo per la sessione (es. dispositivo(pc(chrome · apri))). */
 export function getFocus(db, sessionId = 'main', nowMs = Date.now()) {
@@ -581,6 +598,16 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
   const clean = raw.replace(/^\W*(ehi|ciao|ok)?\W*jarvis\W*/i, '').replace(/\bniente\s+pi[uù]\s+fili\b/gi, '').trim();
   if (!clean) return null;
 
+  // 0b. Chiusura esplicita della navigazione continua ("a posto così", "basta così", "stop navigazione")
+  if (/^(?:ok\s+)?(?:siamo\s+)?(?:a\s+posto\s+cos[iì]|apposto\s+cos[iì]|basta\s+cos[iì]|perfetto\s+cos[iì]|stop\s+navigazione|esci\s+dalla\s+navigazione|va\s+bene\s+cos[iì])\W*$/i.test(clean)) {
+    setNavMode(db, sessionId, false);
+    return {
+      reply: 'Perfetto, signore. Resto in attesa.',
+      expectReply: false,
+      device: [], actions: [], touched: ['automazioni'], touchedLeaves: [],
+    };
+  }
+
   // 1a. Conferma salvataggio automatismo a step appena eseguito ("sì, ha funzionato" / "no")
   const skillConfirm = flows.confirmPendingSkill(db, sessionId, clean, nowMs);
   if (skillConfirm) {
@@ -962,6 +989,23 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
       devices.enqueueCommand(db, 'desktop', { kind: 'hotkey', target: 'win+d' }, nowMs);
       return { reply: 'Mostro il desktop sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
+    if (/^(?:clicca|invio|conferma|apri\s+questo|seleziona\s+questo)\s*$/i.test(withoutPc)) {
+      devices.enqueueCommand(db, 'desktop', { kind: 'hotkey', target: 'enter' }, nowMs);
+      setNavMode(db, sessionId, true, 'pc', nowMs);
+      return { reply: 'Confermo sul PC, signore.', expectReply: true, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+    }
+    if (/^(?:prossimo\s+elemento|avanti\s+tab|tab)\s*$/i.test(withoutPc)) {
+      devices.enqueueCommand(db, 'desktop', { kind: 'hotkey', target: 'tab' }, nowMs);
+      setNavMode(db, sessionId, true, 'pc', nowMs);
+      return { reply: 'Passo al prossimo elemento, signore.', expectReply: true, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+    }
+    const findPageMatch = /^(?:cerca\s+nella\s+pagina|clicca\s+su|apri\s+il\s+link|vai\s+sul\s+titolo)\s+(.+)$/i.exec(withoutPc);
+    if (findPageMatch) {
+      const q = findPageMatch[1].replace(/[.!?]+$/, '').trim();
+      devices.enqueueCommand(db, 'desktop', { kind: 'find_on_page', target: q, args: 'open' }, nowMs);
+      setNavMode(db, sessionId, true, 'pc', nowMs);
+      return { reply: `Cerco e seleziono "${q}" nella pagina, signore.`, expectReply: true, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+    }
 
     // Chiusura programmi / app / siti / finestre sul PC ("chiudi chrome sul pc", "no no chiudi chrome", "chiudi tutto")
     const cleanCloseSrc = withoutPc.replace(/^(?:(?:ok|no|s[iì]|ora|adesso|poi|dai)\s+){1,3}/i, '').trim();
@@ -1001,9 +1045,12 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
       return { reply: `Eseguo il comando sul PC, signore.`, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
 
-    // Far partire un video, un film o una canzone su YouTube sul PC (anche "apri youtube e fai partire un video sul pc")
+    // Far partire un video, un film o una canzone su YouTube sul PC (quando parte il video chiude la navigazione continua)
     if (/\b(fai\s+partire|fammi\s+partire|metti(?:mi)?|riproduci|cerca|ascolta|avvia)\b/i.test(withoutPc) && /\b(youtube|video|film|musica|canzon\w*|brano)\b/i.test(withoutPc)) {
-      return dispatchPcPlayYoutube(db, withoutPc, nowMs);
+      setNavMode(db, sessionId, false);
+      const r = dispatchPcPlayYoutube(db, withoutPc, nowMs);
+      r.expectReply = false;
+      return r;
     }
 
     // Apertura URL o ricerca sito/web sul PC ("cerca il sito amazon", "cerca meteo roma su google", "vai su wikipedia")
@@ -1051,6 +1098,8 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
           steps,
         }, nowMs);
         if (proposed) res.reply += ' Ha funzionato? Se sì, me lo conferma così salvo ogni step negli automatismi?';
+        setNavMode(db, sessionId, true, 'pc', nowMs);
+        res.expectReply = true;
         return res;
       }
     }

@@ -333,3 +333,7 @@ Jarvis diceva "ho aggiornato il piano" o "chiamo Marcolino" senza farlo.
 ## Workspace Adattivo di Progetto (`workspace.js`, v2.27)
 - Entrando in un progetto (`POST /api/workspace/enter`, pulsante `🎯 Apri Workspace` o caricando un file/PDF con `🎯 Attiva come Workspace Progetto`), Jarvis genera un `workspaceSpec` su misura (`kind`, `systemContext`, `widgets` con timer, checklist spuntabile, tabelle/regole, barre progresso e pulsanti rapidi).
 - Finchè il workspace è attivo, `brain.js` sostituisce il contesto generale con `systemContext` (es. regole DSA, livello, formato risposta, temi preferiti) e isola la chat nella sessione `proj:<id>`. All'uscita (`✕ Esci` o `"esci dal progetto"`) ripristina l'assetto standard.
+
+## HUD Celle Curve a Scatti & Navigazione Continua (`orb.js`, `jarvis_desktop.py`, `navMode`, v2.28)
+- `web/orb.js` e `desktop/jarvis_desktop.py` condividono l'estetica HUD a nucleo centrale `JARVIS` con celle curve concentriche, caselle dei nodi figli incastonate e rotazione a scatti cadenzati (`steppedAngle`).
+- Quando si controlla a distanza PC o Telefono, `navMode:<sessionId>` mantiene `expectReply: true` (ricezione continua in tempo reale per scorrere, cliccare, cercare nella pagina con `find_on_page`) finché non parte un video (`play_youtube`) o l'utente dice `"a posto così"`.
