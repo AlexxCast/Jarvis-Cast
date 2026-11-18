@@ -32,8 +32,8 @@ function orbState() {
 }
 function updateOrb() { orb.setState(orbState()); }
 
-// Umore di Jarvis: gioia → giallo/arancione, tensione → rosso/viola, calma → azzurro/blu.
-const MOOD_RGB = { gioia: [255, 170, 40], tensione: [210, 40, 150], calma: [40, 150, 255] };
+// Umore di Kestra dentro la sua palette viola/verde: gioia -> verde neon brillante, calma -> verde smeraldo/lilla, tensione -> viola/magenta intenso.
+const MOOD_RGB = { gioia: [110, 255, 120], tensione: [192, 38, 211], calma: [57, 255, 20] };
 const MOOD_BASE = { gioia: 0.45, tensione: 0.15, calma: 0.55 };
 function applyMood(m) {
   if (!m) return;
@@ -1357,7 +1357,9 @@ function render() {
   }
   const listening = !!(nativeJson('getConfig') || {}).listening;
   const title = { chat: 'Kestra', oggi: 'Oggi', cucina: 'Cucina', attivita: 'Attività', altro: 'Altro' }[store.tab];
-  app.append(h('header', { class: 'top' }, h('h1', {}, title),
+  app.append(h('header', { class: 'top' },
+    h('img', { src: '/logo.png', alt: '', class: 'brand-logo' }),
+    h('h1', { class: 'brand-title' }, title),
     native ? h('span', { class: 'muted small' }, listening ? 'in ascolto' : 'ascolto spento') : null, native ? h('span', { class: 'dot' + (listening ? ' on' : '') }) : null));
   if (store.tab === 'chat') app.append(...viewChat().filter(Boolean));
   else app.append(h('main', {}, { oggi: viewOggi, cucina: viewCucina, attivita: viewAttivita, altro: viewAltro }[store.tab]()));

@@ -381,57 +381,25 @@ export function createOrb() {
       }
     }
 
-    // Il nodo Kestra al centro: globo 3D con il simbolo ufficiale di Kestra (diamante + lame viola e 3 trattini verdi).
+    // Nucleo centrale pulito del globo 3D (senza loghetto dentro la sfera, colori dinamici per emozione)
     const fadeCenter = focused ? Math.max(0.25, 1 - (cur.zoom - 1) / (ZOOM - 1) * 0.75) : 1;
-    const cr = Math.min(w, hgt) * (compact ? 0.085 : 0.056) * breath * Math.min(1.3, scale);
+    const cr = Math.min(w, hgt) * (compact ? 0.07 : 0.045) * breath * Math.min(1.3, scale);
     const heat = center.heat;
     const g = ctx.createRadialGradient(center.sx, center.sy, 0, center.sx, center.sy, cr * 3.2);
-    g.addColorStop(0, `rgba(168,85,247,${(0.4 + heat * 0.2) * cur.glow * fadeCenter})`);
-    g.addColorStop(1, 'rgba(168,85,247,0)');
+    g.addColorStop(0, `rgba(${core},${(0.35 + heat * 0.2) * cur.glow * fadeCenter})`);
+    g.addColorStop(1, `rgba(${core},0)`);
     ctx.fillStyle = g;
     ctx.beginPath(); ctx.arc(center.sx, center.sy, cr * 3.2, 0, Math.PI * 2); ctx.fill();
     ctx.fillStyle = `rgba(5,2,10,${0.95 * fadeCenter})`;
-    ctx.strokeStyle = `rgba(168,85,247,${(0.8 + heat * 0.2) * cur.glow * fadeCenter})`;
+    ctx.strokeStyle = color(0.4 + heat * 0.3, (0.7 + heat * 0.3) * cur.glow * fadeCenter, tintAt(0));
     ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(center.sx, center.sy, cr, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-    ctx.strokeStyle = `rgba(57,255,20,${0.75 * cur.glow * fadeCenter})`;
-    ctx.lineWidth = 1.8;
-    ctx.beginPath(); ctx.arc(center.sx, center.sy, cr * 1.28, spinRing, spinRing + Math.PI * 0.7); ctx.stroke();
-    ctx.beginPath(); ctx.arc(center.sx, center.sy, cr * 1.28, spinRing + Math.PI, spinRing + Math.PI * 1.35); ctx.stroke();
-
-    // Simbolo di Kestra pulito a 3 punte al centro del globo
-    const sr = cr * 0.68;
-    const syTop = center.sy - sr * 0.95;
-    const syMid = center.sy - sr * 0.18;
-    const syBot = center.sy + sr * 0.92;
-    const sxL = center.sx - sr * 0.62;
-    const sxR = center.sx + sr * 0.62;
-    ctx.save();
-    ctx.globalAlpha = fadeCenter;
-    ctx.strokeStyle = '#c084fc';
-    ctx.lineWidth = Math.max(1.4, cr * 0.08);
-    ctx.lineJoin = 'round';
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(sxL, syMid); ctx.lineTo(center.sx, syTop); ctx.lineTo(sxR, syMid);
-    ctx.moveTo(sxL, syMid); ctx.lineTo(sxL, syBot); ctx.lineTo(sxR, syMid);
-    ctx.moveTo(sxR, syMid); ctx.lineTo(sxR, syBot); ctx.lineTo(sxL, syMid);
-    ctx.moveTo(sxL, syMid); ctx.lineTo(center.sx, syBot); ctx.lineTo(sxR, syMid);
-    ctx.stroke();
-    ctx.strokeStyle = '#39ff14';
-    ctx.lineWidth = Math.max(1.3, cr * 0.08);
-    ctx.beginPath();
-    ctx.moveTo(center.sx - sr * 0.17, syTop + sr * 0.40); ctx.lineTo(center.sx - sr * 0.17, syTop + sr * 0.58);
-    ctx.moveTo(center.sx + sr * 0.17, syTop + sr * 0.40); ctx.lineTo(center.sx + sr * 0.17, syTop + sr * 0.58);
-    ctx.moveTo(center.sx, syTop + sr * 0.64); ctx.lineTo(center.sx, syTop + sr * 0.82);
-    ctx.stroke();
-    ctx.restore();
-
-    if (!compact && !focused) {
-      ctx.font = '700 11px system-ui, sans-serif'; ctx.textAlign = 'center';
-      ctx.fillStyle = `rgba(216,180,254,${0.85 * cur.glow})`;
-      ctx.fillText('KESTRA', center.sx, center.sy + cr * 1.35 + 12);
-    }
+    ctx.strokeStyle = color(0.55, 0.8 * cur.glow * fadeCenter, tintAt(0));
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(center.sx, center.sy, cr * 1.35, spinRing, spinRing + Math.PI * 0.7); ctx.stroke();
+    ctx.beginPath(); ctx.arc(center.sx, center.sy, cr * 1.35, spinRing + Math.PI, spinRing + Math.PI * 1.35); ctx.stroke();
+    ctx.fillStyle = `rgba(225,255,220,${(0.75 + heat * 0.25) * fadeCenter})`;
+    ctx.beginPath(); ctx.arc(center.sx, center.sy, cr * 0.45, 0, Math.PI * 2); ctx.fill();
   }
 
   function start() { if (!raf) { last = performance.now(); raf = requestAnimationFrame(frame); } }
