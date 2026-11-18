@@ -811,8 +811,8 @@ class JarvisDesktopApp:
         for idx_r, (r_in, r_out, arcs, mult, d) in enumerate(rings):
             rot = stepped(t * mult, 20) * d
             r_mid = (r_in + r_out) / 2
-            col = "#a855f7" if idx_r % 2 == 0 else "#39ff14"
-            fill_c = "#1a082e" if idx_r % 2 == 0 else "#072207"
+            col = "#39ff14" if idx_r % 2 == 0 else "#a855f7"
+            fill_c = "#072207" if idx_r % 2 == 0 else "#1a082e"
             for start, span, kids in arcs:
                 a0 = math.radians(start + rot)
                 a1 = math.radians(start + span + rot)

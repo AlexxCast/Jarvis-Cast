@@ -116,9 +116,9 @@ export function createOrb() {
   let onPick = null;
   // Umore: colora la rete e gli impulsi (non lo sfondo). Un cambio parte da Jarvis e si propaga verso
   // l'esterno come un'onda; le emozioni secondarie colorano alcune zone e una parte degli impulsi.
-  const BASE = [168, 85, 247];
-  // Colore distintivo per i nodi dei percorsi autonomi (flow): verde neon e viola acceso.
-  const AUTO_CALM = [57, 255, 20], AUTO_AGITATED = [217, 70, 239];
+  const BASE = [57, 255, 20];
+  // Colore distintivo per i nodi dei percorsi autonomi (flow): viola acceso e verde smeraldo.
+  const AUTO_CALM = [168, 85, 247], AUTO_AGITATED = [57, 255, 20];
   let tintFrom = BASE, tintTo = BASE, tintA = 0, wave = 9, parts = [], tension = 0.15, agitation = 0;
   let fit = 1, rings = 3, maxRad = 1;                // la sfera si allontana quando i gusci crescono
   let angle = 0.4, tilt = 0.35, last = 0, spawn = 0, raf = 0, w = 0, hgt = 0, spinRing = 0;

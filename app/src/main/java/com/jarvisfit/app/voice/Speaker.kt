@@ -41,18 +41,14 @@ object Speaker {
                 if (langOk == TextToSpeech.LANG_MISSING_DATA || langOk == TextToSpeech.LANG_NOT_SUPPORTED) {
                     tts?.language = Locale.getDefault()
                 }
-                // Pitch leggermente più profondo e cadenza calibrata in stile Jarvis
-                tts?.setPitch(0.88f)
+                // Pitch naturale femminile per Kestra
+                tts?.setPitch(1.02f)
                 tts?.setSpeechRate(1.02f)
 
-                // Voce maschile italiana, se installata
+                // Voce femminile italiana più naturale disponibile
                 runCatching {
-                    val italianVoices = (tts?.voices ?: emptySet()).filter { it.locale.language == "it" && !it.isNetworkConnectionRequired }
-                    val maleVoice = italianVoices.firstOrNull { v ->
-                        val n = v.name.lowercase()
-                        (n.contains("male") || n.contains("-itd-") || n.contains("-ita-")) && !n.contains("female")
-                    } ?: italianVoices.firstOrNull { !it.name.lowercase().contains("female") }
-                    if (maleVoice != null) tts?.voice = maleVoice
+                    val femVoice = tts?.let { pickFemaleVoice(it, Locale.ITALIAN) }
+                    if (femVoice != null) tts?.voice = femVoice
                 }
 
                 tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
@@ -126,23 +122,23 @@ object Speaker {
         return if (out.isEmpty()) listOf(text to Locale.ITALIAN) else out
     }
 
-    private fun pickMaleVoice(engine: TextToSpeech, locale: Locale): android.speech.tts.Voice? {
+    private fun pickFemaleVoice(engine: TextToSpeech, locale: Locale): android.speech.tts.Voice? {
         val lang = locale.language
         val candidates = runCatching {
             (engine.voices ?: emptySet()).filter { it.locale.language == lang }
         }.getOrDefault(emptyList())
         if (candidates.isEmpty()) return null
+        val femaleHints = listOf("female", "#female", "-itc-", "-itb-", "-ita-", "-sfg-", "-tpf-", "elsa", "alice", "federica", "paola", "samantha", "jenny", "aria", "sara", "victoria")
         val maleHints = listOf("male", "#male", "-itd-", "-tpd-", "-iom-", "-iol-", "-rjs-", "cosimo", "luca", "diego", "david", "daniel", "george", "guy", "ryan")
-        val femaleHints = listOf("female", "#female", "-itc-", "-itb-", "-sfg-", "-tpf-", "elsa", "alice", "federica", "zira", "samantha", "jenny", "aria")
         val naturalHints = listOf("wavenet", "neural", "natural", "studio", "hd", "journey")
 
         fun score(v: android.speech.tts.Voice): Int {
             val n = v.name.lowercase()
-            if (femaleHints.any { n.contains(it) }) return -1000
-            var s = v.quality // HIGH=400, VERY_HIGH=500, NORMAL=300
-            if (maleHints.any { n.contains(it) }) s += 300
+            if (maleHints.any { n.contains(it) } && !n.contains("female")) return -1000
+            var s = v.quality
+            if (femaleHints.any { n.contains(it) }) s += 300
             if (naturalHints.any { n.contains(it) }) s += 200
-            if (!v.isNetworkConnectionRequired) s += 40 // piccola preferenza per stabilità offline a parità di qualità
+            if (!v.isNetworkConnectionRequired) s += 40
             if (v.locale.country.equals(locale.country, ignoreCase = true)) s += 30
             return s
         }
@@ -172,9 +168,9 @@ object Speaker {
             val isFirst = idx == 0
             val isLast = idx == segments.lastIndex
             runCatching {
-                val maleVoice = pickMaleVoice(engine, segLocale)
-                if (maleVoice != null) engine.voice = maleVoice else engine.language = segLocale
-                engine.setPitch(0.95f)
+                val femVoice = pickFemaleVoice(engine, segLocale)
+                if (femVoice != null) engine.voice = femVoice else engine.language = segLocale
+                engine.setPitch(1.02f)
                 engine.setSpeechRate(if (segLocale == Locale.US) 0.94f else 1.0f)
             }
             val queueMode = if (isFirst) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD

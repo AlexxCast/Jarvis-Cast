@@ -115,7 +115,7 @@ function frame(now) {
     const rot = steppedAngle(t + ringIdx * 0.35, hudFreq * (1 + ringIdx * 0.2), 0.34, ringIdx % 2 === 0 ? 1 : -1);
     const a0 = slotIdx * slotSpan + pad + rot;
     const a1 = a0 + arcLen;
-    const bCol = (i % 2 === 0 || b.auto) ? [168, 85, 247] : GREEN;
+    const bCol = (i % 2 === 0) ? GREEN : [168, 85, 247];
     const alpha = (0.5 + hb * 0.45 + (modeName === 'THINKING' ? 0.2 : 0)) * g;
 
     // Cella curva attorno al nucleo
