@@ -50,9 +50,8 @@ function layoutBranches(list, old) {
     // Livelli: i rami personali e leggeri stanno su un guscio interno, quelli pesanti e accessori fuori.
     const r = shellOf(b);
     const hub = { ...onSphere(lat, lon, r), lat, lon, rad: r, heat: prev ? prev.hub.heat : 0 };
-    // Dal centro: dritto verso l'esterno, poi una curva a gomito fino al nodo (come una pista).
-    const bend = { ...onSphere(lat + (i % 2 ? 0.25 : -0.25), lon - 0.2, r * 0.55), rad: r * 0.55 };
-    const spoke = [{ x: 0, y: 0, z: 0 }, bend, hub];
+    // Dal centro: linea dritta fino al nodo sulla sfera.
+    const spoke = [{ x: 0, y: 0, z: 0 }, hub];
     const all = (b.children || []).slice(0, 32);
     const ids = new Set(all.map(c => c.id));
     // Prima gli argomenti principali attorno al ramo, poi i sotto-argomenti attorno al loro argomento.
@@ -382,98 +381,30 @@ export function createOrb() {
       }
     }
 
-    // Nucleo centrale JARVIS + celle curve concentriche con nodi figli e rotazione a scatti (stile HUD futuristico)
+    // Il nodo Jarvis al centro: effetto globo 3D originale con anello doppio luminoso.
     const fadeCenter = focused ? Math.max(0.25, 1 - (cur.zoom - 1) / (ZOOM - 1) * 0.75) : 1;
-    const cr = Math.min(w, hgt) * (compact ? 0.14 : 0.085) * breath * Math.min(1.25, scale);
+    const cr = Math.min(w, hgt) * (compact ? 0.07 : 0.045) * breath * Math.min(1.3, scale);
     const heat = center.heat;
-
-    // Funzione di rotazione a scatti cadenzati (step-hold: scatta rapidamente poi fa una micro-pausa come se stesse pensando)
-    const steppedAngle = (t, freq, stepSize, dir = 1) => {
-      const p = t * freq;
-      const idx = Math.floor(p);
-      const frac = p - idx;
-      const move = frac < 0.35 ? (frac / 0.35) * (frac / 0.35) * (3 - 2 * (frac / 0.35)) : 1;
-      return (idx + move) * stepSize * dir;
-    };
-
-    if (!focused) {
-      const hudFreq = mode === 'thinking' ? 2.4 : mode === 'listening' ? 1.4 : mode === 'speaking' ? 1.8 : 0.65;
-      const hudList = branches.length ? branches.slice(0, 9) : [
-        { label: 'CORE', leaves: [{}, {}], hub: { heat: 0.4 }, rgb: tintAt(0) },
-        { label: 'AUTO', leaves: [{}, {}, {}], hub: { heat: 0.6 }, auto: true, rgb: autoRgb },
-        { label: 'MEM', leaves: [{}], hub: { heat: 0.3 }, rgb: tintAt(0.4) },
-        { label: 'SYS', leaves: [{}, {}], hub: { heat: 0.5 }, rgb: tintAt(0.7) },
-      ];
-      const ringsCount = compact ? 2 : 3;
-      for (let i = 0; i < hudList.length; i++) {
-        const b = hudList[i];
-        const ringIdx = i % ringsCount;
-        const rIn = cr * (1.28 + ringIdx * 0.52);
-        const rOut = rIn + cr * (compact ? 0.34 : 0.38);
-        const rMid = (rIn + rOut) * 0.5;
-        const group = hudList.filter((_, k) => k % ringsCount === ringIdx);
-        const slotIdx = group.indexOf(b);
-        const slotSpan = (Math.PI * 2) / Math.max(1, group.length);
-        const pad = 0.14;
-        const arcLen = Math.max(0.42, slotSpan - pad * 2);
-        const rot = steppedAngle(time + ringIdx * 0.37, hudFreq * (1 + ringIdx * 0.18), 0.32, ringIdx % 2 === 0 ? 1 : -1);
-        const a0 = slotIdx * slotSpan + pad + rot;
-        const a1 = a0 + arcLen;
-        const cellCol = b.auto ? autoRgb : (b.rgb || tintAt(0.2));
-        const cellAlpha = (0.38 + (b.hub?.heat || 0) * 0.45 + (mode === 'thinking' ? 0.2 : 0)) * cur.glow;
-
-        // Cella curva chiusa (arco esterno + arco interno + bordi radiali arrotondati)
-        ctx.beginPath();
-        ctx.arc(center.sx, center.sy, rOut, a0, a1);
-        ctx.arc(center.sx, center.sy, rIn, a1, a0, true);
-        ctx.closePath();
-        ctx.fillStyle = `rgba(${cellCol.map(Math.round).join(',')},${Math.min(0.22, cellAlpha * 0.25)})`;
-        ctx.fill();
-        ctx.strokeStyle = color(0.45 + (b.hub?.heat || 0) * 0.4, Math.min(0.95, cellAlpha), cellCol);
-        ctx.lineWidth = 1.4;
-        ctx.stroke();
-
-        // Caselle dei nodi figli incastonate dentro la cella curva
-        const kidsCount = Math.min(4, Math.max(1, (b.leaves || []).length));
-        const stepK = arcLen / (kidsCount + 1);
-        for (let k = 0; k < kidsCount; k++) {
-          const ka = a0 + stepK * (k + 1);
-          const kx = center.sx + Math.cos(ka) * rMid;
-          const ky = center.sy + Math.sin(ka) * rMid;
-          const boxW = Math.min(11, Math.max(5, cr * 0.24));
-          const boxH = Math.min(7, Math.max(4, (rOut - rIn) * 0.44));
-          ctx.save();
-          ctx.translate(kx, ky);
-          ctx.rotate(ka + Math.PI / 2);
-          ctx.fillStyle = `rgba(${cellCol.map(Math.round).join(',')},${Math.min(0.85, 0.35 + (b.hub?.heat || 0) * 0.5)})`;
-          ctx.strokeStyle = `rgba(220,255,210,${Math.min(0.95, 0.5 + cur.glow * 0.4)})`;
-          ctx.lineWidth = 1;
-          ctx.beginPath();
-          ctx.rect(-boxW / 2, -boxH / 2, boxW, boxH);
-          ctx.fill();
-          ctx.stroke();
-          ctx.restore();
-        }
-      }
-    }
-
-    const g = ctx.createRadialGradient(center.sx, center.sy, 0, center.sx, center.sy, cr * 2.4);
-    g.addColorStop(0, `rgba(${core},${(0.32 + heat * 0.2) * cur.glow * fadeCenter})`);
+    const g = ctx.createRadialGradient(center.sx, center.sy, 0, center.sx, center.sy, cr * 3.2);
+    g.addColorStop(0, `rgba(${core},${(0.35 + heat * 0.2) * cur.glow * fadeCenter})`);
     g.addColorStop(1, `rgba(${core},0)`);
     ctx.fillStyle = g;
-    ctx.beginPath(); ctx.arc(center.sx, center.sy, cr * 2.4, 0, Math.PI * 2); ctx.fill();
-    ctx.fillStyle = `rgba(0,0,0,${0.94 * fadeCenter})`;
-    ctx.strokeStyle = color(0.5 + heat * 0.3, (0.8 + heat * 0.2) * cur.glow * fadeCenter, tintAt(0));
+    ctx.beginPath(); ctx.arc(center.sx, center.sy, cr * 3.2, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = `rgba(0,0,0,${0.95 * fadeCenter})`;
+    ctx.strokeStyle = color(0.4 + heat * 0.3, (0.7 + heat * 0.3) * cur.glow * fadeCenter, tintAt(0));
     ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(center.sx, center.sy, cr, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-
-    // Scritta JARVIS dentro il nucleo centrale, come nel disegno
-    ctx.font = `700 ${Math.max(9, Math.round(cr * 0.44))}px system-ui, sans-serif`;
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.fillStyle = `rgba(220,255,210,${0.92 * fadeCenter})`;
-    ctx.fillText('JARVIS', center.sx, center.sy);
-    ctx.textBaseline = 'alphabetic';
+    ctx.strokeStyle = color(0.55, 0.8 * cur.glow * fadeCenter, tintAt(0));
+    ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.arc(center.sx, center.sy, cr * 1.35, spinRing, spinRing + Math.PI * 0.7); ctx.stroke();
+    ctx.beginPath(); ctx.arc(center.sx, center.sy, cr * 1.35, spinRing + Math.PI, spinRing + Math.PI * 1.35); ctx.stroke();
+    ctx.fillStyle = `rgba(225,255,215,${(0.75 + heat * 0.25) * fadeCenter})`;
+    ctx.beginPath(); ctx.arc(center.sx, center.sy, cr * 0.45, 0, Math.PI * 2); ctx.fill();
+    if (!compact && !focused) {
+      ctx.font = '600 11px system-ui, sans-serif'; ctx.textAlign = 'center';
+      ctx.fillStyle = `rgba(190,255,180,${0.75 * cur.glow})`;
+      ctx.fillText('JARVIS', center.sx, center.sy + cr * 1.35 + 12);
+    }
   }
 
   function start() { if (!raf) { last = performance.now(); raf = requestAnimationFrame(frame); } }

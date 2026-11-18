@@ -79,78 +79,87 @@ function frame(now) {
   glow.addColorStop(0, rgba(GREEN, 0.10 + mode.pulse * 0.10)); glow.addColorStop(1, rgba(GREEN, 0));
   ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(C, C, R, 0, Math.PI * 2); ctx.fill();
 
-  const beat = 1 + Math.sin(t * (3 + mode.speed * 2)) * 0.06 * mode.pulse;
-  const cr = W * 0.125 * beat;
-  const rInner = cr / R;
-
-  const line = (path, col, a, w, h = 0) => {
-    ctx.strokeStyle = rgba(col, a, h); ctx.lineWidth = w; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-    ctx.beginPath(); path.forEach((p, i) => { const q = P(p); i ? ctx.lineTo(q.x, q.y) : ctx.moveTo(q.x, q.y); }); ctx.stroke();
-  };
-  // Cerchietti cavi puliti (come nello schizzo a mano): interno scuro coprente così le piste si fermano sul bordo.
-  const dot = (p, r, col, a, h = 0, isAuto = false) => {
-    const q = P(p);
-    if (h > 0.15 || isAuto) {
-      ctx.fillStyle = rgba(col, (isAuto ? 0.24 : 0) + h * 0.18);
-      ctx.beginPath(); ctx.arc(q.x, q.y, r * 2.1, 0, Math.PI * 2); ctx.fill();
-    }
-    ctx.fillStyle = 'rgba(5, 14, 6, 0.96)';
-    ctx.strokeStyle = rgba(col, a, h); ctx.lineWidth = isAuto ? 2.4 : 2.1;
-    ctx.beginPath(); ctx.arc(q.x, q.y, r, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
-  };
-
+  const beat = 1 + Math.sin(t * (3 + mode.speed * 2)) * 0.05 * mode.pulse;
+  const cr = W * 0.14 * beat;
   const g = mode.glow;
-  for (const b of net) {
+
+  // Rotazione a scatti cadenzati (come se stesse pensando)
+  const steppedAngle = (timeVal, freq, stepSize, dir = 1) => {
+    const p = timeVal * freq;
+    const idx = Math.floor(p);
+    const frac = p - idx;
+    const move = frac < 0.35 ? (frac / 0.35) * (frac / 0.35) * (3 - 2 * (frac / 0.35)) : 1;
+    return (idx + move) * stepSize * dir;
+  };
+
+  const hudFreq = modeName === 'THINKING' ? 2.6 : modeName === 'LISTENING' ? 1.5 : modeName === 'SPEAKING' ? 1.9 : 0.7;
+  const cells = net.length ? net.slice(0, 9) : [
+    { id: 'c1', auto: false, leaves: [{}, {}] },
+    { id: 'c2', auto: true, leaves: [{}, {}, {}] },
+    { id: 'c3', auto: false, leaves: [{}] },
+    { id: 'c4', auto: false, leaves: [{}, {}] },
+  ];
+  const ringsCount = 3;
+  for (let i = 0; i < cells.length; i++) {
+    const b = cells[i];
     const hb = heat.get(b.id) || 0;
+    const ringIdx = i % ringsCount;
+    const rIn = cr * (1.28 + ringIdx * 0.56);
+    const rOut = rIn + cr * 0.4;
+    const rMid = (rIn + rOut) * 0.5;
+    const group = cells.filter((_, k) => k % ringsCount === ringIdx);
+    const slotIdx = group.indexOf(b);
+    const slotSpan = (Math.PI * 2) / Math.max(1, group.length);
+    const pad = 0.14;
+    const arcLen = Math.max(0.45, slotSpan - pad * 2);
+    const rot = steppedAngle(t + ringIdx * 0.35, hudFreq * (1 + ringIdx * 0.2), 0.34, ringIdx % 2 === 0 ? 1 : -1);
+    const a0 = slotIdx * slotSpan + pad + rot;
+    const a1 = a0 + arcLen;
     const bCol = b.auto ? autoCol : GREEN;
-    const ang = Math.atan2(b.hub.y, b.hub.x);
-    const spokeFromRing = [{ x: Math.cos(ang) * rInner, y: Math.sin(ang) * rInner }, b.hub];
-    line(spokeFromRing, bCol, (0.55 + hb * 0.45) * g, 2.1 + hb * 1.2, hb);
-    for (const l of b.leaves) {
-      const hl = Math.max(heat.get(l.id) || 0, hb * 0.4);
-      const lCol = (l.auto || b.auto) ? autoCol : LEAF;
-      line(l.path, lCol, (0.48 + hl * 0.52) * g, 1.8 + hl * 1.1, hl);
+    const alpha = (0.48 + hb * 0.45 + (modeName === 'THINKING' ? 0.2 : 0)) * g;
+
+    // Cella curva attorno al nucleo
+    ctx.beginPath();
+    ctx.arc(C, C, rOut, a0, a1);
+    ctx.arc(C, C, rIn, a1, a0, true);
+    ctx.closePath();
+    ctx.fillStyle = rgba(bCol, Math.min(0.26, alpha * 0.28), hb);
+    ctx.fill();
+    ctx.strokeStyle = rgba(bCol, Math.min(0.96, alpha), hb);
+    ctx.lineWidth = 1.6;
+    ctx.stroke();
+
+    // Caselle nodi figli incastonate dentro la cella curva
+    const kidsCount = Math.min(4, Math.max(1, (b.leaves || []).length));
+    const stepK = arcLen / (kidsCount + 1);
+    for (let k = 0; k < kidsCount; k++) {
+      const ka = a0 + stepK * (k + 1);
+      const kx = C + Math.cos(ka) * rMid;
+      const ky = C + Math.sin(ka) * rMid;
+      ctx.save();
+      ctx.translate(kx, ky);
+      ctx.rotate(ka + Math.PI / 2);
+      ctx.fillStyle = rgba(bCol, Math.min(0.85, 0.4 + hb * 0.5), hb);
+      ctx.strokeStyle = rgba(LEAF, Math.min(0.98, 0.7 + g * 0.25), hb);
+      ctx.lineWidth = 1.1;
+      ctx.beginPath();
+      ctx.rect(-4.5, -3, 9, 6);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
     }
   }
 
-  const keep = [];
-  for (const s of sparks) {
-    s.t += dt * s.speed * (0.6 + mode.speed * 0.5);
-    if (s.t >= 1) { if (s.next) keep.push(s.next); continue; }
-    if (s.t >= 0) {
-      const q = P(pointAt(s.path, s.t));
-      const sc = s.auto ? autoCol : GREEN;
-      ctx.fillStyle = rgba(sc, 0.22); ctx.beginPath(); ctx.arc(q.x, q.y, 4.5, 0, Math.PI * 2); ctx.fill();
-      ctx.fillStyle = rgba(sc, 0.95, 0.8); ctx.beginPath(); ctx.arc(q.x, q.y, 2, 0, Math.PI * 2); ctx.fill();
-    }
-    keep.push(s);
-  }
-  sparks = keep.slice(-40);
-  if (net.length && t > nextFire) {
-    const hot = net.filter(b => heat.get(b.id));
-    const pool = hot.length && Math.random() < 0.7 ? hot : net;
-    fire(pool[Math.floor(Math.random() * pool.length)]);
-    nextFire = t + 1.4 / (0.4 + mode.speed);
-  }
-
-  for (const b of net) {
-    const hb = heat.get(b.id) || 0;
-    const bCol = b.auto ? autoCol : GREEN;
-    for (const l of b.leaves) {
-      const hl = Math.max(heat.get(l.id) || 0, hb * 0.3);
-      const isAuto = !!(l.auto || b.auto);
-      dot(l, (l.sub ? 3.8 : 4.6) + hl * 1.2, isAuto ? autoCol : LEAF, (0.75 + hl * 0.25) * g, hl, isAuto);
-    }
-    dot(b.hub, 5.8 + hb * 1.5, bCol, (0.88 + hb * 0.12) * g, hb, b.auto);
-  }
-
-  // Anello centrale Jarvis cavo (doppio tratto marcato come nello schizzo a mano).
+  // Nucleo centrale JARVIS
   ctx.fillStyle = 'rgba(5, 14, 6, 0.97)';
   ctx.beginPath(); ctx.arc(C, C, cr, 0, Math.PI * 2); ctx.fill();
-  ctx.strokeStyle = rgba(GREEN, 0.96 * g); ctx.lineWidth = 3.2;
+  ctx.strokeStyle = rgba(GREEN, 0.96 * g); ctx.lineWidth = 2.6;
   ctx.beginPath(); ctx.arc(C, C, cr, 0, Math.PI * 2); ctx.stroke();
-  ctx.strokeStyle = rgba(GREEN, 0.52 * g); ctx.lineWidth = 1.4;
-  ctx.beginPath(); ctx.arc(C, C, cr * 0.78, 0, Math.PI * 2); ctx.stroke();
+  ctx.font = `700 ${Math.max(8, Math.round(cr * 0.42))}px system-ui, sans-serif`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = rgba([220, 255, 210], 0.94 * g);
+  ctx.fillText('JARVIS', C, C);
+  ctx.textBaseline = 'alphabetic';
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);

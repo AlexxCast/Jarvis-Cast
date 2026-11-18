@@ -145,3 +145,4 @@
 [2026-11-18 10:50:13] App 'Warm' non trovata sul PC (nessun popup aperto).
 [2026-11-18 10:53:40] Errore heartbeat: <urlopen error _ssl.c:1063: The handshake operation timed out>
 [2026-11-18 10:54:35] Errore heartbeat: The read operation timed out
+[2026-11-18 11:10:11] Errore heartbeat: <urlopen error _ssl.c:1063: The handshake operation timed out>
