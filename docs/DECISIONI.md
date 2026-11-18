@@ -406,3 +406,10 @@ Diagnosi fatta leggendo i 1.589 messaggi salvati. Decisioni:
 
 ### Errori 500 muti (2026-11-18)
 Se il Durable Object si blocca (riavvio durante un aggiornamento, limite di CPU o memoria, migrazione fallita), Cloudflare rispondeva con una pagina 500 senza dettagli e l'app mostrava solo "Errore 500". Ora `server/src/forward.js` riprova una volta gli errori passeggeri e altrimenti risponde 503 con il motivo vero; il Durable Object risponde sempre in JSON anche se fallisce la migrazione all'avvio. Se l'errore torna, il testo mostrato dall'app dice cosa è successo.
+
+### Limite di scritture di Cloudflare (2026-11-18)
+Il vero motivo dell'"Errore 500": "Exceeded allowed rows written in Durable Objects free tier". Il piano gratuito concede 100.000 righe scritte al giorno (si azzera a mezzanotte UTC). Il programma del PC manda un battito ogni 2 secondi da due cicli diversi e ogni battito riscriveva `devicesRegistry`: circa 86.000 scritture al giorno da solo.
+- `devices.js`: lo stato più recente dei dispositivi resta in memoria; nel database si salva solo se cambiano nome, piattaforma, app o profili, oppure ogni 5 minuti. Un'ora simulata di traffico (PC, telefono, app, battito) ora fa circa 40 scritture invece di 3.600.
+- `db.js`: la migrazione salva la firma dello schema e all'avvio non riscrive nulla se è uguale.
+- Con il limite esaurito l'app si apre in sola lettura e mostra un messaggio chiaro invece di "Errore 500".
+Regola: niente scritture nel database a ogni richiesta frequente (battiti, polling); tenere in memoria e salvare a intervalli.

@@ -1,6 +1,6 @@
 // API HTTP di Jarvis (gira dentro il Durable Object, una richiesta alla volta).
 
-import { kvGet, kvSet, logEvent } from './db.js';
+import { kvGet, kvSet, logEvent, WRITE_LIMIT_RE, friendlyError } from './db.js';
 import { handleChat, isAddressed, applyActions, addMessage } from './brain.js';
 import { loadDiary, saveDiary, mergeLegacy, patchProfile, DIET_ACTIONS } from './diet.js';
 import * as N from './nutrition.js';
@@ -506,7 +506,8 @@ export async function handleApi(db, env, deps, request) {
     }
     return bad('non trovato', 404);
   } catch (e) {
-    logEvent(db, nowIsoOf(deps.now(), tz), 'error', `${method} ${path}: ${e.message}`);
+    try { logEvent(db, nowIsoOf(deps.now(), tz), 'error', `${method} ${path}: ${e.message}`); } catch { /* database in sola lettura */ }
+    if (WRITE_LIMIT_RE.test(e.message || '')) return bad(friendlyError(e), 503);
     return bad(e.message || 'errore interno', /JSON|grande/.test(e.message || '') ? 400 : 500);
   }
 }

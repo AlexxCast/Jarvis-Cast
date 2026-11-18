@@ -2,7 +2,7 @@
 // che custodisce database, memoria e allarmi (promemoria e compiti in background).
 
 import { DurableObject } from 'cloudflare:workers';
-import { wrapDurableSql, migrate } from './db.js';
+import { wrapDurableSql, migrate, friendlyError, WRITE_LIMIT_RE } from './db.js';
 import { handleApi } from './api.js';
 import * as agenda from './agenda.js';
 import * as jobs from './jobs.js';
@@ -44,7 +44,10 @@ export class JarvisDO extends DurableObject {
     // Il battito parte alla prima richiesta e poi si mantiene da solo nell'allarme.
     if (this.bootError) {
       try { migrate(this.db); this.bootError = null; } catch (e) {
-        return Response.json({ error: `Errore all'avvio del database: ${String(e?.message || e).slice(0, 200)}` }, { status: 500 });
+        // Con il limite di scritture esaurito il database si legge ancora: l'app si apre in sola lettura.
+        if (!WRITE_LIMIT_RE.test(String(e?.message || e))) {
+          return Response.json({ error: `Errore all'avvio del database: ${friendlyError(e).slice(0, 240)}` }, { status: 500 });
+        }
       }
     }
     if (!this.beat) { this.beat = true; this.ctx.waitUntil(this.schedule(Date.now() + 15 * 60_000)); }
@@ -53,7 +56,7 @@ export class JarvisDO extends DurableObject {
     } catch (e) {
       // Errore fuori dal gestore (per esempio mentre si registra un altro errore): risposta leggibile, mai una 500 muta.
       console.error('Errore nel Durable Object:', e?.stack || e);
-      return Response.json({ error: `Errore interno: ${String(e?.message || e).slice(0, 200)}` }, { status: 500 });
+      return Response.json({ error: `Errore interno: ${friendlyError(e).slice(0, 240)}` }, { status: 500 });
     }
   }
 

@@ -10,8 +10,21 @@ const QUEUE_KEY = 'devicesQueue';
 const HISTORY_KEY = 'devicesHistory';
 const ONLINE_TTL_MS = 45_000;
 
-export function listDevices(db, nowMs = Date.now()) {
+// Il PC manda un battito ogni 2 secondi (anche due programmi insieme): scriverlo ogni volta nel database
+// consumava da solo quasi 90.000 scritture al giorno, oltre il limite gratuito di Cloudflare (100.000).
+// L'ultimo stato vive in memoria e si salva solo quando cambia qualcosa di importante o ogni 5 minuti.
+const PERSIST_MS = 5 * 60_000;
+const live = new WeakMap(); // db → Map(id → record più recente)
+const liveOf = (db) => { let m = live.get(db); if (!m) { m = new Map(); live.set(db, m); } return m; };
+
+function storedDevices(db) {
   const raw = kvGet(db, DEVICES_KEY, []);
+  const mem = liveOf(db);
+  return raw.map(d => (mem.has(d.id) && Number(mem.get(d.id).lastSeen) > Number(d.lastSeen || 0) ? mem.get(d.id) : d));
+}
+
+export function listDevices(db, nowMs = Date.now()) {
+  const raw = storedDevices(db);
   return raw.map(d => ({
     ...d,
     online: nowMs - Number(d.lastSeen || 0) <= ONLINE_TTL_MS,
@@ -35,7 +48,8 @@ export function heartbeat(db, payload = {}, nowMs = Date.now()) {
   const apps = Array.isArray(payload.apps) ? payload.apps.map(a => String(a || '').trim().slice(0, 50)).filter(Boolean).slice(0, 120) : undefined;
   const profiles = Array.isArray(payload.profiles) ? payload.profiles.map(p => String(p || '').trim().slice(0, 60)).filter(Boolean).slice(0, 20) : undefined;
 
-  const list = kvGet(db, DEVICES_KEY, []);
+  const saved = kvGet(db, DEVICES_KEY, []);
+  const list = storedDevices(db);
   const existing = list.find(d => d.id === id || (d.kind === kind && kind === 'desktop'));
   const record = {
     id: existing?.id || id,
@@ -47,8 +61,14 @@ export function heartbeat(db, payload = {}, nowMs = Date.now()) {
     profiles: profiles || existing?.profiles || [],
     lastSeen: nowMs,
   };
-  const updated = [record, ...list.filter(d => d.id !== record.id)].slice(0, 12);
-  kvSet(db, DEVICES_KEY, updated);
+  liveOf(db).set(record.id, record);
+  const before = saved.find(d => d.id === record.id);
+  const same = (a, b) => JSON.stringify(a || []) === JSON.stringify(b || []);
+  const important = !before || before.name !== record.name || before.platform !== record.platform || before.kind !== record.kind
+    || !same(before.apps, record.apps) || !same(before.profiles, record.profiles);
+  if (important || nowMs - Number(before.lastSeen || 0) >= PERSIST_MS) {
+    kvSet(db, DEVICES_KEY, [record, ...list.filter(d => d.id !== record.id)].slice(0, 12));
+  }
 
   // Consegna e svuota i comandi in coda per questo dispositivo (solo se poll !== false, così la GUI non li ruba al demone).
   const shouldPoll = payload.poll !== false;
