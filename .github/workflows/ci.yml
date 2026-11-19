@@ -23,6 +23,8 @@ jobs:
           node-version: 22
       - run: npm test
       - run: node --check web/app.js
+      # Ascolto dal microfono del PC: logica della chiamata e rilevatore di voce (riconoscimento finto).
+      - run: pip install numpy && cd desktop && python -m unittest test_ascolto && python -m py_compile jarvis_desktop.py
 
   android:
     name: App Android (test e build)
@@ -34,5 +36,10 @@ jobs:
           distribution: temurin
           java-version: 17
       - uses: gradle/actions/setup-gradle@v4
+      # Riconoscimento forte di "Kestra": modello e librerie sherpa-onnx (se mancano l'app usa il metodo di Android).
+      - name: Scarica il riconoscimento della parola Kestra
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash scripts/fetch_kws.sh
       # gradle.properties punta al JDK del PC di sviluppo: in CI si usa quello appena installato.
       - run: ./gradlew --no-daemon "-Dorg.gradle.java.home=$JAVA_HOME" testDebugUnitTest assembleDebug

@@ -85,6 +85,8 @@ class JarvisBridge(
         put("listening", Settings.listeningEnabled)
         put("speakReplies", Settings.speakReplies)
         put("sensitivity", Settings.sensitivity)
+        put("strongWake", Settings.strongWake)
+        put("strongWakeReady", com.jarvisfit.app.voice.KestraKws.ready(activity))
         put("micGuard", Settings.micGuard)
         put("overlay", Settings.overlay)
         put("overlayAllowed", com.jarvisfit.app.device.Overlay.allowed(activity))
@@ -120,6 +122,14 @@ class JarvisBridge(
 
     @JavascriptInterface
     fun setMicGuard(on: Boolean) { Settings.micGuard = on }
+
+    @JavascriptInterface
+    fun setStrongWake(on: Boolean) {
+        Settings.strongWake = on
+        // Spento: il controllo anti-blocco del servizio riparte in pochi secondi col riconoscimento di Android.
+        // Acceso: lo usa dal prossimo giro di ascolto.
+        if (!on) com.jarvisfit.app.voice.KestraKws.stop()
+    }
 
     @JavascriptInterface
     fun setSensitivity(value: Double) { Settings.sensitivity = value.toFloat().coerceIn(0f, 1f) }

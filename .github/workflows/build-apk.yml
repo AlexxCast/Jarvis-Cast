@@ -10,6 +10,8 @@ on:
       - "*.kts"
       - "gradle.properties"
       - ".github/workflows/build-apk.yml"
+      - "scripts/fetch_kws.sh"
+      - "scripts/kws_keywords.py"
   workflow_dispatch:
 
 permissions:
@@ -46,6 +48,11 @@ jobs:
             echo "::warning::Segreto DEBUG_KEYSTORE_B64 assente: l'APK sarà firmato con una chiave diversa da quella del telefono."
           fi
 
+      # Riconoscimento forte di "Kestra": modello e librerie sherpa-onnx (se mancano l'app usa il metodo di Android).
+      - name: Scarica il riconoscimento della parola Kestra
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: bash scripts/fetch_kws.sh
       # gradle.properties punta al JDK del PC di sviluppo: qui si usa quello appena installato.
       - name: Compila APK
         run: ./gradlew --no-daemon "-Dorg.gradle.java.home=$JAVA_HOME" assembleDebug

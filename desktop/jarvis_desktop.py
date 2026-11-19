@@ -184,17 +184,19 @@ def get_pc_metrics() -> dict:
     return {"cpu": 12, "ram": ram_pct, "activeWindow": active_win}
 
 
-def speak_tts(text: str) -> None:
-    """Legge ad alta voce sul PC tramite il sintetizzatore vocale nativo di Windows."""
+def speak_tts(text: str, wait: bool = False) -> None:
+    """Legge ad alta voce sul PC tramite il sintetizzatore vocale nativo di Windows (wait: aspetta che finisca)."""
     if not text or os.name != "nt":
         return
     clean = text.replace('"', " ").replace("'", " ").replace("\n", " ").strip()[:400]
     cmd = f'Add-Type -AssemblyName System.Speech; (New-Object System.Speech.Synthesis.SpeechSynthesizer).Speak("{clean}")'
     try:
-        subprocess.Popen(
-            ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", cmd],
-            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
-        )
+        args = ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", cmd]
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        if wait:
+            subprocess.run(args, creationflags=flags, timeout=90)
+        else:
+            subprocess.Popen(args, creationflags=flags)
     except Exception:
         pass
 
@@ -675,7 +677,7 @@ def execute_pc_command(cmd: dict, log_fn, cfg: dict = None) -> None:
             log_fn(f"Impossibile aprire '{target}': {e}")
 
 
-def api_call(cfg: dict, method: str, path: str, payload: dict = None) -> dict:
+def api_call(cfg: dict, method: str, path: str, payload: dict = None, timeout: float = 15) -> dict:
     base = cfg.get("server_url", "").strip().rstrip("/")
     token = cfg.get("server_token", "").strip()
     if not base or not token:
@@ -693,7 +695,7 @@ def api_call(cfg: dict, method: str, path: str, payload: dict = None) -> dict:
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
     try:
-        with urllib.request.urlopen(req, timeout=15) as resp:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
         body_txt = ""
@@ -772,6 +774,14 @@ class JarvisDesktopApp:
             bg="#39ff14", fg="#000000", relief="flat", padx=8, pady=4, command=self.save_and_connect,
         ).grid(row=0, column=2, rowspan=2, padx=4)
         cfg_frame.columnconfigure(1, weight=1)
+
+        # Ascolto dal microfono del PC
+        self.listen_var = tk.BooleanVar(value=bool(self.cfg.get("listen")))
+        tk.Checkbutton(
+            cfg_frame, text='Ascolta "Kestra" dal microfono del PC', variable=self.listen_var, command=self.toggle_listen,
+            fg="#39ff14", bg="#000000", selectcolor="#000000", activebackground="#000000", activeforeground="#39ff14",
+            font=("Segoe UI", 9),
+        ).grid(row=2, column=0, columnspan=3, sticky="w", pady=(4, 0))
 
         # Chat / Barra di comando diretta
         cmd_frame = tk.Frame(root, bg="#000000", padx=14)
@@ -869,6 +879,29 @@ class JarvisDesktopApp:
         save_config(self.cfg)
         self.log("Configurazione salvata. Verifica connessione a Jarvis Cloud...")
         threading.Thread(target=self.ping_once, daemon=True).start()
+
+    def toggle_listen(self) -> None:
+        on = bool(self.listen_var.get())
+        if on:
+            try:
+                import kestra_ascolto
+                missing = kestra_ascolto.missing_dependencies()
+            except Exception as e:
+                missing = str(e)
+            if missing:
+                self.listen_var.set(False)
+                messagebox.showinfo(
+                    "Ascolto dal PC",
+                    "Per ascoltare dal microfono servono alcuni componenti (una volta sola).\n\n"
+                    "Fai doppio clic su Installa_Ascolto.bat nella cartella di Kestra Desktop, poi riattiva questa casella.\n\n"
+                    f"Mancano: {missing}",
+                )
+                return
+        self.cfg = load_config()
+        self.cfg["listen"] = on
+        save_config(self.cfg)
+        ensure_bg_daemon()
+        self.log("Ascolto dal microfono attivato: parte in background entro pochi secondi." if on else "Ascolto dal microfono disattivato.")
 
     def ping_once(self) -> None:
         try:
@@ -975,6 +1008,32 @@ def poll_wait(res) -> float:
 
 DAEMON_PORT = 47621
 LOG_PATH = DIR / "jarvis_bg.log"
+# Cambia a ogni aggiornamento del demone: la finestra riavvia un demone vecchio rimasto acceso.
+DAEMON_VERSION = "2026-11-19-ascolto"
+VERSION_PATH = DIR / "jarvis_bg.version"
+
+
+def restart_old_daemon() -> None:
+    """Un demone avviato con il programma vecchio continua a girare con il codice vecchio: lo chiude."""
+    if not is_bg_running():
+        return
+    try:
+        if VERSION_PATH.read_text(encoding="utf-8").strip() == DAEMON_VERSION:
+            return
+    except Exception:
+        pass
+    if os.name != "nt":
+        return
+    try:
+        flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+        out = subprocess.run(["netstat", "-ano", "-p", "TCP"], capture_output=True, text=True, creationflags=flags, timeout=10).stdout
+        for line in out.splitlines():
+            parts = line.split()
+            if len(parts) >= 5 and parts[1] == f"127.0.0.1:{DAEMON_PORT}" and parts[3].upper() in ("LISTENING", "IN ASCOLTO"):
+                subprocess.run(["taskkill", "/PID", parts[-1], "/F"], capture_output=True, creationflags=flags, timeout=10)
+        time.sleep(1.0)
+    except Exception:
+        pass
 
 
 def is_bg_running() -> bool:
@@ -1006,6 +1065,37 @@ def bg_log(msg: str) -> None:
         pass
 
 
+def manage_listener(listener, cfg: dict):
+    """Accende o spegne l'ascolto dal microfono secondo la casella nella finestra (config "listen")."""
+    want = bool(cfg.get("listen")) and bool(cfg.get("server_url")) and bool(cfg.get("server_token"))
+    if listener and listener.alive and not want:
+        listener.stop()
+        bg_log("Ascolto dal microfono spento.")
+        return None
+    if want and not (listener and listener.alive):
+        try:
+            import kestra_ascolto
+            missing = kestra_ascolto.missing_dependencies()
+            if missing:
+                bg_log(f"Ascolto non avviato: mancano {missing} (esegui Installa_Ascolto.bat).")
+                cfg["listen"] = False
+                save_config(cfg)
+                return None
+
+            def send(text, followup):
+                return api_call(load_config(), "POST", "/chat", {"text": text, "session": "main", "source": "voice", "followup": followup}, timeout=60)
+
+            listener = kestra_ascolto.Listener(
+                send=send, speak=lambda t: speak_tts(t, wait=True), log=bg_log,
+                model_size=cfg.get("listen_model", "small"), device=cfg.get("listen_device"),
+            )
+            listener.start()
+        except Exception as e:
+            bg_log(f"Ascolto non avviato: {e}")
+            return None
+    return listener
+
+
 def run_background_daemon() -> None:
     """Demone silenzioso in background: tiene il PC connesso anche ad app chiusa e dopo il riavvio."""
     lock_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -1024,14 +1114,20 @@ def run_background_daemon() -> None:
                 break
 
     threading.Thread(target=accept_loop, daemon=True).start()
+    try:
+        VERSION_PATH.write_text(DAEMON_VERSION, encoding="utf-8")
+    except Exception:
+        pass
     bg_log("Demone Jarvis Desktop avviato in background.")
     pc_name = f"PC {socket.gethostname()}"
     plat = f"{platform.system()} {platform.release()}"
     apps = ["Chrome", "Edge", "VS Code", "Esplora File", "PowerShell", "Blocco Note", "Calcolatrice", "Spotify"]
 
     last_err = ""
+    listener = None
     while True:
         cfg = load_config()
+        listener = manage_listener(listener, cfg)
         if cfg.get("server_url") and cfg.get("server_token"):
             try:
                 res = api_call(
@@ -1068,6 +1164,7 @@ if __name__ == "__main__":
     if "--bg" in sys.argv:
         run_background_daemon()
     else:
+        restart_old_daemon()
         ensure_bg_daemon()
         root = tk.Tk()
         app = JarvisDesktopApp(root)
