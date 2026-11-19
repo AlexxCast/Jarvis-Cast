@@ -116,6 +116,8 @@ class MainActivity : ComponentActivity() {
     override fun onResume() {
         super.onResume()
         com.jarvisfit.app.device.Overlay.appVisible = true
+        // Con l'app davanti Android ridà al servizio il microfono vero (serve al riconoscimento forte di "Kestra").
+        com.jarvisfit.app.voice.JarvisService.refresh(this)
     }
 
     override fun onPause() {

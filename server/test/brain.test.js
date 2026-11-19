@@ -378,6 +378,11 @@ test('umore: le emozioni spostano gli ormoni, che tornano piano alla quiete; ent
   assert.match(systemOf(f.calls[0]), /STATO D'ANIMO/);
   const state = await (await handleApi(db, ENV, deps(f), new Request('https://x/api/state'))).json();
   assert.ok(state.mood.tensione > 0.3);
+  // La confusione è un ormone suo (colora i raggi di arancione rosato).
+  mood.feel(db, 'dubbio', 1, T0 + 24 * H);
+  const lost = mood.current(db, T0 + 24 * H);
+  assert.equal(lost.dominant, 'confusione');
+  assert.ok(lost.confusione > 0.35);
 });
 
 test('promemoria legati a un luogo: salvati da telefono, consegnati all\'arrivo e mai dal timer', async () => {

@@ -458,3 +458,23 @@ Anche con la 2.34 il Capo doveva chiamarla molte volte. Il riconoscimento di And
 - sherpa-onnx (Apache 2.0), keyword spotting a vocabolario aperto (`sherpa-onnx-kws-zipformer-gigaspeech-3.3M`): la parola si scrive in pezzi del modello (`keywords.txt`), non serve addestrare niente. File Kotlin copiati dalla 2.0.1 in `app/src/main/java/com/k2fsa/sherpa/onnx`; modello e librerie arm64 della stessa versione scaricati durante la build da `scripts/fetch_kws.sh` (CI e Build APK). Se mancano, l'app usa il riconoscimento di Android come prima.
 - `voice/KestraKws.kt`: AudioRecord 16 kHz → modello; soglia e spinta seguono la sensibilità (Alta ≈ soglia 0,20). Quando sente il nome: bip e subito il riconoscimento normale della richiesta (niente saluto lungo). Non prende il fuoco audio, quindi ascolta anche con la musica.
 - Si comporta come una sessione d'ascolto per MicGuard, la pausa durante la voce di Kestra e il controllo anti-blocco. Interruttore in Impostazioni (`strongWake`, acceso di default).
+
+## Sfera a colori e riconoscimento forte più affidabile (app 2.37, 19/11/2026)
+- **Colori della sfera** (richiesta di Alessio): la sfera non è più di un solo colore. Ogni ramo ha una tonalità sua
+  presa con l'angolo aureo (copre tutto lo spettro e due rami vicini non si somigliano); ogni foglia resta nella
+  famiglia del suo ramo ma con una sfumatura diversa. Le piste sui livelli sfumano dal colore del nodo di partenza a
+  quello della foglia; i gusci dei livelli sono grigio-azzurri neutri.
+- **Le emozioni colorano SOLO i raggi** dal centro ai nodi (più il nucleo e gli impulsi che ci corrono sopra).
+  Un cambio d'umore risale i raggi dal centro come un'onda. Palette: calma/tranquilla = verde, gioia (stato
+  intermedio) = azzurro, tensione/rabbia = rosso magenta, confusione = arancione rosato. A riposo vince il verde.
+- Nuovo ormone `confusione` in `server/src/mood.js` (dubbio, incertezza, perplessità); quando non riesce a salvare
+  davvero una cosa ("me lo può ripetere?") si sente confusa invece che frustrata.
+- I nodi autonomi (flow) tengono il loro doppio anello ma il colore è quello dello spettro: l'umore non tocca i nodi.
+- **Riconoscimento forte** (rispondeva circa 1 volta su 5):
+  - soglie più facili (Media ≈ 0.19 / spinta 2.25, Alta ≈ 0.14; prima 0.26 / 1.5);
+  - volume automatico fino a ×5 con limitatore morbido: il telefono sul comodino sente la voce dalla scrivania;
+  - se Android dà al servizio un microfono muto (succede quando l'ascolto riparte con l'app chiusa) se ne accorge
+    (zeri esatti per 6 s o `isClientSilenced`), passa al riconoscimento di Android per 10 minuti, e riaprire l'app
+    lo riattiva (`JarvisService.refresh` a ogni `onResume`, che riavvia il servizio dal primo piano);
+  - diagnosi in Impostazioni › Telefono: se è attivo, volume del microfono, quante volte ha sentito "Kestra" e
+    l'ultimo problema. Serve a capire dal telefono vero cosa non va.
