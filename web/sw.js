@@ -1,6 +1,6 @@
 // Prima la rete (così ogni aggiornamento pubblicato arriva subito), la copia locale se si è offline
 // o se il server non risponde entro pochi secondi: l'app si apre sempre, anche col server bloccato.
-const CACHE = 'kestra-shell-v58';
+const CACHE = 'kestra-shell-v59';
 const SHELL = ['/', '/style.css', '/app.js', '/orb.js', '/visual.js', '/offline.js', '/net2d.js', '/overlay.html', '/overlay.js', '/logo.png', '/manifest.webmanifest'];
 const WAIT_MS = 4000;
 

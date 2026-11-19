@@ -28,6 +28,8 @@ import { logEvent, kvSet, kvGet } from './db.js';
 
 const STICKY_TURNS = 5;
 // Richieste di cambiare cosa mostra l'app: solo allora il modello riceve le istruzioni per personalizzarla.
+// Richieste di cambiare come lavora Kestra (codice del server) o di annullare una modifica già online.
+const CODE_WORDS = /(codice|server|comportament|ragion|impara a|migliora(?:ti)?\b|te stess|cambia(?:re)? come|annulla (?:l'ultima |la )?modific|torna come prima|hai rotto|test)/i;
 const UI_WORDS = /(mostra|vedere|vedo|visualizz|schermat|riquadr|togli|nascond|in vista|personalizz|interfaccia|nell'app|sull'app|home|pagina|funzion|modific|riprogramm|riscriv|programm|pulsant|bottone|anteprima|approv|unisci|scarta)/i;
 // Richieste di usare il telefono: solo allora il modello riceve l'elenco delle app installate.
 const DEVICE_WORDS = /(apri|app\b|applicazion|mand|invi|scriv|messagg|chiam|cerca|metti|music|canzon|playlist|ascolt|video|foto|leggi|whatsapp|telegram|instagram|telefono|impostazion|sveglia|naviga|mappa|portami|accendi|spegni|volume)/i;
@@ -392,7 +394,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   const parts = {
     core: CORE_PROMPT(diary.profile.name, nowHuman(ms, tz)) + '\n\n' + mood.MOOD_PROMPT(mood.current(db, ms)) + (projCtx ? '\n\n' + projCtx.header : ''),
     brief: projCtx && !dietOn ? '' : dietBrief(diary, today),
-    rules: [focusLine, cooking.contextLine(db), dietOn ? DIET_RULES : '', UI_WORDS.test(userText) ? ui.uiPrompt(ui.loadLayout(db)) : '', UI_WORDS.test(userText) ? coder.codePrompt(env, db) : '', DEVICE_WORDS.test(userText) ? appsPrompt(db) : '', lessons.contextBlock(db, probe), initiative.NOTIF_WORDS.test(userText) ? initiative.notificationsContext(db) : '', (/\b(pc|computer|desktop|windows|dispositiv\w*)\b/i.test(userText) || activeFocus?.device === 'pc' || navActive) ? devices.devicesPrompt(db, ms) : '', phone.pendingContext(db, ms)].filter(Boolean).join('\n\n'),
+    rules: [focusLine, cooking.contextLine(db), dietOn ? DIET_RULES : '', UI_WORDS.test(userText) ? ui.uiPrompt(ui.loadLayout(db)) : '', (UI_WORDS.test(userText) || CODE_WORDS.test(userText)) ? coder.codePrompt(env, db) : '', DEVICE_WORDS.test(userText) ? appsPrompt(db) : '', lessons.contextBlock(db, probe), initiative.NOTIF_WORDS.test(userText) ? initiative.notificationsContext(db) : '', (/\b(pc|computer|desktop|windows|dispositiv\w*)\b/i.test(userText) || activeFocus?.device === 'pc' || navActive) ? devices.devicesPrompt(db, ms) : '', phone.pendingContext(db, ms)].filter(Boolean).join('\n\n'),
     blocks: [...(dietOn ? dietContext(diary, today) : []), ...(projCtx ? projCtx.blocks : [])],
     memories: recalled.entries.slice(0, projCtx ? 8 : 24).map(m => `- [${m.id}] (${m.module}) ${m.text}`),
     moduleIndex: [mods.length ? 'MODULI DI MEMORIA ESISTENTI: ' + mods.map(m => `${m.name}${m.description ? ` (${m.description})` : ''} [${m.entries}]`).join('; ') : '',
@@ -658,6 +660,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
         if (c.type === 'code_change' && c.request) { const id = coder.propose(db, c.request, deps.now(), tz); const w = coder.work(db, env, deps, id); if (deps.defer) deps.defer(w); else await w; }
         else if (c.type === 'code_approve') await coder.approve(db, env, deps, c.id);
         else if (c.type === 'code_discard') await coder.discard(db, env, deps, c.id);
+        else if (c.type === 'code_revert') await coder.revert(db, env, deps, c.id);
         done.applied.push(c.type);
       } catch (e) { logEvent(db, nowIso, 'error', `${c.type}: ${e.message}`); }
     }
