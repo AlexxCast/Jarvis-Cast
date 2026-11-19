@@ -130,7 +130,7 @@ export async function work(db, env, deps, id) {
   } catch (e) {
     logEvent(db, at(), 'error', `codice ${id}: ${e.message}`);
     setStatus(db, id, { status: 'failed', error: String(e.message).slice(0, 400) }, at());
-    pushInbox(db, at(), 'code', `Non sono riuscito a preparare la modifica "${p.request.slice(0, 60)}": ${String(e.message).slice(0, 160)}`);
+    pushInbox(db, at(), 'code', `Non sono riuscita a preparare la modifica "${p.request.slice(0, 60)}": ${String(e.message).slice(0, 160)}`);
   }
 }
 

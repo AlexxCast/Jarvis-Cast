@@ -1,5 +1,6 @@
 // Il "cervello": mette insieme contesto, router dei modelli, memoria e azioni.
 
+import { cleanSpoken, isOnlyFiller } from './parlato.js';
 import * as phone from './phone.js';
 import * as flows from './flows.js';
 import * as agents from './agents.js';
@@ -82,6 +83,9 @@ export function cleanVisual(a) {
 /** Frasi con cui il modello dichiara di aver salvato o cambiato qualcosa. */
 const ACTION_ASK = /\b(aggiungi|segna|segnami|registra|ricordami|ricorda|salva|crea|creami|apri|aprimi|prepara|preparami|organizza|cancella|elimina|togli|sposta|imposta|programma|clicca|seleziona|collegati|configura)\b/i;
 
+// Frase che chiede di FARE qualcosa (non una domanda o un racconto): "apri youtube sul pc", "metti musica sul pc".
+const PC_DO_RE = /^(?:(?:e|poi|ora|adesso|no|s[iì]|invece|per\s+favore|puoi|potresti|mi)\s+)*(?:apri\w*|avvi\w*|lancia\w*|chiudi\w*|metti\w*|fai\s+partire|fammi\s+(?:partire|vedere)|riproduci|cerca\w*|scorri|scrivi|vai\s+su|mostra\w*|spegni|riavvia|blocca|accendi)\b/i;
+
 export const CLAIM_WORDS = /\b(ho|l'ho|li ho|le ho|te l'ho|gliel'ho)\s+(appena\s+|già\s+|subito\s+|anche\s+)?(registrat|aggiunt|aggiornat|salvat|segnat|impostat|annotat|memorizzat|eliminat|cancellat|inserit|creat|modificat|spostat|tolt|rimoss|chius|apert)|\b(chiudo|apro|avvio|cerco|eseguo|seleziono)\s+(?:subito|ora|adesso|immediatamente)\b|\b(apro|avvio|clicco|forzo|lancio|configuro|premo|faccio partire)\b|\bci penso io\b[^!?]{0,40}\b(apr|cerc|avvi|lanci|mett|clicc|prepar|configur)|\b(promemoria|piano|diario|pasto|peso|allenamento|dispensa|ricetta)\s+(è stat[oa]\s+)?(impostat|aggiornat|registrat|salvat|creat|aggiunt)[oa]\b|^\W*(fatto|registrato|aggiornato|salvato|segnato|annotato)\b/i;
 const FAIL_LABELS = { show: 'mostrare la grafica', web_search: 'cercare su internet', read_url: 'leggere la pagina', add_meal: 'registrare il pasto (mancano gli alimenti)', update_meal: 'modificare il pasto (non l\'ho trovato)', delete_meal: 'eliminare il pasto (non l\'ho trovato)', add_weight: 'registrare il peso', add_activity: 'registrare l\'allenamento', add_reminder: 'creare il promemoria (data non valida)', remember: 'salvare il ricordo', call: 'avviare la chiamata (manca il nome)', update_profile: 'aggiornare il profilo', delete_activity: 'eliminare l\'attività (non l\'ho trovata)' };
 const failLabel = (t) => FAIL_LABELS[t] || `completare l'operazione "${t}"`;
@@ -102,7 +106,7 @@ export function noteImprovement(db, text, nowIso) {
   kvSet(db, 'improvementRequests', [...list.slice(-49), { at: nowIso, text: t }]);
 }
 
-/** Toglie i tic verbali ("Certamente, signore." a inizio di ogni risposta) e usa "Capo" come vuole la personalità. */
+/** Toglie i tic verbali ("Certamente, Capo." a inizio di ogni risposta) e usa "Capo" come vuole la personalità. */
 const PROJECT_EXIT_RE = /^\W*(?:(?:ok|kestra|chestra)\s+)?(?:esci\s+dal\s+(?:progetto|workspace)|chiudi\s+(?:il\s+)?(?:progetto|workspace)|torna\s+(?:a\s+(?:kestra|jarvis)\s+)?(?:normale|standard))\W*$/i;
 const PROJECT_NEWCHAT_RE = /^\W*(?:(?:apri|inizia|fai|crea)\s+(?:una\s+)?)?nuova\s+chat\b(?:\s+(?:nel|del)\s+progetto)?\W*$/i;
 export const PROJECT_OPEN_RE = /^\W*(?:(?:ok|ehi|kestra|chestra)\s+)?(apri|entra\s+nel|vai\s+(?:nel|al)|riprendi|torna\s+(?:nel|al)|crea|fai|nuovo|apri\s+un\s+nuovo)\s+(?:il\s+|un\s+)?(?:nuovo\s+)?progetto\s+(?:chiamato\s+|di\s+nome\s+|sul(?:l[ao'])?\s+|di\s+|per\s+)?["“]?(.{2,60}?)["”]?\W*$/i;
@@ -157,7 +161,7 @@ export function applyActions(db, actions, ctx) {
       else if (a.type === 'forget') memory.forget(db, a.id);
       else if (a.type === 'learn') { if (!lessons.learn(db, a.rule || a.text, ctx.nowIso)) { out.failed.push(a.type); continue; } }
       else if (a.type === 'clean_graph') agents.GraphAgent.cleanBranch(db, a.branch || 'all', a.max_nodes);
-      else if (a.type === 'add_reminder') { if (!agenda.addReminder(db, a, ctx.ms, ctx.tz)) { out.failed.push(a.type); continue; } }
+      else if (a.type === 'add_reminder') { if (!agenda.addReminder(db, a, ctx.ms, ctx.tz, { fromModel: true })) { out.failed.push(a.type); continue; } }
       else if (a.type === 'done_reminder') agenda.doneReminder(db, a.id);
       else if (coder.CODE_ACTIONS.has(a.type)) out.code.push({ type: a.type, id: String(a.id || ''), request: String(a.request || '').trim().slice(0, 2000) });
       else if (ui.UI_ACTIONS.has(a.type)) { if (!ui.applyUiAction(db, a, ctx.nowIso)) { out.failed.push(a.type); continue; } out.ui = true; }
@@ -228,6 +232,12 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   const rawText = String(text || '').trim().slice(0, 4000);
   const userText = rawText || (image ? 'Guarda questa foto.' : (fileList.length ? `Analizza ${fileList.length === 1 ? 'questo file' : 'questi file'}: ${fileList.map(f => f.name).join(', ')}` : ''));
   if (!userText) return { reply: 'Non ho sentito nulla, Capo.', expectReply: true, card: '', photoRequest: null };
+  // Solo esitazione o il nome ("ehm", "kestra", "mmh boh"): niente modello e niente scritture nel database.
+  // In conversazione aperta è quasi sempre rumore; altrimenti il Capo sta ancora pensando.
+  if (!image && !fileList.length && isOnlyFiller(rawText)) {
+    if (followup) return { reply: '', ignored: true, expectReply: false, card: '', photoRequest: null, actions: [], device: [], touched: [], touchedLeaves: [] };
+    return { reply: 'Dimmi, Capo.', expectReply: true, card: '', visual: null, photoRequest: null, model: 'jarvis-core', switched: false, actions: [], device: [], tier: 'local', layoutChanged: false, touched: [], touchedLeaves: [] };
+  }
 
   // Conversazione aperta: frase sentita senza "Kestra". Se è la TV, la radio o qualcuno che parla con altri, silenzio.
   if (followup && !image && !fileList.length) {
@@ -269,7 +279,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
       return local(`Siamo nel progetto "${found.name}".`, { expectReply: true, actions: ['project_enter'] });
     }
     if (/^(?:crea|nuovo|fai|apri\s+un\s+nuovo)/i.test(openAsk[1])) {
-      const pid = projects.createProject(db, { name: openAsk[2].replace(/[.!?]+$/, '') }, nowIso, ms);
+      const pid = projects.createProject(db, { name: openAsk[2].replace(/[.!?]+$/, '').replace(/^(?:il|lo|la|i|gli|le)\s+|^l['’]\s*/i, '') }, nowIso, ms);
       proj = projects.enterProject(db, pid, {}, nowIso, ms);
       return local(`Ho creato il progetto "${proj.project.name}" e ci sono dentro. Dimmi le istruzioni, oppure carica i file dalla scheda Progetti.`, { expectReply: true, actions: ['project_create'] });
     }
@@ -330,7 +340,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   }
 
   // 2. Gatekeeper procedurale locale: attività già fatte sul telefono vanno in automatico, zero modelli esterni.
-  const localHit = flows.gatekeepChat(db, userText, { hasImage: !!image || fileList.length > 0, hasPendingPhone: !!phone.pendingContext(db, ms) });
+  const localHit = flows.gatekeepChat(db, userText, { hasImage: !!image || fileList.length > 0, hasPendingPhone: !!phone.pendingContext(db, ms), nowMs: ms });
   if (localHit) {
     addMessage(db, sessionId, 'user', userText, nowIso, image ? { image: true } : null);
     addMessage(db, sessionId, 'assistant', localHit.reply, nowIso, { model: 'local-gatekeeper' });
@@ -339,7 +349,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
     const { touched, touchedLeaves } = agents.onLocalHit(db, userText, localHit, nowIso, ms);
     continuity.record(db, { ms, tz, sessionId, userText, reply: localHit.reply, applied: localHit.actions || [], device: localHit.device || [], touched: touched || [] });
     return {
-      reply: localHit.reply, expectReply: false, card: '', visual: null, photoRequest: null,
+      reply: localHit.reply, expectReply: !!localHit.expectReply, card: '', visual: null, photoRequest: null,
       model: 'local-gatekeeper', switched: false, actions: localHit.actions, device: localHit.device,
       tier: 'local', layoutChanged: false, touched, touchedLeaves,
     };
@@ -439,7 +449,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
           build: (model) => buildMessages(model, parts), fetchFn: deps.fetchFn, now: deps.now, tz,
         });
         parsed = parseReply(res.text);
-      } catch { parsed = { ...parsed, reply: 'Ho cercato, ma non riesco a elaborare i risultati in questo momento, signore.', actions: [] }; }
+      } catch { parsed = { ...parsed, reply: 'Ho cercato, ma non riesco a elaborare i risultati in questo momento, Capo.', actions: [] }; }
       parsed.actions = parsed.actions.filter(a => a.type !== 'web_search' && a.type !== 'read_url' && a.type !== 'recall');
     }
     if (!parsed.actions.some(a => a && a.type === 'remember')) {
@@ -488,7 +498,8 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
     // Dice di averlo fatto ma nessuna azione è andata a buon fine: una seconda richiesta per avere le azioni vere.
     const nothing = (d, t = []) => !d.applied.length && !d.device.length && !d.jobs.length && !d.code.length && !(t && t.length);
     // Le richieste da eseguire sul telefono (chiamate, app) hanno la loro rete di sicurezza più sotto.
-    const deviceAsk = !!phone.calleeOf(userText) || (phone.DOING_WORDS.test(userText) && phone.isPhoneTarget(db, userText));
+    const pcAsk = jarvisCore.isPcTarget(db, userText) && PC_DO_RE.test(cleanSpoken(userText)) && !/\?\s*$/.test(userText.trim());
+    const deviceAsk = !!phone.calleeOf(userText) || (phone.DOING_WORDS.test(userText) && phone.isPhoneTarget(db, userText)) || pcAsk;
     if (nothing(done, parsed.topics) && (done.failed.length || parsed.truncated || (CLAIM_WORDS.test(parsed.reply) && !deviceAsk))) {
       logEvent(db, nowIso, 'error', `azione dichiarata ma non eseguita (${done.failed.join(', ') || 'nessuna azione'}): ${parsed.reply.slice(0, 120)}`);
       let fixed = null;
@@ -505,12 +516,12 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
         done = redo;
       }
       else {
-        parsed = { ...parsed, reply: 'Mi scusi signore, non sono riuscito a salvarlo davvero. Me lo può ripetere con i dettagli?', expectReply: true, card: '', actions: [] };
+        parsed = { ...parsed, reply: 'Scusa Capo, non ci sono riuscita davvero. Me lo ripeti con qualche dettaglio in più?', expectReply: true, card: '', actions: [] };
         mood.feel(db, 'confusione', 0.3, ms);
       }
     } else if (done.failed.length) {
       // Alcune azioni sono riuscite e altre no: lo dice chiaramente invece di far finta.
-      parsed = { ...parsed, reply: `${parsed.reply} Attenzione però: non sono riuscito a ${[...new Set(done.failed)].map(failLabel).join(' e a ')}.` };
+      parsed = { ...parsed, reply: `${parsed.reply} Attenzione però: non sono riuscita a ${[...new Set(done.failed)].map(failLabel).join(' e a ')}.` };
       logEvent(db, nowIso, 'error', `azioni non riuscite: ${done.failed.join(', ')}`);
     }
     remembered = parsed.actions.filter(a => a && a.type === 'remember').map(a => memory.slug(a.module) || 'generale');
@@ -578,8 +589,11 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
     }
     // Rete di sicurezza per il PC: se l'utente o il modello parla di fare qualcosa sul PC/Ghideon/Gideon,
     // svuota sempre le azioni sul telefono (così non parte MAI sul telefono per errore) e invia il comando al PC.
-    if (jarvisCore.isPcTarget(db, userText) || jarvisCore.isPcTarget(db, parsed.reply)) {
-      done.device = [];
+    // Solo se è il CAPO a chiedere di fare qualcosa sul PC: prima bastava che la risposta del modello nominasse
+    // il PC ("sul PC ti consiglio...") per buttare via un messaggio WhatsApp e aprire WhatsApp sul computer, e una
+    // domanda ("come faccio ad aprire chrome sul pc?") poteva far partire comandi veri.
+    if (pcAsk) {
+      done.device = done.device.filter(d => d.type === 'visual');
       if (!done.applied.includes('pc_action')) {
         const primeTitleM = /\b(?:apri|apro|cerca|cerco|metti|metto)\s+(.{2,60}?)\s+(?:su|in)\s+prime(?:\s+video)?\b/i.exec(userText + ' ' + parsed.reply);
         if (primeTitleM && primeTitleM[1]) {
@@ -604,6 +618,13 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
           }
         }
       }
+    }
+    // Numero di emergenza senza un'emergenza nella frase: prima si chiede (vedi phone.holdEmergencyCall).
+    const heldCall = done.device.find(d => d.type === 'call' && phone.holdEmergencyCall(db, d.name, userText, ms));
+    if (heldCall) {
+      done.device = done.device.filter(d => d !== heldCall);
+      done.applied = done.applied.filter(a => a !== 'call');
+      parsed = { ...parsed, reply: `Chiamo davvero il ${String(heldCall.name).replace(/^il\s+/i, '')}? Dimmi "sì, chiama".`, expectReply: true };
     }
     // Notizie o diagnostiche chieste a voce/chat: se il modello non ha già creato una grafica "show",
     // costruisce in automatico la scheda in sovraimpressione (visual overlay) con i punti principali.
@@ -653,7 +674,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   } catch (e) {
     logEvent(db, nowIso, 'error', `chat: ${e.message} ${(e.tried || []).join(' | ')}`);
     mood.feel(db, 'frustrazione', 0.3, ms);
-    result = { reply: e.tried ? e.message : 'Si è verificato un problema interno, signore. Riprovi tra poco.', expectReply: false, card: '', photoRequest: null, model: '', switched: false, actions: [], device: [], error: true };
+    result = { reply: e.tried ? e.message : 'Si è verificato un problema interno, Capo. Riprova tra poco.', expectReply: false, card: '', photoRequest: null, model: '', switched: false, actions: [], device: [], error: true };
   }
 
   addMessage(db, sessionId, 'assistant', result.reply, nowIso, { model: result.model, card: result.card || undefined, visual: result.visual || undefined });
@@ -730,9 +751,11 @@ export function followupVerdict(text, lastAssistant = '') {
   const t = String(text || '').toLowerCase().replace(/[^a-z0-9àèéìòóù' ]/g, ' ').replace(/\s+/g, ' ').trim();
   if (!t) return 'no';
   const words = t.split(' ');
-  if (words.length <= 3) return 'yes';
   if (/\?\s*$/.test(String(lastAssistant || '').trim()) && words.length <= 8) return 'yes';
-  if (words.length <= 12 && /^(?:e\s+|poi\s+|ora\s+|adesso\s+|allora\s+|no\s+|s[iì]\s+)?(?:apri|aprimi|metti|mettimi|aggiungi|segna|registra|togli|cancella|chiama|cerca|cercami|ricordami|ricorda|dimmi|mostrami|mostra|fai|fammi|leggi|leggimi|scrivi|manda|invia|imposta|spegni|accendi|quanto|quanti|quante|qual|quale|cosa|come|perch[eé]|dove|quando|puoi|sai|mi\s+(?:dici|serve|servono)|ho\s+(?:mangiato|bevuto|fatto))\b/.test(t)) return 'yes';
+  // Frasi brevi: "sì", "grazie", "va bene", "basta" sono per Kestra; "buonasera a tutti" o "a voi la linea" sono la TV.
+  // Prima bastavano 3 parole qualsiasi per far rispondere Kestra alla televisione.
+  if (words.length <= 3 && /^(?:s[iì]|si|no|ok|okay|grazie|va\s+bene|perfetto|certo|esatto|giusto|bravo|brava|basta|stop|ferm[oa]|fermati|l[iì]|quell[oa]|(?:il\s+|la\s+|l')?(?:prim|second|terz|quart|quint|ultim)[oa]|avanti|indietro|ripeti|fatto|dai|vai|aspetta|annulla|ciao|kestra|chestra|ancora|altro|poi|e\s+poi|niente|lascia\s+stare|non\s+importa|ottimo|top|benissimo|capito|come|cosa)(?=\s|$)/.test(t)) return 'yes';
+  if (words.length <= 12 && /^(?:e\s+|poi\s+|ora\s+|adesso\s+|allora\s+|no\s+|s[iì]\s+)?(?:apri|aprimi|metti|mettimi|clicca|seleziona|scorri|scendi|aggiungi|segna|registra|togli|cancella|chiama|cerca|cercami|ricordami|ricorda|dimmi|mostrami|mostra|fai|fammi|leggi|leggimi|scrivi|manda|invia|imposta|spegni|accendi|quanto|quanti|quante|qual|quale|cosa|come|perch[eé]|dove|quando|puoi|sai|mi\s+(?:dici|serve|servono)|ho\s+(?:mangiato|bevuto|fatto))\b/.test(t)) return 'yes';
   return 'ask';
 }
 

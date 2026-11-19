@@ -3,9 +3,10 @@
 // Il modello torna in gioco solo per scelte aperte, testi da scrivere, schermi imprevisti,
 // letture da riassumere e qualunque azione irreversibile o sensibile (sempre).
 
+import { cleanSpoken } from './parlato.js';
 import { kvGet, kvSet } from './db.js';
 import { keywords, slug } from './memory.js';
-import { calleeOf, INSIDE_WORDS, INTERNAL_JARVIS_WORDS } from './phone.js';
+import { calleeOf, holdEmergencyCall, INSIDE_WORDS, INTERNAL_JARVIS_WORDS } from './phone.js';
 
 const FLOWS_KEY = 'phoneFlows';
 const AUTO_GOALS_KEY = 'autoGoals';
@@ -93,13 +94,14 @@ export function extractParam(flow, goal) {
     const part = (s) => escapeRe(s.trim()).replace(/\s+/g, '\\s+');
     const re = new RegExp(`^\\W*${pre.trim() ? part(pre) + '\\s+' : ''}(.+?)${post.trim() ? '\\s+' + part(post) : ''}\\W*$`, 'i');
     const m = re.exec(g);
-    if (m && m[1].trim()) return m[1].trim();
+    if (m && m[1].trim()) return stripFiller(m[1]);
   }
   // Riserva: le parole dell'obiettivo che non fanno parte del flow.
   const fixed = new Set(flow.tokens || []), app = norm(flow.app);
   const kept = g.split(/\s+/).filter(w => { const t = contentTokens(w); return t.length && !t.some(x => fixed.has(x)) && norm(w) !== app; });
-  return kept.length ? kept.join(' ') : null;
+  return kept.length ? stripFiller(kept.join(' ')) || null : null;
 }
+const stripFiller = (t) => cleanSpoken(t).replace(/^(?:tipo|cioè|quell[ao]\s+di|qualcosa\s+di)\s+/i, '').trim();
 
 export function listFlows(db) {
   return kvGet(db, FLOWS_KEY, []);
@@ -377,28 +379,32 @@ export function tryFlowStep(db, { goal, step, screen, nowMs }) {
  * Gatekeeper locale per la chat: regole booleane + punteggio dei flow decidono se una richiesta
  * semplice si può eseguire subito, senza modelli esterni. Null = la richiesta va al modello.
  */
-export function gatekeepChat(db, userText, { hasImage = false, hasPendingPhone = false } = {}) {
+export function gatekeepChat(db, userText, { hasImage = false, hasPendingPhone = false, nowMs = Date.now() } = {}) {
   const text = String(userText || '').trim();
   if (!text || hasImage || hasPendingPhone) return null;
   if (text.length > 140 || COMPLEX_CHAT.test(text) || CREATIVE_WORDS.test(text) || INTERNAL_JARVIS_WORDS.test(text)) return null;
-  const goal = text.replace(/^\W*(ehi|ciao|ok)?\W*jarvis\W*/i, '').replace(/[.!]+$/, '').trim();
+  // "eh cerca tipo ligabue su joytify" → "cerca ligabue su joytify": il telefono non deve scrivere "tipo ligabue".
+  const goal = cleanSpoken(text).replace(/\b(?:tipo|cioè)\s+/gi, '').replace(/[.!]+$/, '').trim();
   if (!goal || MULTI_INTENT.test(goal)) return null;
   const local = (reply, device) => ({ reply, device: [device], actions: [device.type], local: true });
 
   // 1. Compito già appreso.
   const { flow, score } = bestFlow(listFlows(db), goal);
-  if (flow && score >= CHAT_THRESHOLD) return local('Eseguo subito, signore.', { type: 'phone_task', goal });
+  if (flow && score >= CHAT_THRESHOLD) return local('Eseguo subito, Capo.', { type: 'phone_task', goal });
 
   // 2. Telefonata semplice ("chiama Marco").
   const callee = calleeOf(goal);
-  if (callee && callee.split(/\s+/).length <= 3) return local(`Chiamo ${callee}, signore.`, { type: 'call', name: callee });
+  if (callee && callee.split(/\s+/).length <= 3) {
+    if (holdEmergencyCall(db, callee, text, nowMs)) return { reply: `Chiamo davvero il ${callee.replace(/^il\s+/i, '')}? Dimmi "sì, chiama".`, device: [], actions: [], local: true, expectReply: true };
+    return local(`Chiamo ${callee}, Capo.`, { type: 'call', name: callee });
+  }
 
   // 3. Aprire un'app installata ("apri Joytify"), senza altro da fare dentro.
   const apps = kvGet(db, 'apps', []);
   if (apps.length && /^(apri|avvia)\s+/i.test(goal) && !INSIDE_WORDS.test(goal.replace(/^avvia\s+/i, ''))) {
     const asked = norm(goal.replace(/^(apri|avvia)\s+(l'|la\s+|il\s+|lo\s+)?(app\s+|applicazione\s+)?/i, ''));
     const hit = apps.find(a => norm(a) === asked) || (asked.length >= 4 ? apps.find(a => norm(a).startsWith(asked)) : null);
-    if (hit) return local(`Apro ${hit}, signore.`, { type: 'open_app', name: hit });
+    if (hit) return local(`Apro ${hit}, Capo.`, { type: 'open_app', name: hit });
   }
   return null;
 }
@@ -547,6 +553,8 @@ export function findMatchingSkill(db, userText = '', activeDevice = null) {
 
   // Serve un verbo di comando: "collegati alla mia agenda Google" non deve far partire "google su PC".
   if (!/\b(apri|aprimi|avvia|metti|mettimi|cerca|cercami|guarda|riproduci|vai\s+su|fai\s+partire|fammi\s+partire|accendi|lancia)\b/i.test(userText)) return null;
+  // "non aprire youtube", "non mi mettere netflix": una negazione non fa mai partire un automatismo.
+  if (/\bnon\s+(?:mi\s+|ti\s+|lo\s+|la\s+)?(?:apri\w*|avvi\w*|mett\w*|cerc\w*|riprodu\w*|lanci\w*|accend\w*|far\s+partire)/i.test(userText)) return null;
   const skills = listSkills(db).filter(s => s.verified && isSaneSkill(s));
   let best = null;
   let bestScore = 0;
@@ -710,7 +718,7 @@ export function resolvePendingAccount(db, sessionId = 'main', userText = '', now
     }
     if (CONFIRM_NO_RE.test(clean)) {
       kvSet(db, key, null);
-      return { cancelled: true, reply: 'Va bene, signore. Mi dica pure il nome esatto dell\'account da usare.' };
+      return { cancelled: true, reply: 'Va bene, Capo. Dimmi pure il nome esatto dell\'account da usare.' };
     }
   }
 
@@ -737,7 +745,7 @@ export function resolvePendingAccount(db, sessionId = 'main', userText = '', now
     setPendingAccountPrompt(db, sessionId, { ...pending, mode: 'confirm', candidate: clean, suggestion: m.suggestion }, nowMs);
     return {
       askConfirm: true,
-      reply: `Ho sentito "${clean}", intendeva l'account "${m.suggestion}"? Me lo conferma?`,
+      reply: `Ho sentito "${clean}", intendevi l'account "${m.suggestion}"? Me lo confermi?`,
     };
   }
   // Account completamente nuovo dettato dall'utente: chiede conferma ripetendo il nome!
@@ -745,9 +753,9 @@ export function resolvePendingAccount(db, sessionId = 'main', userText = '', now
     setPendingAccountPrompt(db, sessionId, { ...pending, mode: 'confirm', candidate: clean, suggestion: clean }, nowMs);
     return {
       askConfirm: true,
-      reply: `Non trovo "${clean}" tra gli account salvati. Conferma che vuole salvare e usare il nuovo account "${clean}"?`,
+      reply: `Non trovo "${clean}" tra gli account salvati. Confermi che vuoi salvare e usare il nuovo account "${clean}"?`,
     };
   }
   kvSet(db, key, null);
-  return { cancelled: true, reply: 'Operazione account annullata, signore.' };
+  return { cancelled: true, reply: 'Operazione account annullata, Capo.' };
 }

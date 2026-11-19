@@ -311,7 +311,10 @@ export function tidyTopics(db) {
           db.run('UPDATE topics SET parent = ? WHERE module = ? AND parent = ?', host.name, mod, child.name);
           db.run('DELETE FROM topics WHERE module = ? AND name = ?', mod, child.name);
           merged++;
-        } else {
+        } else if (child.parent !== host.name || child.label !== shorter) {
+          // Solo se cambia davvero: prima questa riga riscriveva OGNI argomento annidato a ogni lettura della sfera
+          // (app ogni 90 s, finestra sopra le app a ogni ascolto, tre volte dopo ogni messaggio). Con 50 argomenti
+          // annidati erano decine di migliaia di righe al giorno, cioè il limite gratuito di Cloudflare finito.
           db.run('UPDATE topics SET parent = ?, label = ? WHERE module = ? AND name = ?', host.name, shorter, mod, child.name);
           child.parent = host.name;
           child.label = shorter;

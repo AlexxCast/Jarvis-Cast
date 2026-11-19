@@ -1,6 +1,7 @@
 // Controllo del telefono: il telefono legge lo schermo (servizio di accessibilità), lo manda qui,
 // il modello sceglie UNA mossa alla volta e il telefono la esegue. Il ciclo lo guida il telefono.
 
+import { cleanSpoken } from './parlato.js';
 import * as router from './router.js';
 import * as flows from './flows.js';
 import { logEvent, kvGet, kvSet } from './db.js';
@@ -43,12 +44,12 @@ export function parseMove(text) {
   const s = String(text || ''), a = s.indexOf('{'), b = s.lastIndexOf('}');
   let o = null;
   if (a >= 0 && b > a) { try { o = JSON.parse(s.slice(a, b + 1)); } catch { o = null; } }
-  if (!o || !MOVES.has(o.do)) return { do: 'ask', say: 'Non ho capito come proseguire su questo schermo, signore.' };
+  if (!o || !MOVES.has(o.do)) return { do: 'ask', say: 'Non ho capito come proseguire su questo schermo, Capo.' };
   const move = { do: o.do, say: String(o.say || '').slice(0, 400) };
   if (o.n != null && Number.isFinite(Number(o.n))) move.n = Math.trunc(Number(o.n));
   if (o.text != null) move.text = String(o.text).slice(0, 500);
   if (o.do === 'scroll') move.dir = o.dir === 'su' ? 'su' : 'giu';
-  if ((move.do === 'tap' || move.do === 'type') && move.n == null) return { do: 'ask', say: 'Non trovo l\'elemento da toccare, signore.' };
+  if ((move.do === 'tap' || move.do === 'type') && move.n == null) return { do: 'ask', say: 'Non trovo l\'elemento da toccare, Capo.' };
   return move;
 }
 
@@ -57,9 +58,9 @@ export const systemFor = (trusted) => SYSTEM.replace('{{CONFERMA}}', trusted ? C
 /** Una mossa: { goal, voiceTrusted, screen: {app, items:[{n, kind, text}]}, history: ["tap 3 Cerca", ...], step } */
 export async function step(db, env, deps, b) {
   const goal = String(b.goal || '').trim().slice(0, 1000);
-  if (!goal) return { do: 'done', say: 'Nessun obiettivo, signore.' };
+  if (!goal) return { do: 'done', say: 'Nessun obiettivo, Capo.' };
   const n = Number(b.step) || 0;
-  if (n >= MAX_STEPS) return { do: 'ask', say: 'Ci sto mettendo troppi passaggi: mi fermo qui, signore.' };
+  if (n >= MAX_STEPS) return { do: 'ask', say: 'Ci sto mettendo troppi passaggi: mi fermo qui, Capo.' };
   const screen = b.screen || {};
   // Compito già imparato: la mossa la decide il flow salvato, senza chiamare il modello.
   const autoMove = flows.tryFlowStep(db, { goal, step: n, screen, nowMs: deps.now() });
@@ -81,7 +82,7 @@ export async function step(db, env, deps, b) {
       tier: stepTier, maxTokens: 300, fetchFn: deps.fetchFn, now: deps.now, tz: deps.tz,
       build: () => [{ role: 'system', content: systemFor(b.voiceTrusted === true) }, { role: 'user', content: user }],
     });
-    const move = parseMove(res.text);
+    const move = guardMove(parseMove(res.text), screen, goal, b.voiceTrusted === true);
     flows.recordTrace(db, { goal, step: n, screen, move, nowMs: deps.now() });
     // Se si ferma a chiedere, il compito resta in sospeso: alla risposta dell'utente ("sì, invia")
     // la chat lo riprende da dove era rimasto.
@@ -90,8 +91,32 @@ export async function step(db, env, deps, b) {
     return move;
   } catch (e) {
     logEvent(db, nowIso(deps.now(), deps.tz), 'error', `telefono: ${e.message}`);
-    return { do: 'ask', say: 'Non riesco a ragionare in questo momento, signore. Riprovi tra poco.' };
+    return { do: 'ask', say: 'Non riesco a ragionare in questo momento, Capo. Riprova tra poco.' };
   }
+}
+
+const SENSITIVE_FIELD = /\b(password|passwort|passcode|pin|otp|codice\s+(?:di\s+)?(?:verifica|sicurezza|accesso)|cvv|cvc|iban|numero\s+(?:della\s+)?carta|card\s+number)\b/i;
+const MONEY_OR_DELETE = /\b(paga\w*|pagamento|acquist\w*|compra\w*|buy|pay|ordina\s+e\s+paga|conferma\s+(?:l'?)?ordine|bonifico|abbonati|subscribe|elimina\w*|delete|cancella\s+(?:account|tutto|chat)|svuota|disinstalla|uninstall|ripristina|reset|formatta)\b/i;
+const SEND_OR_CALL = /\b(send|invia\w*|chiama|call|avvia\s+chiamata)\b/i;
+const CONFIRMED_RE = /\b(?:ha\s+confermato|confermato\s+dall'utente|l'utente\s+ha\s+detto\s+s[iì])\b/i;
+
+/**
+ * Regole che valgono SEMPRE, qualunque cosa dica il modello (prima stavano solo nel prompt):
+ * mai scrivere password o codici, mai pagare o cancellare senza un "sì", mai inviare o chiamare senza
+ * conferma se la voce non è stata riconosciuta, mai toccare un elemento che non esiste sullo schermo.
+ */
+export function guardMove(move, screen = {}, goal = '', voiceTrusted = false) {
+  if (!move || (move.do !== 'tap' && move.do !== 'type')) return move;
+  const items = Array.isArray(screen.items) ? screen.items : [];
+  const item = items.find(i => Number(i.n) === Number(move.n));
+  if (!item) return { do: 'ask', say: 'Non trovo quel tasto sullo schermo: mi dici cosa devo toccare?' };
+  const label = String(item.text || '').replace(/\[cursore qui\]/gi, '').replace(/\s+/g, ' ').trim();
+  if (move.do === 'type' && SENSITIVE_FIELD.test(label)) return { do: 'ask', say: 'Questo è un campo per password o codici: scrivilo tu, io non lo faccio.' };
+  if (move.do !== 'tap' || CONFIRMED_RE.test(goal)) return move;
+  const shown = label.replace(/\(icona:\s*([^)]+)\)/i, '$1').slice(0, 40);
+  if (MONEY_OR_DELETE.test(label)) return { do: 'ask', say: `Sto per toccare "${shown}". Procedo?` };
+  if (!voiceTrusted && SEND_OR_CALL.test(label)) return { do: 'ask', say: /chiama|call/i.test(label) ? 'Avvio la chiamata. Procedo?' : 'Invio il messaggio. Procedo?' };
+  return move;
 }
 
 /** Compito sul telefono fermo in attesa di una risposta dell'utente (ultimi 15 minuti), per la chat. */
@@ -125,11 +150,39 @@ export function isPhoneTarget(db, text) {
   return false;
 }
 
+/** Parole di tempo: "domani chiama il dentista" è un promemoria, non una telefonata adesso. */
+export const LATER_CALL_RE = /\b(domani|dopodomani|stasera|stanotte|stamattina|pi[uù]\s+tardi|dopo\s+(?:pranzo|cena)|tra\s+\d+|fra\s+\d+|tra\s+(?:un|una|poco|mezz)|fra\s+(?:un|una|poco|mezz)|alle\s+\d|all['’]\s*una|a\s+mezzogiorno|luned[iì]|marted[iì]|mercoled[iì]|gioved[iì]|venerd[iì]|sabato|domenica|ricordami|ricordarmi|promemoria|quando\s+(?:arrivo|esco|torno|finisco))(?![\p{L}\p{N}])/iu;
+/** Numeri di emergenza (Italia e Austria): mai chiamati senza una conferma esplicita. */
+export const EMERGENCY_RE = /^\s*(?:il\s+)?(?:112|113|115|118|1515|1530|911|133|144|122|141|140|999)\b/;
+
+const REAL_EMERGENCY_RE = /\b(aiuto|emergenza|urgente|sto\s+male|incidente|ambulanza|polizia|carabinieri|pompieri|soccorso|infarto|svenut\w*|sangue|fuoco|incendio|ladri)\b/i;
+
+/**
+ * Una telefonata a un numero di emergenza parte subito solo se la frase parla davvero di un'emergenza
+ * ("aiuto chiama il 112, c'è un incidente"). Altrimenti (TV, frase a metà, numero capito male) si chiede prima.
+ * Ritorna il nome da tenere in sospeso, oppure '' se la chiamata può partire.
+ */
+export function holdEmergencyCall(db, name, userText, ms) {
+  if (!EMERGENCY_RE.test(String(name || '')) || REAL_EMERGENCY_RE.test(String(userText || ''))) return '';
+  kvSet(db, 'callConfirm', { at: ms, name: String(name).trim() });
+  return String(name).trim();
+}
+
 /** "chiama Marcolino" -> "Marcolino". Vuoto se non è una telefonata normale (es. "chiama su WhatsApp", "come si chiama"). */
 export function calleeOf(text) {
   const t = String(text || '');
   if (/\b(whatsapp|telegram|videochiam|meet|zoom|skype|messenger|instagram)\b/i.test(t)) return '';
+  // "non chiamare la mamma", "domani chiama il dentista", "ricordami di chiamare Marco": non si chiama adesso.
+  if (/\bnon\s+(?:chiamare|chiamarl[oa]|chiama)\b/i.test(t) || LATER_CALL_RE.test(t)) return '';
   const m = /(?:^|[\s,])(?:chiama(?:mi)?|telefona\s+a|fai\s+una\s+chiamata\s+a|fai\s+uno\s+squillo\s+a)\s+(?:a\s+|il\s+|la\s+|lo\s+|l')?([^?.!,;]{2,40})/i.exec(t);
   if (!m || /\b(si|ti|mi)\s+chiama/i.test(t)) return '';
-  return m[1].replace(/\b(per favore|subito|adesso|ora|grazie|al telefono|sul cellulare)\b.*$/i, '').trim();
+  const name = cleanSpoken(m[1].replace(/\b(per favore|subito|adesso|ora|grazie|al telefono|sul cellulare)\b.*$/i, ''))
+    // "chiama la mamma no aspetta il papà": ci si è corretti, quindi conta l'ultimo nome.
+    .replace(/^.*\b(?:no\s+)?(?:aspetta|anzi|cioè|scusa)\s+(?:no\s+)?(?:il\s+|la\s+|lo\s+|l')?/i, '')
+    .replace(/^(?:il|la|lo|l')\s+/i, '').trim();
+  // "chiamami un taxi" non è un contatto della rubrica.
+  if (!name || /^(?:un|uno|una|qualcuno|qualcosa)\b/i.test(name) || name.length < 2) return '';
+  // "chiama il 112 c'è stato un incidente": conta solo il numero.
+  const emergency = EMERGENCY_RE.exec(name);
+  return emergency ? emergency[0].replace(/^\s*il\s+/i, '').trim() : name;
 }

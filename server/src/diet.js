@@ -2,6 +2,7 @@
 
 import * as N from './nutrition.js';
 import { kvGet, kvSet } from './db.js';
+import { findFood, gramsOf, estimate } from './foods.js';
 
 export const EMPTY_DIARY = () => ({
   profile: { name: '', birthDate: '', sex: 'M', heightCm: 0, weightKg: 0, targetWeightKg: 0, goal: 'dimagrire', weeklyChangeKg: 0.5, activityLevel: 'moderato', foodLikes: '', foodDislikes: '', dietNotes: '', appearanceNotes: '' },
@@ -20,13 +21,34 @@ let counter = 0;
 export const newId = (prefix, ms) => prefix + ms.toString(36) + (++counter).toString(36);
 
 const s = (v) => (v == null ? '' : String(v)).trim();
-const n = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+// Numeri come li scrive un modello: 320, "320", "320 kcal", "110g", "3,5". Prima "320 kcal" diventava 0.
+const n = (v) => {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : 0;
+  const t = String(v ?? '');
+  if (/^\s*\d{1,3}(?:\.\d{3})+(?!\d|,)/.test(t)) return Number(t.trim().match(/^[\d.]+/)[0].replace(/\./g, '')); // "8.000 passi"
+  const m = /-?\d+(?:[.,]\d+)?/.exec(t);
+  return m ? Number(m[0].replace(',', '.')) : 0;
+};
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
 const validDate = (v, today) => (N.parseDate(s(v)) ? s(v) : today);
 
+/**
+ * Alimenti puliti: niente grammi negativi, niente 99999 kcal (un errore del modello rovinava il totale del giorno).
+ * Se il modello dà i grammi ma non le calorie, si stimano dalla tabella dei cibi comuni (foods.js).
+ */
 function items(a) {
-  return (Array.isArray(a.items) ? a.items : []).filter(i => i && s(i.name)).map(i => ({
-    name: s(i.name), grams: n(i.grams), kcal: n(i.kcal), protein: n(i.protein), carbs: n(i.carbs), fat: n(i.fat),
-  }));
+  return (Array.isArray(a.items) ? a.items : []).filter(i => i && s(i.name)).map(i => {
+    const it = {
+      name: s(i.name).slice(0, 120), grams: clamp(n(i.grams), 0, 5000), kcal: Math.round(clamp(n(i.kcal), 0, 5000)),
+      protein: clamp(n(i.protein), 0, 500), carbs: clamp(n(i.carbs), 0, 1000), fat: clamp(n(i.fat), 0, 500),
+    };
+    if (!it.kcal) {
+      const food = findFood(it.name);
+      const grams = it.grams || (food ? gramsOf(s(i.qty || i.quantity || ''), food) : 0);
+      if (food && grams > 0) Object.assign(it, { grams, ...estimate(food, grams), estimated: true });
+    }
+    return it;
+  });
 }
 
 const PROFILE_NUMBERS = ['heightCm', 'weightKg', 'targetWeightKg', 'weeklyChangeKg'];
@@ -97,7 +119,7 @@ export function applyDietAction(d, a, { today, nowIso, ms, hadPhoto = false }) {
       return null;
     case 'delete_activity': d.activities = d.activities.filter(x => x.id !== s(a.id)); return null;
     case 'add_weight': {
-      if (n(a.kg) <= 20) return null;
+      if (n(a.kg) <= 20 || n(a.kg) > 400) return null; // "82 e 4" capito come 824 non è un peso
       const date = validDate(a.date, today);
       d.weights = d.weights.filter(w => w.date !== date).concat({ date, kg: n(a.kg) });
       return null;
@@ -132,7 +154,9 @@ export function applyDietAction(d, a, { today, nowIso, ms, hadPhoto = false }) {
         d.pantry = [];
         return null;
       }
-      d.pantry = d.pantry.filter(x => !((id && x.id === id) || (name && (x.name.toLowerCase() === name || x.name.toLowerCase().includes(name) || name.includes(x.name.toLowerCase())))));
+      // Con un nome di 1-2 lettere ("o", "la") includes() svuotava mezza dispensa: lì vale solo il nome esatto.
+      const loose = name.length >= 3;
+      d.pantry = d.pantry.filter(x => !((id && x.id === id) || (name && (x.name.toLowerCase() === name || (loose && (x.name.toLowerCase().includes(name) || name.includes(x.name.toLowerCase())))))));
       return null;
     }
     case 'update_recipe_session': {

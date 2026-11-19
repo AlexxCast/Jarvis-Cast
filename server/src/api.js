@@ -6,6 +6,7 @@ import { loadDiary, saveDiary, mergeLegacy, patchProfile, DIET_ACTIONS } from '.
 import * as N from './nutrition.js';
 import * as memory from './memory.js';
 import * as phone from './phone.js';
+import * as eyes from './pc_eyes.js';
 import * as cooking from './cooking.js';
 import * as flows from './flows.js';
 import * as devices from './devices.js';
@@ -140,6 +141,7 @@ export async function handleApi(db, env, deps, request) {
       const cmd = devices.enqueueCommand(db, b.targetDevice || 'desktop', b, ms);
       return json({ command: cmd, devices: devices.listDevices(db, ms), history: devices.listCommandHistory(db) });
     }
+    if (path === '/api/pc/look' && method === 'POST') return json(await eyes.look(db, env, deps, await body(request), ms, tz));
     if (path === '/api/devices/screen' && method === 'POST') {
       const b = await body(request);
       const img = String(b.image || '').replace(/^data:image\/\w+;base64,/, '');

@@ -91,7 +91,7 @@ export async function advance(db, env, deps) {
     const attempts = Number(job.result.startsWith('retry:') ? job.result.slice(6) : 0) + 1;
     if (attempts < 3) { db.run('UPDATE jobs SET result = ?, updated = ? WHERE id = ?', `retry:${attempts}`, at, job.id); return 90_000; }
     db.run("UPDATE jobs SET status = 'failed', result = ?, updated = ? WHERE id = ?", `Non completato: ${msg}`, at, job.id);
-    pushInbox(db, at, 'job', `Non sono riuscito a completare "${job.title}": ${msg}`);
+    pushInbox(db, at, 'job', `Non sono riuscita a completare "${job.title}": ${msg}`);
     return hasPendingJobs(db) ? 1000 : null;
   };
 
@@ -171,7 +171,7 @@ export async function advance(db, env, deps) {
     }
     db.run("UPDATE jobs SET status = 'done', result = ?, updated = ? WHERE id = ?", final.slice(0, 12000), at, job.id);
     mood.feel(db, 'soddisfazione', 0.6, deps.now());
-    pushInbox(db, at, 'job', `Ho completato "${job.title}", signore. Il risultato è nella sezione Attività.`);
+    pushInbox(db, at, 'job', `Ho completato "${job.title}", Capo. Il risultato è nella sezione Attività.`);
     return hasPendingJobs(db) ? 1000 : null;
   } catch (e) {
     logEvent(db, at, 'error', `job ${job.id}: ${e.message}`);

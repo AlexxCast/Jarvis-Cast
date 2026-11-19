@@ -70,13 +70,15 @@ export function heartbeat(db, payload = {}, nowMs = Date.now()) {
     metrics: { ...(existing?.metrics || {}), ...metrics },
     apps: apps || existing?.apps || [],
     profiles: profiles || existing?.profiles || [],
+    // Cosa sa fare il programma del PC (es. 'look' = guarda lo schermo): quello vecchio non lo manda.
+    caps: Array.isArray(payload.caps) ? payload.caps.map(c => String(c).slice(0, 20)).slice(0, 20) : (existing?.caps || []),
     lastSeen: nowMs,
   };
   liveOf(db).set(record.id, record);
   const before = saved.find(d => d.id === record.id);
   const same = (a, b) => JSON.stringify(a || []) === JSON.stringify(b || []);
   const important = !before || before.name !== record.name || before.platform !== record.platform || before.kind !== record.kind
-    || !same(before.apps, record.apps) || !same(before.profiles, record.profiles);
+    || !same(before.apps, record.apps) || !same(before.profiles, record.profiles) || !same(before.caps, record.caps);
   if (important || nowMs - Number(before.lastSeen || 0) >= PERSIST_MS) {
     kvSet(db, DEVICES_KEY, [record, ...list.filter(d => d.id !== record.id)].slice(0, 12));
   }

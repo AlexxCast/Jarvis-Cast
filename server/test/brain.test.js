@@ -592,7 +592,7 @@ test('onestà: se nemmeno al secondo tentativo salva, lo ammette invece di far f
   const db = makeDb();
   const out = await handleChat(db, ENV, deps(fakeFetch(() => reply({ reply: 'Ho aggiornato il piano, signore.', actions: [{ type: 'add_meal', meal: 'cena' }] }))), { text: 'ho mangiato una pizza' });
   assert.equal(loadDiary(db).meals.length, 0);
-  assert.match(out.reply, /non sono riuscito a salvarlo/);
+  assert.match(out.reply, /non ci sono riuscita davvero/);
   assert.equal(out.expectReply, true);
   // Una risposta che parla solo dei dati, senza dichiarare azioni, non fa partire controlli.
   let calls = 0;
@@ -605,7 +605,7 @@ test('onestà: azioni riuscite a metà vengono dichiarate, e un JSON tagliato sa
   const db = makeDb();
   const out = await handleChat(db, ENV, deps(fakeFetch(() => reply({ reply: 'Ho registrato il peso e corretto il pranzo.', actions: [{ type: 'add_weight', kg: 80 }, { type: 'update_meal', id: 'inesistente', description: 'x' }] }))), { text: 'peso 80 kg e correggi il pranzo' });
   assert.equal(loadDiary(db).weights.length, 1);
-  assert.match(out.reply, /Attenzione però: non sono riuscito a modificare il pasto/);
+  assert.match(out.reply, /Attenzione però: non sono riuscita a modificare il pasto/);
   const cut = parseReply('{"reply": "Ho registrato la colazione.", "expect_reply": false, "card": "", "actions": [{"type": "add_meal", "meal": "colazione", "description": "latte {e} biscotti", "items": [{"name": "latte", "grams": 200, "kcal": 90, "protein": 6, "carbs": 10, "fat": 3}]}, {"type": "add_me');
   assert.equal(cut.truncated, true);
   assert.equal(cut.reply, 'Ho registrato la colazione.');

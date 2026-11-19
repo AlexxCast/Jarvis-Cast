@@ -16,8 +16,12 @@ ap.add_argument("--real-weight", type=float, default=4.0, help="peso degli esemp
 ap.add_argument("--neg-npy", nargs="*", default=[], help="negativi già in vettori [N,16,96] (fetch_negatives.py)")
 ap.add_argument("--neg-npy-weight", type=float, default=1.0)
 ap.add_argument("--mine", type=int, default=2, help="giri di caccia ai falsi allarmi sulle registrazioni senza Kestra")
+ap.add_argument("--bg", nargs="*", default=[], help="audio di sottofondo (es. TV accesa) da mescolare sotto gli esempi")
+ap.add_argument("--bg-prob", type=float, default=0.35, help="quota di esempi con il sottofondo")
+ap.add_argument("--noise-prob", type=float, default=0.3, help="quota di esempi con rumore costante forte (ventola, cappa)")
+ap.add_argument("--seed", type=int, default=1)
 args = ap.parse_args()
-rng = np.random.default_rng(1)
+rng = np.random.default_rng(args.seed)
 FE = Features(f"{args.kit}/melspectrogram.onnx", f"{args.kit}/embedding_model.onnx")
 
 
@@ -43,11 +47,33 @@ def segments(x, min_len=0.25, max_gap=0.18):
     return segs
 
 
+BG = []
+
+
+def colored_noise(n):
+    """Rumore costante: bianco, rosa o marrone (ventola, cappa, phon, doccia)."""
+    w = rng.normal(0, 1, n).astype(np.float32); kind = rng.integers(0, 3)
+    if kind == 0: return w
+    X = np.fft.rfft(w); f = np.maximum(np.fft.rfftfreq(n, 1 / 16000), 20)
+    return np.fft.irfft(X / (np.sqrt(f) if kind == 1 else f), n).astype(np.float32)
+
+
 def augment(x):
-    """Stessa stanza ma più lontana o più rumorosa, poi il guadagno automatico dell'app (pezzo più forte → 0,08, max x5)."""
+    """Stessa stanza ma più lontana o più rumorosa, poi il guadagno automatico dell'app (pezzo più forte → 0,08, max x5).
+    Con --bg una parte degli esempi ha sotto la TV vera (0-15 dB), con --noise-prob un rumore costante forte (3-20 dB):
+    nei crash test del 19/11 con la TV sotto la voce il nome passava 5 volte su 15, e il rumore costante faceva scattare."""
     gain = 10 ** (rng.uniform(-30, 3) / 20); y = x * gain
+    py = np.sqrt(np.mean(y ** 2)) + 1e-9
     n = rng.normal(0, 1, len(y)).astype(np.float32); n /= np.sqrt(np.mean(n ** 2)) + 1e-9
-    y = y + n * (np.sqrt(np.mean(y ** 2)) + 1e-9) / 10 ** (rng.uniform(8, 45) / 20)
+    y = y + n * py / 10 ** (rng.uniform(8, 45) / 20)
+    if BG and rng.random() < args.bg_prob:
+        b = BG[rng.integers(len(BG))]; a = rng.integers(0, max(1, len(b) - len(y)))
+        seg = np.resize(b[a:a + len(y)], len(y)); seg /= np.sqrt(np.mean(seg ** 2)) + 1e-9
+        y = y + seg * py / 10 ** (rng.uniform(0, 15) / 20)
+    if rng.random() < args.noise_prob:
+        c = colored_noise(len(y)); c /= np.sqrt(np.mean(c ** 2)) + 1e-9
+        y = y + c * py / 10 ** (rng.uniform(3, 20) / 20)
+    if rng.random() < 0.08: y = np.clip(y * rng.uniform(3, 8), -1, 1)  # voce troppo vicina: saturazione
     peak = max(np.sqrt(np.mean(y[i:i + 1600] ** 2)) for i in range(0, len(y) - 1599, 1600))
     return np.tanh(y * min(5.0, max(1.0, 0.08 / (peak + 1e-9))))
 
@@ -56,6 +82,7 @@ def f16(x):
     return FE.clip_features((np.clip(x, -1, 1) * 32767).astype(np.int16))
 
 
+BG = [read(p) for p in args.bg]
 kit = np.load(f"{args.kit}/kit.npz")
 P = kit["pos"].astype(np.float32); N = kit["neg"].astype(np.float32)
 print("kit", P.shape, N.shape)

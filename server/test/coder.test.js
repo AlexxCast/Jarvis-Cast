@@ -93,7 +93,7 @@ test('Jarvis programmatore: se il modello sbaglia riprova con gli errori, poi si
   assert.equal(p.status, 'failed');
   assert.equal(n, 2);
   assert.ok(!gh.calls.some(c => c.startsWith('POST /repos/me/repo/git/refs')), 'nessun ramo creato');
-  assert.match(db.get("SELECT text FROM inbox WHERE kind = 'code'").text, /Non sono riuscito/);
+  assert.match(db.get("SELECT text FROM inbox WHERE kind = 'code'").text, /Non sono riuscita/);
 });
 
 test('senza GITHUB_TOKEN la funzione è spenta', async () => {

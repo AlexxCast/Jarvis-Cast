@@ -27,11 +27,45 @@ export function nextOccurrence(dueMs, repeat, afterMs, tz) {
   return null;
 }
 
+/**
+ * Scadenza scritta dal modello → millisecondi. Accetta "2026-11-20T08:00", con secondi, con "Z" o "+01:00"
+ * (prima la Z veniva ignorata: un'ora di sfasamento), l'ora a una cifra ("T8:00"), "20/11/2026 08:00",
+ * solo la data (alle 9) o solo l'ora (la prossima volta che arriva). Rifiuta ore impossibili ("25:00").
+ * Un orario già passato da poco (il modello scrive "oggi alle 8" alle 18:30) passa al giorno dopo, invece di suonare subito.
+ */
+export function parseDue(due, nowMs, tz = 'Europe/Rome', { keepPast = false } = {}) {
+  const t = String(due ?? '').trim();
+  if (!t) return null;
+  let ms = null;
+  let m = /^(\d{4})-(\d{1,2})-(\d{1,2})(?:[T ](\d{1,2})[:.](\d{2})(?::(\d{2})(?:\.\d+)?)?\s*(Z|[+-]\d{2}:?\d{2})?)?$/i.exec(t)
+    || (() => { const d = /^(\d{1,2})[/.-](\d{1,2})[/.-](\d{4})(?:[ T,]+(\d{1,2})[:.](\d{2}))?$/.exec(t); return d ? [d[0], d[3], d[2], d[1], d[4], d[5]] : null; })();
+  if (m) {
+    const [, y, mo, d, hh = '9', mm = '00', , zone] = m;
+    if (+mo < 1 || +mo > 12 || +d < 1 || +d > 31 || +hh > 23 || +mm > 59) return null;
+    const pad = (v) => String(v).padStart(2, '0');
+    if (zone) {
+      const off = zone.toUpperCase() === 'Z' ? 0 : (zone[0] === '-' ? -1 : 1) * (Number(zone.slice(1, 3)) * 60 + Number(zone.slice(-2)));
+      ms = Date.UTC(+y, +mo - 1, +d, +hh, +mm) - off * 60_000;
+    } else ms = localToMs(`${y}-${pad(mo)}-${pad(d)}T${pad(hh)}:${pad(mm)}`, tz);
+  } else if ((m = /^(\d{1,2})[:.](\d{2})$/.exec(t))) {
+    if (+m[1] > 23 || +m[2] > 59) return null;
+    const { date } = localParts(nowMs, tz);
+    ms = localToMs(`${date}T${m[1].padStart(2, '0')}:${m[2]}`, tz);
+    if (ms <= nowMs) ms += 24 * 3600_000;
+  }
+  if (ms == null || !Number.isFinite(ms)) return null;
+  if (!keepPast && ms < nowMs - 60_000) {
+    if (nowMs - ms < 24 * 3600_000) ms += 24 * 3600_000; // "alle 8" detto la sera: domattina
+    else return null; // data passata da più di un giorno: meglio chiedere che suonare subito
+  }
+  return ms;
+}
+
 export const PLACE_EVENTS = { arrivo: 'quando arrivi a', uscita: 'quando esci da' };
 // Due avvisi dello stesso luogo a meno di 15 minuti sono quasi sempre il GPS che "balla" sul confine.
 const PLACE_COOLDOWN_MS = 15 * 60_000;
 
-export function addReminder(db, { text, due, repeat, place, when }, ms, tz) {
+export function addReminder(db, { text, due, repeat, place, when }, ms, tz, { fromModel = false } = {}) {
   const clean = String(text || '').trim().slice(0, 300);
   const key = placeKey(place);
   if (key) {
@@ -42,7 +76,8 @@ export function addReminder(db, { text, due, repeat, place, when }, ms, tz) {
     db.run('INSERT INTO reminders (id, text, due, created, repeat, place, place_event) VALUES (?, ?, ?, ?, ?, ?, ?)', id, clean, 0, nowIso(ms, tz), rep, key, ev);
     return id;
   }
-  const dueMs = localToMs(due, tz);
+  // Dall'interfaccia un orario passato suona subito (scelta del Capo); dal modello è quasi sempre un errore di data.
+  const dueMs = fromModel ? parseDue(due, ms, tz) : (parseDue(due, ms, tz, { keepPast: true }));
   if (!clean || dueMs == null) return null;
   const rep = REPEATS[String(repeat || '').toLowerCase()] ? String(repeat).toLowerCase() : '';
   const id = newId('r', ms);
