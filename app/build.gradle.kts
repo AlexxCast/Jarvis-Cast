@@ -13,8 +13,8 @@ android {
         applicationId = "com.jarvisfit.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 36
-        versionName = "2.34"
+        versionCode = 37
+        versionName = "2.35"
     }
 
     // In GitHub Actions la chiave del PC arriva dal segreto DEBUG_KEYSTORE_B64 (vedi build-apk.yml):
@@ -61,6 +61,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-service:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    // Collegamento con Kestra sull'orologio Wear OS (modulo wear/)
+    implementation("com.google.android.gms:play-services-wearable:18.2.0")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")

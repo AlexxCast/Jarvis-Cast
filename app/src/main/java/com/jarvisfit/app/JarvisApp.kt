@@ -21,6 +21,8 @@ class JarvisApp : Application() {
         super.onCreate()
         Settings.init(this)
         Store.init(this)
+        // L'orologio prende da qui indirizzo del server e token.
+        com.jarvisfit.app.device.WatchLink.publishConfig(this)
         val nm = getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(
             NotificationChannel(CH_LISTEN, "Ascolto Jarvis", NotificationManager.IMPORTANCE_LOW)

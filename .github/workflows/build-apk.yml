@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "app/**"
+      - "wear/**"
       - "gradle/**"
       - "gradlew"
       - "*.kts"
@@ -51,7 +52,9 @@ jobs:
         run: ./gradlew --no-daemon "-Dorg.gradle.java.home=$JAVA_HOME" assembleDebug
 
       - name: Rinomina APK
-        run: cp app/build/outputs/apk/debug/*.apk Jarvis.apk
+        run: |
+          cp app/build/outputs/apk/debug/*.apk Jarvis.apk
+          cp wear/build/outputs/apk/debug/*.apk Kestra-orologio.apk
 
       # Impronta del certificato dell'app installata sul telefono (JarvisFit 1.0).
       - name: Controlla che la firma coincida con l'app installata
@@ -60,8 +63,11 @@ jobs:
           EXPECTED: CBE33F52DF0FCE8EF19F5A16A1475D8E4854D23AE0A01047F5AFEA624C2F0E07
         run: |
           GOT=$(python3 scripts/apk_cert.py Jarvis.apk | awk '{print $2}' | head -1)
+          # L'orologio deve avere la stessa firma del telefono, altrimenti i due non si parlano.
+          WATCH=$(python3 scripts/apk_cert.py Kestra-orologio.apk | awk '{print $2}' | head -1)
           echo "Firma APK: $GOT"
-          if [ "$GOT" = "$EXPECTED" ]; then
+          echo "Firma APK orologio: $WATCH"
+          if [ "$GOT" = "$EXPECTED" ] && [ "$WATCH" = "$EXPECTED" ]; then
             echo "signed=true" >> "$GITHUB_OUTPUT"
           else
             echo "::warning::La firma non coincide con l'app sul telefono: niente release (installarlo richiederebbe di disinstallare e perdere i dati)."
@@ -72,7 +78,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Jarvis-apk
-          path: Jarvis.apk
+          path: |
+            Jarvis.apk
+            Kestra-orologio.apk
 
       # La release si pubblica solo se la firma è quella giusta: un APK firmato diversamente
       # costringerebbe a disinstallare l'app e a perdere i dati.
@@ -82,4 +90,6 @@ jobs:
         with:
           tag_name: apk-latest
           name: Jarvis APK (ultima build)
-          files: Jarvis.apk
+          files: |
+            Jarvis.apk
+            Kestra-orologio.apk
