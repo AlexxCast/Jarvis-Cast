@@ -88,6 +88,8 @@ export function heartbeat(db, payload = {}, nowMs = Date.now()) {
   if (mine.length) {
     const rest = queue.filter(c => !(c.targetDevice === record.id || c.targetDevice === kind));
     kvSet(db, QUEUE_KEY, rest);
+    const ids = new Set(mine.map(c => c.id));
+    kvSet(db, HISTORY_KEY, kvGet(db, HISTORY_KEY, []).map(h => ids.has(h.id) ? { ...h, status: 'consegnato', deliveredAt: nowMs } : h));
   }
 
   if (mine.length) markActive(db, nowMs);
@@ -124,6 +126,36 @@ export function enqueueCommand(db, targetDevice, cmd, nowMs = Date.now()) {
   return entry;
 }
 
+/** Esito riportato dal PC dopo aver eseguito un comando (verifica a ciclo chiuso). */
+export function reportResult(db, payload = {}, nowMs = Date.now()) {
+  const id = String(payload.id || '');
+  if (!id) return { ok: false };
+  const status = payload.ok === false ? 'errore' : 'eseguito';
+  let found = false;
+  const hist = kvGet(db, HISTORY_KEY, []).map(h => {
+    if (h.id !== id) return h;
+    found = true;
+    return { ...h, status, error: String(payload.error || '').slice(0, 200), after: String(payload.activeWindow || '').slice(0, 120), doneAt: nowMs };
+  });
+  if (found) kvSet(db, HISTORY_KEY, hist);
+  return { ok: found };
+}
+
+const STATUS_LABEL = { queued: 'IN CODA, il PC non l\'ha ancora preso', consegnato: 'consegnato, esito non ancora noto', eseguito: 'eseguito', errore: 'FALLITO' };
+
+/** Ultimi comandi al PC con il loro esito reale, per non dichiarare fatto ciò che non lo è. */
+export function recentCommandsPrompt(db, nowMs = Date.now()) {
+  const recent = kvGet(db, HISTORY_KEY, []).filter(h => nowMs - Number(h.createdAt || 0) < 15 * 60_000).slice(0, 4);
+  if (!recent.length) return '';
+  const lines = recent.map(h => {
+    const min = Math.max(0, Math.round((nowMs - Number(h.createdAt || 0)) / 60_000));
+    const st = STATUS_LABEL[h.status] || h.status;
+    return `- ${min} min fa: ${h.kind} "${String(h.target).slice(0, 60)}" → ${st}${h.error ? ' (' + h.error + ')' : ''}${h.after ? ` · finestra attiva dopo: "${h.after}"` : ''}`;
+  });
+  return 'ESITO DEGLI ULTIMI COMANDI AL PC (fatti osservati, non supposizioni):\n' + lines.join('\n')
+    + '\nSe il Capo dice che non ha funzionato, credigli: non ripetere lo stesso comando, prova un\'altra strada o di\' cosa non puoi fare.';
+}
+
 export function listCommandHistory(db) {
   return kvGet(db, HISTORY_KEY, []);
 }
@@ -139,5 +171,8 @@ export function devicesPrompt(db, nowMs = Date.now()) {
     const apps = (d.apps || []).length ? ` · App PC: ${d.apps.slice(0, 20).join(', ')}` : '';
     return `- ${d.name} (${d.kind}, ${st}${metr ? ' · ' + metr : ''})${apps}`;
   });
-  return 'DISPOSITIVI GESTITI DA JARVIS (puoi controllarli con l\'azione pc_action {kind: "open_app"|"open_url"|"close_app"|"search_web"|"play_youtube"|"search_files"|"type_text"|"hotkey"|"system"|"capture_screen"|"notify"|"shell", target: "...", args?: "..."}):\n' + lines.join('\n');
+  const recent = recentCommandsPrompt(db, nowMs);
+  return 'DISPOSITIVI GESTITI DA JARVIS (puoi controllarli con l\'azione pc_action {kind: "open_app"|"open_url"|"close_app"|"search_web"|"play_youtube"|"search_files"|"type_text"|"hotkey"|"find_on_page"|"scroll"|"system"|"capture_screen"|"notify"|"shell", target: "...", args?: "..."}):\n' + lines.join('\n')
+    + '\nSul PC NON puoi cliccare col mouse dentro una finestra né vedere lo schermo senza capture_screen: per scegliere un film o un link usa open_url con l\'indirizzo di ricerca, find_on_page (args "open" per aprire il risultato) o hotkey. Se una cosa non la sai fare, dillo invece di promettere.'
+    + (recent ? '\n' + recent : '');
 }

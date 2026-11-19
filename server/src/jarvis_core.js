@@ -484,6 +484,19 @@ export function dispatchPcOpen(db, rawTarget, nowMs = Date.now()) {
   const clean = String(rawTarget || '').replace(/[.!?]+$/, '').trim();
   if (!clean) return null;
   const low = clean.toLowerCase();
+  // "helluva boss su prime video": un titolo dentro un servizio → pagina di ricerca del servizio, non un'app inesistente.
+  const inSvc = /^(.{2,80}?)\s+(?:su|sul|in|da)\s+(prime(?:\s+video)?|youtube|netflix)$/i.exec(clean);
+  if (inSvc) {
+    const q = encodeURIComponent(inSvc[1].trim());
+    const svc = inSvc[2].toLowerCase();
+    const url = svc.startsWith('prime') ? `https://www.primevideo.com/search/ref=atv_nb_sbox?phrase=${q}`
+      : svc === 'youtube' ? `https://www.youtube.com/results?search_query=${q}` : `https://www.netflix.com/search?q=${q}`;
+    devices.enqueueCommand(db, 'desktop', { kind: 'open_url', target: url }, nowMs);
+    return {
+      reply: `Cerco ${inSvc[1].trim()} su ${inSvc[2]} sul PC: da lì scegli tu l'episodio, io non posso cliccare dentro la pagina.`,
+      device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [],
+    };
+  }
   const webUrl = WEB_SERVICES[low];
   const reg = flows.registerAutoGoal(db, `PC: apri ${clean}`, nowMs);
   if (webUrl) {

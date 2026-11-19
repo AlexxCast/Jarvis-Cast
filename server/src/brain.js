@@ -21,6 +21,7 @@ import * as places from './places.js';
 import * as agenda from './agenda.js';
 import * as ui from './ui.js';
 import * as coder from './coder.js';
+import * as cooking from './cooking.js';
 import * as mood from './mood.js';
 import { today as todayOf, nowIso as nowIsoOf, nowHuman } from './clock.js';
 import { logEvent, kvSet, kvGet } from './db.js';
@@ -79,7 +80,9 @@ export function cleanVisual(a) {
 }
 
 /** Frasi con cui il modello dichiara di aver salvato o cambiato qualcosa. */
-export const CLAIM_WORDS = /\b(ho|l'ho|li ho|le ho|te l'ho|gliel'ho)\s+(appena\s+|già\s+|subito\s+|anche\s+)?(registrat|aggiunt|aggiornat|salvat|segnat|impostat|annotat|memorizzat|eliminat|cancellat|inserit|creat|modificat|spostat|tolt|rimoss|chius|apert)|\b(chiudo|apro|avvio|cerco|eseguo|seleziono)\s+(?:subito|ora|adesso|immediatamente)\b|\b(promemoria|piano|diario|pasto|peso|allenamento|dispensa|ricetta)\s+(è stat[oa]\s+)?(impostat|aggiornat|registrat|salvat|creat|aggiunt)[oa]\b|^\W*(fatto|registrato|aggiornato|salvato|segnato|annotato)\b/i;
+const ACTION_ASK = /\b(aggiungi|segna|segnami|registra|ricordami|ricorda|salva|crea|creami|apri|aprimi|prepara|preparami|organizza|cancella|elimina|togli|sposta|imposta|programma|clicca|seleziona|collegati|configura)\b/i;
+
+export const CLAIM_WORDS = /\b(ho|l'ho|li ho|le ho|te l'ho|gliel'ho)\s+(appena\s+|già\s+|subito\s+|anche\s+)?(registrat|aggiunt|aggiornat|salvat|segnat|impostat|annotat|memorizzat|eliminat|cancellat|inserit|creat|modificat|spostat|tolt|rimoss|chius|apert)|\b(chiudo|apro|avvio|cerco|eseguo|seleziono)\s+(?:subito|ora|adesso|immediatamente)\b|\b(apro|avvio|clicco|forzo|lancio|configuro|premo|faccio partire)\b|\bci penso io\b[^!?]{0,40}\b(apr|cerc|avvi|lanci|mett|clicc|prepar|configur)|\b(promemoria|piano|diario|pasto|peso|allenamento|dispensa|ricetta)\s+(è stat[oa]\s+)?(impostat|aggiornat|registrat|salvat|creat|aggiunt)[oa]\b|^\W*(fatto|registrato|aggiornato|salvato|segnato|annotato)\b/i;
 const FAIL_LABELS = { show: 'mostrare la grafica', web_search: 'cercare su internet', read_url: 'leggere la pagina', add_meal: 'registrare il pasto (mancano gli alimenti)', update_meal: 'modificare il pasto (non l\'ho trovato)', delete_meal: 'eliminare il pasto (non l\'ho trovato)', add_weight: 'registrare il peso', add_activity: 'registrare l\'allenamento', add_reminder: 'creare il promemoria (data non valida)', remember: 'salvare il ricordo', call: 'avviare la chiamata (manca il nome)', update_profile: 'aggiornare il profilo', delete_activity: 'eliminare l\'attività (non l\'ho trovata)' };
 const failLabel = (t) => FAIL_LABELS[t] || `completare l'operazione "${t}"`;
 const REPAIR_PROMPT = (failed) => `CONTROLLO AUTOMATICO: nella tua risposta ${failed.length ? `queste azioni non erano valide e NON sono state eseguite: ${failed.join(', ')}` : 'dichiari di aver fatto qualcosa ma il campo "actions" è vuoto o incompleto'}. Finora NON è stato salvato nulla. Rimanda SOLO il JSON completo, con in "actions" tutte le azioni corrette e complete (per un pasto: items con name, grams, kcal, protein, carbs, fat; per update/delete: l'id esatto preso dal contesto). Se davvero non c'è nulla da salvare, lascia "actions" vuoto e scrivi una reply che NON dica di aver salvato o fatto qualcosa.`;
@@ -159,6 +162,7 @@ export function applyActions(db, actions, ctx) {
       else if (coder.CODE_ACTIONS.has(a.type)) out.code.push({ type: a.type, id: String(a.id || ''), request: String(a.request || '').trim().slice(0, 2000) });
       else if (ui.UI_ACTIONS.has(a.type)) { if (!ui.applyUiAction(db, a, ctx.nowIso)) { out.failed.push(a.type); continue; } out.ui = true; }
       else if (a.type === 'start_job') { if (String(a.goal || '').trim()) out.jobs.push({ title: String(a.title || 'Compito').slice(0, 80), goal: String(a.goal).slice(0, 2000) }); }
+      else if (cooking.COOKING_ACTIONS.has(a.type)) { if (!cooking.apply(db, a, ctx.ms)) { out.failed.push(a.type); continue; } }
       else if (a.type === 'live_card') { if (!jarvisCore.applyLiveCard(db, a, ctx.ms)) { out.failed.push(a.type); continue; } }
       else if (a.type === 'pc_action') {
         const target = String(a.target || a.name || a.url || '').trim();
@@ -301,7 +305,11 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   jarvisCore.selfInterrogate(db, env, ms, tz);
 
   // 1. JARVIS CORE (IA proprietaria interna): gestisce direttamente controllo multi-dispositivo (PC/Telefono), Antigravity, timer e diagnostica.
-  const coreHit = (!image && !fileList.length) ? jarvisCore.handleCoreIntent(db, userText, ms, env, sessionId, tz) : null;
+  // In cucina con le mani occupate: "avanti", "indietro", "ripeti" scorrono i passaggi senza chiamare un modello.
+  const cookStep = (!image && !fileList.length) ? cooking.voiceStep(db, userText, ms) : null;
+  const coreHit = cookStep
+    ? { reply: cookStep, expectReply: true, actions: ['recipe_step'], device: [], touched: ['cucina'], touchedLeaves: [] }
+    : (!image && !fileList.length) ? jarvisCore.handleCoreIntent(db, userText, ms, env, sessionId, tz) : null;
   if (coreHit) {
     if (coreHit.scheduleAt) deps.schedule?.(coreHit.scheduleAt);
     if (coreHit.reply) {
@@ -369,7 +377,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   const parts = {
     core: CORE_PROMPT(diary.profile.name, nowHuman(ms, tz)) + '\n\n' + mood.MOOD_PROMPT(mood.current(db, ms)) + (projCtx ? '\n\n' + projCtx.header : ''),
     brief: projCtx && !dietOn ? '' : dietBrief(diary, today),
-    rules: [focusLine, dietOn ? DIET_RULES : '', UI_WORDS.test(userText) ? ui.uiPrompt(ui.loadLayout(db)) : '', UI_WORDS.test(userText) ? coder.codePrompt(env, db) : '', DEVICE_WORDS.test(userText) ? appsPrompt(db) : '', lessons.contextBlock(db, probe), initiative.NOTIF_WORDS.test(userText) ? initiative.notificationsContext(db) : '', (/\b(pc|computer|desktop|windows|dispositiv\w*)\b/i.test(userText) || activeFocus?.device === 'pc' || navActive) ? devices.devicesPrompt(db, ms) : '', phone.pendingContext(db, ms)].filter(Boolean).join('\n\n'),
+    rules: [focusLine, cooking.contextLine(db), dietOn ? DIET_RULES : '', UI_WORDS.test(userText) ? ui.uiPrompt(ui.loadLayout(db)) : '', UI_WORDS.test(userText) ? coder.codePrompt(env, db) : '', DEVICE_WORDS.test(userText) ? appsPrompt(db) : '', lessons.contextBlock(db, probe), initiative.NOTIF_WORDS.test(userText) ? initiative.notificationsContext(db) : '', (/\b(pc|computer|desktop|windows|dispositiv\w*)\b/i.test(userText) || activeFocus?.device === 'pc' || navActive) ? devices.devicesPrompt(db, ms) : '', phone.pendingContext(db, ms)].filter(Boolean).join('\n\n'),
     blocks: [...(dietOn ? dietContext(diary, today) : []), ...(projCtx ? projCtx.blocks : [])],
     memories: recalled.entries.slice(0, projCtx ? 8 : 24).map(m => `- [${m.id}] (${m.module}) ${m.text}`),
     moduleIndex: [mods.length ? 'MODULI DI MEMORIA ESISTENTI: ' + mods.map(m => `${m.name}${m.description ? ` (${m.description})` : ''} [${m.entries}]`).join('; ') : '',
@@ -397,9 +405,12 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   let remembered = [];
   let topicHits = { modules: [], leaves: [] };
   const tier = router.classifyTier(userText, !!image || !!pdfBase64);
+  // Richiesta che chiede di FARE qualcosa (PC, telefono, diario, agenda, sessioni): niente modelli lite,
+  // che rispondono "ci penso io" senza mettere l'azione nel JSON.
+  const needsActions = ACTION_ASK.test(userText) || phone.DOING_WORDS.test(userText) || jarvisCore.isPcTarget(db, userText);
   try {
     let res = await router.chat(db, env, {
-      tier, needsVision: !!image || !!pdfBase64, preferKey: sess.model, maxTokens: 2000,
+      tier, needsVision: !!image || !!pdfBase64, preferKey: sess.model, needsActions, maxTokens: 2000,
       build: (model) => buildMessages(model, parts), fetchFn: deps.fetchFn, now: deps.now, tz,
     });
     let parsed = parseReply(res.text);
@@ -518,6 +529,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
       if (svc.length >= 3 && !flows.findMatchingSkill(db, userText, 'pc')) {
         const proposed = flows.proposeSkill(db, sessionId, {
           name: `${svc} su PC`,
+          userText,
           service: svc,
           device: 'pc',
           defaults: { account: activeFocus?.profile || 'alexx cast' },
@@ -532,6 +544,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
       if (svc.length >= 3 && (devAct.type === 'open_app' || devAct.type === 'open_url') && !flows.findMatchingSkill(db, userText, 'telefono')) {
         const proposed = flows.proposeSkill(db, sessionId, {
           name: `${svc} su Telefono`,
+          userText,
           service: svc,
           device: 'telefono',
           steps: [{ kind: devAct.type, target: devAct.url || devAct.name, optional: false }],

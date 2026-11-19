@@ -677,6 +677,23 @@ def execute_pc_command(cmd: dict, log_fn, cfg: dict = None) -> None:
             log_fn(f"Impossibile aprire '{target}': {e}")
 
 
+def run_and_report(cmd: dict, log_fn, cfg: dict) -> None:
+    """Esegue il comando e dice al server com'è andata: così Kestra non racconta di aver fatto ciò che è fallito."""
+    ok, err = True, ""
+    try:
+        execute_pc_command(cmd, log_fn, cfg)
+    except Exception as e:  # il comando è fallito: lo si riporta invece di tacere
+        ok, err = False, str(e)[:200]
+        log_fn(f"Comando non riuscito [{cmd.get('kind')}]: {err}")
+    if not cmd.get("id"):
+        return
+    try:
+        api_call(cfg, "POST", "/devices/result", {"id": cmd.get("id"), "ok": ok, "error": err,
+                                                   "activeWindow": (get_pc_metrics() or {}).get("activeWindow", "")}, timeout=6)
+    except Exception:
+        pass  # server non raggiungibile: il comando resta "consegnato"
+
+
 def api_call(cfg: dict, method: str, path: str, payload: dict = None, timeout: float = 15) -> dict:
     base = cfg.get("server_url", "").strip().rstrip("/")
     token = cfg.get("server_token", "").strip()
@@ -928,7 +945,7 @@ class JarvisDesktopApp:
             self.root.after(0, lambda: self.status_lbl.configure(text="● CONNESSO A JARVIS CLOUD", fg="#39ff14"))
             self.log("Connesso con successo a Jarvis Cloud! Il PC è online.")
             for cmd in res.get("commands") or []:
-                execute_pc_command(cmd, self.log, self.cfg)
+                run_and_report(cmd, self.log, self.cfg)
         except Exception as e:
             self.online = False
             self.root.after(0, lambda: self.status_lbl.configure(text="○ Errore connessione", fg="#ef4444"))
@@ -988,7 +1005,7 @@ class JarvisDesktopApp:
                         self.root.after(0, lambda: self.status_lbl.configure(text="● CONNESSO A JARVIS CLOUD", fg="#39ff14"))
                         self.log("PC registrato e connesso al sistema multi-dispositivo di Jarvis.")
                     for cmd in res.get("commands") or []:
-                        execute_pc_command(cmd, self.log, self.cfg)
+                        run_and_report(cmd, self.log, self.cfg)
                     wait = poll_wait(res)
                 except Exception:
                     wait = 10
@@ -1149,7 +1166,7 @@ def run_background_daemon() -> None:
                 )
                 last_err = ""
                 for cmd in res.get("commands") or []:
-                    execute_pc_command(cmd, bg_log, cfg)
+                    run_and_report(cmd, bg_log, cfg)
                 wait = poll_wait(res)
             except Exception as e:
                 wait = 10  # server irraggiungibile: niente raffica di tentativi
