@@ -1442,6 +1442,11 @@ function viewImpostazioni() {
       toggle('Ascolto continuo di "Kestra" (anche a schermo spento)', 'listening', 'setListening'),
       toggle('Leggi le risposte ad alta voce', 'speakReplies', 'setSpeakReplies'),
       toggle('Lascia il microfono alle altre app (Gemini, vocali, chiamate)', 'micGuard', 'setMicGuard'),
+      cfg.strongWake === undefined ? null : h('div', {},
+        toggle('Riconoscimento forte di "Kestra" (offline, ascolta solo il suo nome)', 'strongWake', 'setStrongWake'),
+        h('div', { class: 'muted small' }, cfg.strongWakeReady
+          ? 'Sente il nome anche da lontano e con la musica accesa; dopo il bip di\' la richiesta.'
+          : 'Non disponibile su questo telefono: uso il riconoscimento di Android.')),
       h('div', {}, h('div', { class: 'small' }, 'Sensibilità quando lo chiama'),
         h('div', { class: 'row wrap' }, [['Bassa', 0.2, 'solo "Ehi Kestra" all\'inizio'], ['Media', 0.5, 'consigliata'], ['Alta', 0.85, 'risponde anche a nomi simili']].map(([label, v, hint]) =>
           h('button', { class: 'btn' + (Math.abs((cfg.sensitivity ?? 0.5) - v) < 0.2 ? ' primary' : ''), title: hint, onclick: () => { nativeCall('setSensitivity', v); setTimeout(render, 200); } }, label))),

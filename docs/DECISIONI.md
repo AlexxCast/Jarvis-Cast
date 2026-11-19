@@ -451,3 +451,10 @@ Il Capo tiene il telefono sul comodino e parla dalla scrivania: doveva gridare. 
 - Stesse regole di chiamata del telefono (nome all'inizio o alla fine di una frase breve, storpiature solo in posizione di chiamata). Solo il nome → bip e ascolta la richiesta. Dopo una domanda di Kestra (`expectReply`) ascolta 8 secondi senza nome, con `followup: true` così il server scarta TV e altre voci.
 - Gira nel demone in background (casella nella finestra → config `listen`); la finestra chiude un demone vecchio (`DAEMON_VERSION`) perché altrimenti resterebbe il codice prima dell'aggiornamento.
 - Dispositivo dedicato in Wi-Fi e app per orologio Wear OS: in thread separati.
+
+### Riconoscimento forte di "Kestra" sul telefono (app 2.35, 2026-11-19)
+Anche con la 2.34 il Capo doveva chiamarla molte volte. Il riconoscimento di Android cerca parole italiane e non conosce "Kestra". Scelta: un modello che cerca SOLO la parola, offline sul telefono.
+- Porcupine (Picovoice) scartato: il piano gratuito è finito il 30/06/2026 e le chiavi gratuite non funzionano più.
+- sherpa-onnx (Apache 2.0), keyword spotting a vocabolario aperto (`sherpa-onnx-kws-zipformer-gigaspeech-3.3M`): la parola si scrive in pezzi del modello (`keywords.txt`), non serve addestrare niente. File Kotlin copiati dalla 2.0.1 in `app/src/main/java/com/k2fsa/sherpa/onnx`; modello e librerie arm64 della stessa versione scaricati durante la build da `scripts/fetch_kws.sh` (CI e Build APK). Se mancano, l'app usa il riconoscimento di Android come prima.
+- `voice/KestraKws.kt`: AudioRecord 16 kHz → modello; soglia e spinta seguono la sensibilità (Alta ≈ soglia 0,20). Quando sente il nome: bip e subito il riconoscimento normale della richiesta (niente saluto lungo). Non prende il fuoco audio, quindi ascolta anche con la musica.
+- Si comporta come una sessione d'ascolto per MicGuard, la pausa durante la voce di Kestra e il controllo anti-blocco. Interruttore in Impostazioni (`strongWake`, acceso di default).
