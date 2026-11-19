@@ -459,7 +459,33 @@ Anche con la 2.34 il Capo doveva chiamarla molte volte. Il riconoscimento di And
 - `voice/KestraKws.kt`: AudioRecord 16 kHz → modello; soglia e spinta seguono la sensibilità (Alta ≈ soglia 0,20). Quando sente il nome: bip e subito il riconoscimento normale della richiesta (niente saluto lungo). Non prende il fuoco audio, quindi ascolta anche con la musica.
 - Si comporta come una sessione d'ascolto per MicGuard, la pausa durante la voce di Kestra e il controllo anti-blocco. Interruttore in Impostazioni (`strongWake`, acceso di default).
 
-### Kestra sull'orologio Wear OS (modulo `wear/`, app telefono 2.36, 2026-11-19)
+## Sfera a colori e riconoscimento forte più affidabile (app 2.37, 19/11/2026)
+- **Colori della sfera** (richiesta di Alessio): la sfera non è più di un solo colore, ma resta nel tema del
+  personaggio Kestra. I colori vengono SOLO dalla figura umanoide del disegno (pixel campionati: prugna, viola del
+  mantello, petrolio di guanti e gilet, cuoio, blu viola dei capelli, pelle, oro della fibbia, argento), mai dallo
+  sfondo pastello né dal nome scritto: una seconda versione con verde smeraldo e petrolio chiaro presi dallo
+  sfondo è stata bocciata. NON tutto lo spettro: una prima versione arcobaleno è stata bocciata
+  ("troppi colori"). Ogni ramo prende un colore di `KESTRA_PALETTE` (orb.js); ogni foglia è una sfumatura diversa
+  del colore del suo ramo.
+- **Sfondo dell'app** (`--bg-art` in style.css): resta scuro ma non tutto verde, con macchie morbide di viola,
+  petrolio, prugna e un filo di cuoio, sempre i colori della figura. Le piste sui livelli sfumano dal colore del nodo di partenza a
+  quello della foglia; i gusci dei livelli sono grigio-azzurri neutri.
+- **Le emozioni colorano SOLO i raggi** dal centro ai nodi (più il nucleo e gli impulsi che ci corrono sopra).
+  Un cambio d'umore risale i raggi dal centro come un'onda. Palette: calma/tranquilla = verde, gioia (stato
+  intermedio) = azzurro, tensione/rabbia = rosso magenta, confusione = arancione rosato. A riposo vince il verde.
+- Nuovo ormone `confusione` in `server/src/mood.js` (dubbio, incertezza, perplessità); quando non riesce a salvare
+  davvero una cosa ("me lo può ripetere?") si sente confusa invece che frustrata.
+- I nodi autonomi (flow) tengono il loro doppio anello ma il colore è quello dello spettro: l'umore non tocca i nodi.
+- **Riconoscimento forte** (rispondeva circa 1 volta su 5):
+  - soglie più facili (Media ≈ 0.19 / spinta 2.25, Alta ≈ 0.14; prima 0.26 / 1.5);
+  - volume automatico fino a ×5 con limitatore morbido: il telefono sul comodino sente la voce dalla scrivania;
+  - se Android dà al servizio un microfono muto (succede quando l'ascolto riparte con l'app chiusa) se ne accorge
+    (zeri esatti per 6 s o `isClientSilenced`), passa al riconoscimento di Android per 10 minuti, e riaprire l'app
+    lo riattiva (`JarvisService.refresh` a ogni `onResume`, che riavvia il servizio dal primo piano);
+  - diagnosi in Impostazioni › Telefono: se è attivo, volume del microfono, quante volte ha sentito "Kestra" e
+    l'ultimo problema. Serve a capire dal telefono vero cosa non va.
+
+### Kestra sull'orologio Wear OS (modulo `wear/`, app telefono 2.38, 2026-11-19)
 Richiesta del Capo: con il telefono sul comodino e lui alla scrivania doveva gridare. Vuole un'app sull'orologio che si apre con un tocco o un tasto e poi resta in background. Non serve cambiare il sistema dell'orologio.
 - **Perché Wear OS:** è l'unico sistema da polso dove un'app può ascoltare, usare internet e parlare. Garmin, Amazfit e simili durano di più ma non caricano app così. Serve Wear OS 3 o successivo (Galaxy Watch 4+, Pixel Watch, TicWatch...).
 - **Come funziona:** aprire l'app fa partire subito l'ascolto (vibrazione breve). La frase va a `/api/chat` dello stesso server, con la sessione `main`, così la conversazione continua quella del telefono. La risposta si sente dall'altoparlante dell'orologio; senza altoparlante si legge e vibra. Poi resta in ascolto per il seguito (`followup`, come sul telefono). Se non parli più, si chiude da sola per non consumare batteria. Abbassare il polso non la ferma: è un servizio in primo piano col microfono.

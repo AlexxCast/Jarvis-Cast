@@ -19,6 +19,45 @@ const MODES = {
   off:       { spin: 0.05, rate: 0.3, glow: 0.35, breathe: 0.01, label: 'Ascolto spento' },
 };
 
+/** Colore [r,g,b] da tonalità (gradi), saturazione e luminosità 0..1. */
+const hsl = (h, sat = 0.92, lig = 0.6) => {
+  const a = sat * Math.min(lig, 1 - lig);
+  const f = (n) => { const k = (n + h / 30) % 12; return Math.round(255 * (lig - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)))); };
+  return [f(0), f(8), f(4)];
+};
+/** Da [r,g,b] a [tonalità in gradi, saturazione, luminosità]. */
+const toHsl = ([r, g, b]) => {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, d = mx - mn;
+  if (!d) return [0, 0, l];
+  const sat = d / (1 - Math.abs(2 * l - 1));
+  const h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [(h * 60 + 360) % 360, sat, l];
+};
+/** Palette presa SOLO dalla figura di Kestra nel disegno di Alessio (pixel del personaggio, niente sfondo né
+ *  scritte): stesse tonalità, solo un po' più luminose per staccare dal fondo scuro. */
+const KESTRA_PALETTE = [
+  hsl(313, 0.62, 0.55), // prugna di pantaloni e ombre del mantello
+  hsl(172, 0.5, 0.45),  // verde petrolio di guanti e fasce
+  hsl(25, 0.5, 0.52),   // cuoio di stivali e cintura
+  hsl(292, 0.5, 0.63),  // viola del mantello alla luce
+  hsl(182, 0.28, 0.58), // grigio petrolio del gilet
+  hsl(250, 0.42, 0.64), // blu viola dei capelli
+  hsl(32, 0.42, 0.64),  // pelle ambrata
+  hsl(55, 0.38, 0.55),  // oro della fibbia
+  hsl(100, 0.1, 0.76),  // argento di bende e lame
+  hsl(305, 0.38, 0.72), // lilla dei riflessi del mantello
+];
+/** Ogni ramo prende un colore della palette (in ordine sparso, così due rami vicini non si somigliano);
+ *  ogni foglia è una sfumatura diversa del colore del suo ramo, sempre dentro il tema. */
+const branchColor = (i) => KESTRA_PALETTE[(i * 3) % KESTRA_PALETTE.length];
+const leafColor = (base, k) => {
+  const [h, sat, l] = toHsl(base);
+  const f = (((k + 1) * 0.618034) % 1) - 0.5;          // -0.5..0.5, diverso per ogni foglia
+  const g = (((k + 1) * 0.381966 + 0.25) % 1) - 0.5;
+  return hsl((h + f * 22 + 360) % 360, Math.min(0.9, sat), Math.max(0.4, Math.min(0.8, l + g * 0.24)));
+};
+
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
 const clampLat = (v) => Math.max(-1.3, Math.min(1.3, v));
@@ -49,6 +88,7 @@ function layoutBranches(list, old) {
     const prev = old.get(b.id);
     // Livelli: i rami personali e leggeri stanno su un guscio interno, quelli pesanti e accessori fuori.
     const r = shellOf(b);
+    const base = branchColor(i);
     const hub = { ...onSphere(lat, lon, r), lat, lon, rad: r, heat: prev ? prev.hub.heat : 0 };
     // Dal centro: linea dritta fino al nodo sulla sfera.
     const spoke = [{ x: 0, y: 0, z: 0 }, hub];
@@ -68,7 +108,7 @@ function layoutBranches(list, old) {
       const before = prev?.leaves.find(l => l.id === c.id);
       const pos = { ...onSphere(llat, llon, r), lat: llat, lon: llon, rad: r };
       const isAuto = !!(c.auto || c.kind === 'flow' || b.auto || b.kind === 'flow');
-      return { id: c.id, label: String(c.label || ''), ...pos, path: surfaceTrace(hub, pos, r), heat: before ? before.heat : 0, auto: isAuto };
+      return { id: c.id, label: String(c.label || ''), ...pos, path: surfaceTrace(hub, pos, r), heat: before ? before.heat : 0, auto: isAuto, rgb: leafColor(base, k) };
     });
     const count = new Map();
     const pendingSubs = [...subs];
@@ -89,10 +129,10 @@ function layoutBranches(list, old) {
         const before = prev?.leaves.find(l => l.id === c.id);
         const pos = { ...onSphere(llat, llon, r), lat: llat, lon: llon, rad: r };
         const isAuto = !!(c.auto || c.kind === 'flow' || host.auto);
-        leaves.push({ id: c.id, label: String(c.label || ''), ...pos, parent: host.id, path: surfaceTrace(host, pos, r), heat: before ? before.heat : 0, sub: true, auto: isAuto });
+        leaves.push({ id: c.id, label: String(c.label || ''), ...pos, parent: host.id, path: surfaceTrace(host, pos, r), heat: before ? before.heat : 0, sub: true, auto: isAuto, rgb: leafColor(base, kids.length + leaves.length) });
       }
     }
-    return { id: b.id, label: String(b.label || b.id), kind: b.kind || 'module', auto: !!(b.auto || b.kind === 'flow'), ring: b.ring ?? 1, zone: i, dir: hub, hub, spoke, leaves, fade: prev?.fade ?? 0 };
+    return { id: b.id, label: String(b.label || b.id), kind: b.kind || 'module', auto: !!(b.auto || b.kind === 'flow'), ring: b.ring ?? 1, zone: i, dir: hub, hub, spoke, leaves, fade: prev?.fade ?? 0, rgb: base };
   });
 }
 
@@ -114,12 +154,12 @@ export function createOrb() {
   let branches = [];
   let focus = null;
   let onPick = null;
-  // Umore: colora la rete e gli impulsi (non lo sfondo). Un cambio parte da Jarvis e si propaga verso
-  // l'esterno come un'onda; le emozioni secondarie colorano alcune zone e una parte degli impulsi.
-  const BASE = [57, 255, 20];
-  // Colore distintivo per i nodi dei percorsi autonomi (flow): viola acceso e verde smeraldo.
-  const AUTO_CALM = [168, 85, 247], AUTO_AGITATED = [57, 255, 20];
-  let tintFrom = BASE, tintTo = BASE, tintA = 0, wave = 9, parts = [], tension = 0.15, agitation = 0;
+  // Colori: ogni nodo ha il suo colore, preso dalla palette del personaggio Kestra, fisso. L'umore colora SOLO i raggi
+  // che partono da Kestra verso i nodi, il nucleo e gli impulsi che corrono sui raggi. Un cambio d'umore
+  // parte dal centro e risale i raggi come un'onda. Rabbia/tensione rosso-magenta, calma verde,
+  // gioia azzurro, confusione arancione rosato (la mappa è in app.js).
+  const BASE = [40, 255, 110];
+  let tintFrom = BASE, tintTo = BASE, tintA = 0, wave = 9, parts = [];
   let fit = 1, rings = 3, maxRad = 1;                // la sfera si allontana quando i gusci crescono
   let angle = 0.4, tilt = 0.35, last = 0, spawn = 0, raf = 0, w = 0, hgt = 0, spinRing = 0;
 
@@ -136,13 +176,13 @@ export function createOrb() {
   function fireBranch(b, leafIds = null, speed = 1) {
     if (trails.length > 50) return;
     center.heat = 1;
-    const col = pulseColor();
-    trails.push({ path: b.spoke, t: 0, speed, col, then: () => {
+    trails.push({ path: b.spoke, t: 0, speed, col: pulseColor(), then: () => {
       b.hub.heat = Math.max(b.hub.heat, leafIds ? 1 : 0.6);
       const targets = leafIds === null
         ? (b.leaves.length && Math.random() < 0.6 ? [b.leaves[Math.floor(Math.random() * b.leaves.length)]] : [])
         : b.leaves.filter(l => leafIds.has(l.id));
-      const light = (l, sp) => trails.push({ path: l.path, t: 0, speed: sp, col, then: () => {
+      // Sui livelli l'impulso prende il colore del nodo che raggiunge.
+      const light = (l, sp) => trails.push({ path: l.path, t: 0, speed: sp, col: l.rgb, then: () => {
         l.heat = Math.max(l.heat, leafIds ? 1 : 0.6);
         // Un sotto-argomento acceso riceve l'impulso passando dal suo argomento.
         for (const s of b.leaves) if (s.parent === l.id && (leafIds ? leafIds.has(s.id) : Math.random() < 0.4)) light(s, sp * 0.9);
@@ -155,22 +195,18 @@ export function createOrb() {
   }
 
   const mix = (a, b, k) => [0, 1, 2].map(i => a[i] + (b[i] - a[i]) * k);
-  /** Colore della rete a distanza rad dal centro: dietro l'onda il nuovo umore, davanti il vecchio. */
+  /** Colore dell'umore a distanza rad dal centro, lungo i raggi: dietro l'onda il nuovo, davanti il vecchio. */
   const tintAt = (rad) => {
     const k = Math.max(0, Math.min(1, (wave - rad) / 0.3));
-    return mix(BASE, mix(tintFrom, tintTo, k * k * (3 - 2 * k)), 0.55 + tintA * 0.45);
+    return mix(tintFrom, tintTo, k * k * (3 - 2 * k));
   };
-  /** Colore di un impulso: di solito l'umore dominante, a volte un'emozione secondaria. */
+  /** Colore di un impulso sui raggi: di solito l'umore dominante, a volte un'emozione secondaria. */
   function pulseColor() {
     let x = Math.random();
-    for (const p of parts) { if ((x -= p.w) <= 0) return mix(BASE, p.rgb, 0.6 + tintA * 0.4); }
+    for (const p of parts) { if ((x -= p.w) <= 0) return p.rgb; }
     return tintAt(0);
   }
-  /** Zone: ogni ramo prende anche un po' del colore di un'emozione secondaria, se c'è. */
-  const zoneOf = (b, base) => {
-    const side = parts.length > 1 ? parts[1 + (b.zone % (parts.length - 1))] : null;
-    return side && side.w > 0.18 ? mix(base, side.rgb, Math.min(0.45, side.w) * tintA) : base;
-  };
+  const SHELL = [150, 175, 200]; // i gusci dei livelli restano neutri: il colore lo danno i nodi
 
   function frame(now) {
     if (!el.isConnected) { raf = 0; return; }
@@ -214,12 +250,6 @@ export function createOrb() {
     }
 
     const compact = hgt < 170;
-    // Stato dei nodi autonomi (senza modello LLM): verde smeraldo quando è calmo, viola acceso quando è agitato o attivo.
-    const autoBranch = branches.find(b => b.auto);
-    const autoHeat = autoBranch ? Math.max(autoBranch.hub.heat || 0, ...autoBranch.leaves.map(l => l.heat || 0)) : 0;
-    const targetAgit = Math.min(1, Math.max(0, (tension - 0.18) * 1.6) + (mode === 'thinking' ? 0.65 : mode === 'listening' ? 0.35 : 0) + autoHeat * 0.75);
-    agitation += (targetAgit - agitation) * ease;
-    const autoRgb = mix(AUTO_CALM, AUTO_AGITATED, agitation);
 
     // Più gusci = sfera più grande: la camera si allontana piano per farla stare tutta.
     fit += (1 / Math.max(1, ...branches.map(b => b.hub.rad * 1.08), 1) - fit) * camEase;
@@ -257,16 +287,10 @@ export function createOrb() {
       ctx.setLineDash([2, 6]); ctx.lineWidth = 1;
       for (let k = 0; k < rings; k++) {
         const r = SHELL_MIN + ringLevel(k) * LEVEL_STEP;
-        ctx.strokeStyle = `rgba(${tintAt(r).map(Math.round).join(',')},${0.1 * cur.glow})`;
+        ctx.strokeStyle = `rgba(${SHELL.join(',')},${0.09 * cur.glow})`;
         ctx.beginPath(); ctx.arc(center.sx, center.sy, R * r * 0.95, 0, Math.PI * 2); ctx.stroke();
       }
       ctx.setLineDash([]);
-    }
-    // L'onda di un cambio d'umore che si allarga dal centro.
-    if (wave < maxRad + 0.3) {
-      ctx.lineWidth = 2;
-      ctx.strokeStyle = `rgba(${tintTo.map(Math.round).join(',')},${(1 - wave / (maxRad + 0.3)) * 0.35 * cur.glow})`;
-      ctx.beginPath(); ctx.arc(center.sx, center.sy, R * wave * 0.95, 0, Math.PI * 2); ctx.stroke();
     }
 
     // heat schiarisce il colore verso il bianco; rgb = colore della zona.
@@ -286,17 +310,22 @@ export function createOrb() {
     const order = [...branches].sort((a, b) => a.hub.d - b.hub.d);
     for (const b of order) {
       const hot = b.hub.heat;
-      b.rgb = b.auto ? autoRgb : zoneOf(b, tintAt(b.hub.rad));
       for (const l of b.leaves) {
-        const lRgb = (b.auto || l.auto) ? autoRgb : b.rgb;
+        const from = l.sub ? (b.leaves.find(p => p.id === l.parent)?.rgb || b.rgb) : b.rgb;
         const lh = Math.max(l.heat, hot * 0.35);
         const depth = (b.hub.d + l.d) / 2;
-        trace(l.path, color(lh, ((0.12 + depth * 0.4) * cur.glow + lh * 0.5) * b.fade, lRgb), 1 + lh * 1.3 + depth * 0.6);
+        const a = ((0.14 + depth * 0.42) * cur.glow + lh * 0.5) * b.fade;
+        // Pista sul livello: sfuma dal colore del nodo di partenza a quello della foglia.
+        const p0 = l.path[0], p1 = l.path[l.path.length - 1];
+        const grad = ctx.createLinearGradient(p0.sx, p0.sy, p1.sx, p1.sy);
+        grad.addColorStop(0, color(lh, a, from)); grad.addColorStop(1, color(lh, a, l.rgb));
+        trace(l.path, grad, 1 + lh * 1.3 + depth * 0.6);
       }
-      // La pista dal centro cambia colore man mano che l'onda la percorre.
-      const inner = b.auto ? autoRgb : tintAt(b.hub.rad * 0.4);
-      trace(b.spoke.slice(0, 2), color(hot, ((0.15 + b.hub.d * 0.4) * cur.glow + hot * 0.5) * b.fade, inner), 1.3 + hot * 1.5 + b.hub.d * 0.7);
-      trace(b.spoke.slice(1), color(hot, ((0.15 + b.hub.d * 0.4) * cur.glow + hot * 0.5) * b.fade, b.rgb), 1.3 + hot * 1.5 + b.hub.d * 0.7);
+      // Il raggio dal centro porta l'umore: l'onda di un cambio lo risale dal nucleo al nodo.
+      const s0 = b.spoke[0], s1 = b.spoke[1], ra = Math.min(1, ((0.18 + b.hub.d * 0.42) * cur.glow * (0.8 + tintA * 0.4) + hot * 0.5) * b.fade);
+      const sg = ctx.createLinearGradient(s0.sx, s0.sy, s1.sx, s1.sy);
+      for (const f of [0, 0.25, 0.5, 0.75, 1]) sg.addColorStop(f, color(hot, ra, tintAt(b.hub.rad * f)));
+      trace(b.spoke, sg, 1.3 + hot * 1.5 + b.hub.d * 0.7);
     }
 
     // Impulsi che corrono lungo le piste
@@ -351,15 +380,13 @@ export function createOrb() {
       const bScale = scale * shellScale * leafCrowd;
       for (const l of b.leaves) {
         const isAuto = !!(b.auto || l.auto);
-        const lRgb = isAuto ? autoRgb : b.rgb;
+        const lRgb = l.rgb;
         ring(l, (2.6 + l.d * 2 + l.heat * 1.8) * bScale, l.heat, ((0.35 + l.d * 0.6) * cur.glow + l.heat * 0.4) * b.fade, true, lRgb, isAuto);
         if (!compact && b.fade > 0.5 && (focused === b ? cur.zoom > 1.6 : (l.heat > 0.3 && l.d > 0.4))) {
           const right = l.sx >= cx;
           ctx.font = '12px system-ui, sans-serif';
           ctx.textAlign = right ? 'left' : 'right';
-          ctx.fillStyle = isAuto
-            ? `rgba(${autoRgb.map(Math.round).join(',')},${0.65 + l.heat * 0.35})`
-            : `rgba(200,255,190,${0.55 + l.heat * 0.45})`;
+          ctx.fillStyle = `rgba(${mix(l.rgb, [255, 255, 255], 0.55).map(Math.round).join(',')},${(isAuto ? 0.65 : 0.55) + l.heat * 0.4})`;
           // Il testo resta dentro lo schermo: si accorcia finché ci sta.
           const room = (right ? w - l.sx : l.sx) - 14;
           let text = clip(l.label, 38);
@@ -374,9 +401,7 @@ export function createOrb() {
       if (!compact && b.fade > 0.3 && (focused === b || (!focused && (h.d > (branches.length > 12 ? 0.7 : 0.35) || h.heat > 0.2 || b.auto)))) {
         ctx.font = focused === b ? '600 14px system-ui, sans-serif' : '600 11px system-ui, sans-serif';
         ctx.textAlign = 'center';
-        ctx.fillStyle = b.auto
-          ? `rgba(${autoRgb.map(Math.round).join(',')},${focused === b ? 0.98 : Math.min(1, (0.45 + h.d * 0.5 + h.heat * 0.4) * cur.glow) * b.fade})`
-          : `rgba(190,255,180,${focused === b ? 0.95 : Math.min(1, (0.3 + h.d * 0.5 + h.heat * 0.5) * cur.glow) * b.fade})`;
+        ctx.fillStyle = `rgba(${mix(b.rgb, [255, 255, 255], 0.5).map(Math.round).join(',')},${focused === b ? 0.97 : Math.min(1, ((b.auto ? 0.45 : 0.3) + h.d * 0.5 + h.heat * 0.45) * cur.glow) * b.fade})`;
         ctx.fillText(clip(b.label.toUpperCase(), 22), h.sx, h.sy - r - 9);
       }
     }
@@ -439,9 +464,8 @@ export function createOrb() {
 
   return {
     el, setState,
-    /** Sfumatura dell'umore: colore [r,g,b] e intensità 0..1 (resta sempre una velatura, il verde domina). */
-    /** rgb = colore complessivo dell'umore, amount 0..1, list = [{rgb, w}] emozioni ordinate per peso, tens = tensione 0..1. */
-    setTint(rgb, amount, list = [], tens = 0.15) {
+    /** Umore sui raggi: rgb = colore complessivo, amount 0..1 (quanto è acceso), list = [{rgb, w}] emozioni per peso. */
+    setTint(rgb, amount, list = []) {
       const next = rgb.map(v => Math.round(v));
       if (next.some((v, i) => Math.abs(v - tintTo[i]) > 6)) {
         tintFrom = mix(tintFrom, tintTo, Math.max(0, Math.min(1, wave / (maxRad + 0.3)))); // da dove era arrivata l'onda
@@ -449,7 +473,6 @@ export function createOrb() {
       }
       tintA = Math.max(0, Math.min(1, amount));
       parts = list.filter(p => p && p.rgb && p.w > 0);
-      tension = Number.isFinite(tens) ? tens : 0.15;
     },
     /** I rami da disegnare: [{ id, label, kind, children: [{ id, label }] }] (da /api/graph). Quelli vuoti non si vedono. */
     setGraph(list) {

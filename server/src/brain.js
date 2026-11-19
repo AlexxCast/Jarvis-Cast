@@ -495,7 +495,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
       }
       else {
         parsed = { ...parsed, reply: 'Mi scusi signore, non sono riuscito a salvarlo davvero. Me lo può ripetere con i dettagli?', expectReply: true, card: '', actions: [] };
-        mood.feel(db, 'frustrazione', 0.3, ms);
+        mood.feel(db, 'confusione', 0.3, ms);
       }
     } else if (done.failed.length) {
       // Alcune azioni sono riuscite e altre no: lo dice chiaramente invece di far finta.

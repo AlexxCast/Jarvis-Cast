@@ -68,6 +68,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
         const val ACTION_STOP = "stop"
         const val ACTION_LISTEN = "listen"     // ascolta subito, senza parola chiave
         const val ACTION_ANSWER = "answer"     // ascolta la risposta a una domanda, senza portare Jarvis in primo piano
+        const val ACTION_REFRESH = "refresh"   // l'app è in primo piano: Android ridà il microfono vero al servizio
         private const val NOTIF_ID = 1
         private const val PHOTO_NOTIF_ID = 2
         private const val INBOX_POLL_MS = 90_000L // Timer interno di 1 minuto e mezzo per controllare attività, messaggi e stato
@@ -79,6 +80,16 @@ class JarvisService : LifecycleService(), SensorEventListener {
         fun stop(ctx: Context) {
             Settings.listeningEnabled = false
             ctx.startService(Intent(ctx, JarvisService::class.java).setAction(ACTION_STOP))
+        }
+        /**
+         * Da chiamare quando l'app torna in primo piano. Se l'ascolto era ripartito da solo (dopo un riavvio
+         * o con l'app chiusa) Android dà al servizio un microfono muto: ripartire da qui glielo ridà.
+         */
+        fun refresh(ctx: Context) {
+            if (!Settings.listeningEnabled) return
+            if (androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.RECORD_AUDIO) !=
+                android.content.pm.PackageManager.PERMISSION_GRANTED) return
+            runCatching { ctx.startForegroundService(Intent(ctx, JarvisService::class.java).setAction(ACTION_REFRESH)) }
         }
         fun listenNow(ctx: Context) =
             ctx.startForegroundService(Intent(ctx, JarvisService::class.java).setAction(ACTION_LISTEN))
@@ -176,6 +187,15 @@ class JarvisService : LifecycleService(), SensorEventListener {
                     // Richiesta esplicita dell'utente: esce dall'eventuale pausa e ascolta subito.
                     if (yielded) { yielded = false; main.removeCallbacks(resumeCheck) }
                     if (!busy) onWakeWord(beep = true) else Unit
+                } else if (intent?.action == ACTION_REFRESH) {
+                    ensureForeground(force = true)
+                    val wasSilenced = KestraKws.silenced()
+                    KestraKws.clearSilence()
+                    // Se stava usando il ripiego per colpa del microfono muto, torna subito al riconoscimento forte.
+                    if (wasSilenced && !busy && !yielded && !commandSession) {
+                        stopSession(cancel = true)
+                        restartWakeWordDelayed(300)
+                    } else if (!busy && !yielded) startWakeWord()
                 } else if (intent?.action == ACTION_ANSWER) {
                     if (!busy && !yielded) { stopSession(cancel = true); onWakeWordDetected("", openApp = false) }
                 } else if (!busy && !yielded) {
@@ -196,13 +216,13 @@ class JarvisService : LifecycleService(), SensorEventListener {
         super.onDestroy()
     }
 
-    private fun ensureForeground() {
-        if (foreground) return
+    private fun ensureForeground(force: Boolean = false) {
+        if (foreground && !force) return
         val type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R)
             ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE else 0
         ServiceCompat.startForeground(this, NOTIF_ID, buildNotification("In ascolto di \"Kestra\""), type)
         foreground = true
-        wakeLock?.acquire()
+        if (!force || wakeLock?.isHeld != true) wakeLock?.acquire()
     }
 
     private fun shutdown() {
@@ -340,6 +360,8 @@ class JarvisService : LifecycleService(), SensorEventListener {
         val ok = KestraKws.start(this, Settings.sensitivity,
             onWake = { main.post { onStrongWake() } },
             onError = { main.post { if (sessionActive && !busy) { sessionActive = false; guard?.sessionStopped(); restartWakeWordDelayed(800) } } },
+            // Microfono muto: si passa subito al riconoscimento di Android (KestraKws.ready resta falso per 10 minuti).
+            onSilent = { main.post { if (sessionActive && !busy && !commandSession) { sessionActive = false; guard?.sessionStopped(); restartWakeWordDelayed(300) } } },
         )
         if (!ok) { sessionActive = false; guard?.sessionStopped() }
         return ok
