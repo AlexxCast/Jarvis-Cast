@@ -23,6 +23,8 @@ jobs:
           node-version: 22
       - run: npm test
       - run: node --check web/app.js
+      # Ascolto dal microfono del PC: logica della chiamata e rilevatore di voce (riconoscimento finto).
+      - run: pip install numpy && cd desktop && python -m unittest test_ascolto && python -m py_compile jarvis_desktop.py
 
   android:
     name: App Android (test e build)

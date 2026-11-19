@@ -444,3 +444,10 @@ Richiesta del Capo: altri modelli gratuiti, più potenti. Elenco predefinito (`m
   - "destra", "extra" e simili non chiamano mai.
   - Tra le 5 alternative del riconoscimento si sceglie quella che chiama Kestra.
   - Chiusura dopo il nome più rapida (650 ms) e saluti più brevi, così torna in ascolto prima.
+
+### Ascolto dal microfono del PC (2026-11-19)
+Il Capo tiene il telefono sul comodino e parla dalla scrivania: doveva gridare. Android non permette di aggiungere "Kestra" al vocabolario del riconoscimento (solo suggerimenti da Android 13, spesso ignorati). Scelta: il PC alla scrivania diventa l'orecchio.
+- `desktop/kestra_ascolto.py`: rilevatore di voce a energia (soglia che segue il rumore della stanza), riconoscimento offline faster-whisper (`small`, int8, CPU) con "Kestra" nel suggerimento iniziale; scarta segmenti con `no_speech_prob` alto (Whisper che "inventa" il suggerimento sul rumore).
+- Stesse regole di chiamata del telefono (nome all'inizio o alla fine di una frase breve, storpiature solo in posizione di chiamata). Solo il nome → bip e ascolta la richiesta. Dopo una domanda di Kestra (`expectReply`) ascolta 8 secondi senza nome, con `followup: true` così il server scarta TV e altre voci.
+- Gira nel demone in background (casella nella finestra → config `listen`); la finestra chiude un demone vecchio (`DAEMON_VERSION`) perché altrimenti resterebbe il codice prima dell'aggiornamento.
+- Dispositivo dedicato in Wi-Fi e app per orologio Wear OS: in thread separati.
