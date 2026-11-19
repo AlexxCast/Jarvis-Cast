@@ -64,7 +64,10 @@ async function loadGraph(lightUp = false) {
     const at = g.last?.at || '';
     if (lightUp && at && at !== lastLit) orb.highlight(g.last.touched || [], g.last.leaves || []);
     lastLit = at;
-  } catch { /* la sfera resta com'era */ }
+  } catch (e) {
+    // La sfera resta com'era; se è vuota si dice perché, così il motivo si vede.
+    if (!(store.graph || []).length) toast('Sfera non caricata: ' + (e.message || 'errore'));
+  }
 }
 /** Accende subito i rami di cui sembra parlare il messaggio, senza aspettare il server. */
 const TOPIC_HINTS = {

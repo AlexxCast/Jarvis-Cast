@@ -286,7 +286,8 @@ export async function handleApi(db, env, deps, request) {
     if (path === '/api/graph' && method === 'GET') {
       // Foglie della dieta: per non affollare la sfera con decine di vecchi pasti,
       // mostra solo l'ultimo pasto per fascia (colazione, pranzo, cena, spuntino) entro il tetto del ramo.
-      memory.tidyTopics(db);
+      // Riordino dei rami: solo manutenzione. Con le scritture finite non serve (non resterebbe) e non deve mai far sparire la sfera.
+      if (!writesBlocked()) { try { memory.tidyTopics(db); } catch (e) { console.error('tidyTopics:', e?.message || e); } }
       const limits = kvGet(db, 'graphLimits', {});
       const g = memory.graph(db), d = loadDiary(db);
       const dietCap = Math.max(2, Math.min(10, Number(limits.dieta) || 5));
@@ -322,7 +323,7 @@ export async function handleApi(db, env, deps, request) {
       const sizes = { dieta: (d.meals || []).length, sport: (d.activities || []).length + (d.weights || []).length,
         agenda: db.get('SELECT COUNT(*) AS n FROM reminders WHERE done = 0').n, compiti: db.get('SELECT COUNT(*) AS n FROM jobs').n };
       for (const b of g.branches) if (b.kind === 'module') sizes[b.id] = (b.entries || 0) + db.get('SELECT COUNT(*) AS n FROM topics WHERE module = ?', b.id).n;
-      memory.addLevels(db, g.branches, sizes, ms);
+      try { memory.addLevels(db, g.branches, sizes, ms); } catch (e) { console.error('addLevels:', e?.message || e); }
       return json({ ...g, last: kvGet(db, 'lastTouched', null), mood: mood.current(db, ms) });
     }
     if (path === '/api/mind' && method === 'GET') {
@@ -331,7 +332,7 @@ export async function handleApi(db, env, deps, request) {
       const g = memory.graph(db, { perModule: 40 });
       const sizes = {};
       for (const b of g.branches) if (b.kind === 'module') sizes[b.id] = (b.entries || 0) + db.get('SELECT COUNT(*) AS n FROM topics WHERE module = ?', b.id).n;
-      memory.addLevels(db, g.branches, sizes, ms);
+      try { memory.addLevels(db, g.branches, sizes, ms); } catch (e) { console.error('addLevels:', e?.message || e); }
       const use = kvGet(db, 'branchUse', {});
       const last = db.get("SELECT modules FROM sessions ORDER BY updated DESC LIMIT 1");
       let active = [];
