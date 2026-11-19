@@ -2,6 +2,7 @@
 // (es. "lavoro", "auto", "viaggio-giappone"): Jarvis lo crea quando serve e lo riapre
 // solo quando la conversazione lo richiede, così il contesto resta piccolo.
 
+import * as semantic from './semantic.js';
 import { kvGet, kvSet } from './db.js';
 
 const STOP = new Set('il lo la i gli le un uno una di a da in con su per tra fra e o ma che chi cui non mi ti si ci vi ne è sono ho hai ha del della dei delle al alla ai alle dal dalla nel nella sul sulla come quando dove cosa quale quanto questo questa quello quella mio mia tuo tua suo sua più meno molto poco anche già poi ora oggi fare fatto essere avere jarvis'.split(' '));
@@ -360,10 +361,10 @@ const rootOf = (w) => (w.length > 5 ? w.slice(0, 5) : w);
  * di cui si sta parlando, un po' i ricordi usati spesso e quelli recenti; i fatti "generale" restano come base.
  * Le memorie dei progetti (modulo "p:<id>") non escono qui: entrano solo dentro il loro progetto.
  */
-export function recall(db, text, { sticky = [], limit = 24 } = {}) {
+export function recall(db, text, { sticky = [], limit = 24, qvec = null } = {}) {
   const kw = keywords(text);
   const roots = new Set(kw.map(rootOf));
-  const rows = db.all("SELECT id, module, text, uses, last_used FROM memories WHERE module NOT LIKE 'p:%' ORDER BY id DESC LIMIT 2000");
+  const rows = db.all("SELECT id, module, text, uses, last_used, vec FROM memories WHERE module NOT LIKE 'p:%' ORDER BY id DESC LIMIT 2000");
   const mods = db.all('SELECT name, description FROM modules');
   const modScore = new Map();
   for (const m of mods) {
@@ -371,19 +372,38 @@ export function recall(db, text, { sticky = [], limit = 24 } = {}) {
     modScore.set(m.name, [...roots].filter(k => hay.has(k)).length * 3 + (sticky.includes(m.name) ? 2 : 0));
   }
   const newest = rows.length ? rows[0].id : 0;
+  // Significato: la somiglianza si misura rispetto a tutti i ricordi (quanto spicca), non con una soglia fissa,
+  // perché ogni modello di embedding ha una sua scala.
+  const sims = new Map();
+  if (qvec) for (const r of rows) { const v = semantic.decode(r.vec); if (v) sims.set(r.id, semantic.cosine(qvec, v)); }
+  const semOf = semantic.relativeScorer([...sims.values()]);
   const scored = rows.map(row => {
     const hay = new Set(keywords(row.text));
     const hayRoots = new Set([...hay].map(rootOf));
     let overlap = 0;
     for (const k of kw) overlap += hay.has(k) ? 2 : hayRoots.has(rootOf(k)) ? 1.5 : 0;
     const base = row.module === 'generale' ? 1 : 0;
-    const relevant = overlap + (modScore.get(row.module) || 0) + base;
+    // Significato: pesa quanto le parole, così entra anche ciò che è collegato senza parole in comune.
+    const sem = sims.has(row.id) ? semOf(sims.get(row.id)) : 0;
+    const relevant = overlap + (modScore.get(row.module) || 0) + base + sem;
     // Uso e recenza contano solo se il ricordo è già pertinente: non riempiono il contesto da soli.
     const bonus = relevant > 0 ? Math.min(1, Math.log2(1 + (row.uses || 0)) / 4) + (newest - row.id < 30 ? 0.3 : 0) : 0;
-    return { ...row, score: relevant + bonus };
+    const { vec, ...plain } = row;
+    return { ...plain, score: relevant + bonus };
   }).filter(x => x.score > 0).sort((a, b) => b.score - a.score || b.id - a.id).slice(0, limit);
   const active = [...new Set(scored.filter(x => x.module !== 'generale').map(x => x.module))];
   return { entries: scored, active };
+}
+
+/** I ricordi di un cassetto (o cercati per parole/significato), quando il modello li chiede con l'azione recall. */
+export function recallFor(db, { module = '', query = '' } = {}, limit = 15) {
+  const mod = String(module || '').toLowerCase().trim();
+  if (mod && !mod.startsWith('p:')) {
+    const rows = db.all('SELECT id, module, text FROM memories WHERE module = ? ORDER BY id DESC LIMIT ?', mod, limit);
+    if (rows.length) return rows;
+  }
+  const q = String(query || module || '').trim();
+  return q ? recall(db, q, { limit }).entries : [];
 }
 
 /**

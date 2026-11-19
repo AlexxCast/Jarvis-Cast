@@ -6,6 +6,7 @@
 import { kvGet, kvSet, pushInbox } from './db.js';
 import { loadDiary } from './diet.js';
 import { nowIso as nowIsoOf, today as todayOf } from './clock.js';
+import * as continuity from './continuity.js';
 
 const DAY = 86_400_000;
 export const DEFAULTS = { level: 'normale', quietFrom: 23, quietTo: 7, notifications: true };
@@ -133,6 +134,19 @@ function checkDeadlines(db, ms, tz) {
   return out;
 }
 
+/** Fili aperti: "domani ho l'esame" → il giorno dopo, di giorno, Kestra chiede com'è andata (una volta). */
+function checkFollowUps(db, ms, tz) {
+  const h = hourIn(ms, tz);
+  if (h < 9 || h >= 21) return [];
+  const out = [];
+  for (const f of continuity.dueFollowUps(db, ms, tz).slice(0, 1)) {
+    const r = propose(db, { key: f.key, text: f.text, cooldownMs: 30 * DAY }, ms, tz);
+    if (r === 'sent' || r === 'queued' || r === 'cooldown') continuity.closePlan(db, f.plan.text);
+    out.push(r);
+  }
+  return out;
+}
+
 /** Obiettivi: se segue la dieta e stasera il diario è vuoto, glielo ricorda una volta. */
 function checkGoals(db, ms, tz) {
   const h = hourIn(ms, tz);
@@ -169,7 +183,7 @@ export function tick(db, ms, tz, { force = false } = {}) {
   kvSet(db, 'initiativeTickMs', ms);
   const out = [...flushQueue(db, ms, tz)];
   if (settings(db).level === 'off') return out;
-  for (const check of [checkErrors, checkModels, checkJobs, checkDeadlines, checkGoals]) {
+  for (const check of [checkErrors, checkModels, checkJobs, checkDeadlines, checkGoals, checkFollowUps]) {
     try { out.push(...check(db, ms, tz)); } catch { /* un controllo rotto non ferma gli altri */ }
   }
   return out.filter(x => x === 'sent' || x === 'queued' || x === 'flushed');

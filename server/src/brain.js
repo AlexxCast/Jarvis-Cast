@@ -9,6 +9,8 @@ import * as workspace from './workspace.js';
 import * as projects from './projects.js';
 import * as initiative from './initiative.js';
 import * as lessons from './lessons.js';
+import * as semantic from './semantic.js';
+import * as continuity from './continuity.js';
 import { WEATHER_WORDS, weatherContext } from './weather.js';
 import * as web from './web.js';
 import * as router from './router.js';
@@ -311,6 +313,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
       kvSet(db, 'lastTouched', { at: nowIso + '#' + ms, touched: coreHit.touched, leaves: coreHit.touchedLeaves });
       memory.noteUse(db, coreHit.touched, ms);
     }
+    if (coreHit.reply) continuity.record(db, { ms, tz, sessionId, userText, reply: coreHit.reply, applied: coreHit.actions || [], device: coreHit.device || [], touched: coreHit.touched || [], expectReply: !!coreHit.expectReply });
     return {
       reply: coreHit.reply, expectReply: !!coreHit.expectReply, card: '', visual: coreHit.visual || null, photoRequest: null,
       model: 'jarvis-core', switched: false, actions: coreHit.actions, device: coreHit.device,
@@ -326,6 +329,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
     jarvisCore.maybeLogLatentIssue(db, sessionId, userText, ms, tz);
     if (localHit.device.some(d => d.type === 'phone_task')) kvSet(db, 'phonePending', null);
     const { touched, touchedLeaves } = agents.onLocalHit(db, userText, localHit, nowIso, ms);
+    continuity.record(db, { ms, tz, sessionId, userText, reply: localHit.reply, applied: localHit.actions || [], device: localHit.device || [], touched: touched || [] });
     return {
       reply: localHit.reply, expectReply: false, card: '', visual: null, photoRequest: null,
       model: 'local-gatekeeper', switched: false, actions: localHit.actions, device: localHit.device,
@@ -342,7 +346,9 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   const probe = userText + ' ' + recentMsgs;
   const dietOn = !!image || DIET_KEYWORDS.test(probe) || sticky.includes('dieta') || !!diary.activeRecipeSession || !!diary.pendingPhotoRequest;
   const agendaOn = AGENDA_KEYWORDS.test(probe) || sticky.includes('agenda');
-  const recalled = memory.recall(db, probe, { sticky });
+  // Impronta di significato del messaggio (Gemini, ~0,1 s, tetto 1,5 s): se manca si usa solo la ricerca per parole.
+  const qvec = await semantic.embedQuery(env, deps.fetchFn, userText).catch(() => null);
+  const recalled = memory.recall(db, probe, { sticky, qvec });
 
   const history = db.all('SELECT role, text FROM messages WHERE session = ? AND id > ? ORDER BY id DESC LIMIT 14', sessionId, sess.summarized_upto).reverse();
   const mods = memory.listModules(db);
@@ -373,6 +379,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
     // Domande su fatti recenti: la ricerca parte subito, senza aspettare che il modello la chieda.
     web: web.WEB_WORDS.test(userText) && !WEATHER_WORDS.test(userText) ? web.webBlock(userText, await web.search(env, deps.fetchFn, userText, today)) : '',
     summary: sess.summary,
+    continuity: continuity.block(db, { ms, tz, sessionId, userText }),
     history,
     userText: `[${nowHuman(ms, tz)}${source === 'voice' ? ', a voce' : ''}] ${userText}` +
       (textFiles.length ? '\n\nFILE ALLEGATI DALL\'UTENTE:\n' + textFiles.map(f => `=== FILE: ${f.name} ===\n${f.content.slice(0, 24000)}`).join('\n\n') : '') +
@@ -398,14 +405,23 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
     let parsed = parseReply(res.text);
     saveContextReport(db, { at: nowIso, session: sessionId, tier, project: projCtx?.report || null, recalled: recalled.entries.length, ...parts.report });
     // Il modello chiede di cercare su internet o leggere una pagina: lo facciamo e gli ridiamo la parola.
+    // Oppure chiede un cassetto di memoria che non è entrato nel contesto: glielo diamo e rispondiamo di nuovo.
     const webAsk = parsed.actions.filter(a => a.type === 'web_search' || a.type === 'read_url').slice(0, 2);
-    if (webAsk.length) {
+    const memAsk = parsed.actions.filter(a => a.type === 'recall').slice(0, 3);
+    if (webAsk.length || memAsk.length) {
       const found = [];
       for (const a of webAsk) {
         const q = a.type === 'read_url' ? String(a.url || '') : String(a.query || userText);
         found.push(web.webBlock(q, a.type === 'read_url' ? await web.readUrl(deps.fetchFn, q) : await web.search(env, deps.fetchFn, q, today)));
       }
       parts.web = [parts.web, ...found].filter(Boolean).join('\n\n');
+      if (memAsk.length) {
+        const have = new Set(parts.memories);
+        const extra = memAsk.flatMap(a => memory.recallFor(db, { module: a.module, query: a.query || '' }, 15))
+          .map(m => `- [${m.id}] (${m.module}) ${m.text}`).filter(l => !have.has(l));
+        parts.memories = [...extra, ...parts.memories];
+        if (!extra.length) parts.rules = [parts.rules, 'MEMORIA: il cassetto richiesto è vuoto o non esiste; rispondi con quello che sai senza inventare.'].filter(Boolean).join('\n\n');
+      }
       try {
         res = await router.chat(db, env, {
           tier, needsVision: !!image, preferKey: res.key, maxTokens: 2000,
@@ -413,7 +429,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
         });
         parsed = parseReply(res.text);
       } catch { parsed = { ...parsed, reply: 'Ho cercato, ma non riesco a elaborare i risultati in questo momento, signore.', actions: [] }; }
-      parsed.actions = parsed.actions.filter(a => a.type !== 'web_search' && a.type !== 'read_url');
+      parsed.actions = parsed.actions.filter(a => a.type !== 'web_search' && a.type !== 'read_url' && a.type !== 'recall');
     }
     if (!parsed.actions.some(a => a && a.type === 'remember')) {
       const explicitMem = agents.MemoryAgent.extractExplicit(userText);
@@ -640,6 +656,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   result.touched = [...touched];
   result.touchedLeaves = [...new Set([...topicHits.leaves, ...(result.rememberedIds || []).map(id => 'm:' + id), ...(result.autoLeaves || []), ...recalled.entries.map(m => 'm:' + m.id)])];
   kvSet(db, 'lastTouched', { at: nowIso + '#' + ms, touched: result.touched, leaves: result.touchedLeaves });
+  if (!result.error) continuity.record(db, { ms, tz, sessionId, chatTitle: proj ? `${proj.project.name}${proj.chat?.title ? ' › ' + proj.chat.title : ''}` : '', userText, reply: result.reply, applied: result.actions || [], device: result.device || [], touched: result.touched, expectReply: result.expectReply });
   memory.markUsed(db, recalled.entries.map(m => m.id), nowIso);
   memory.noteUse(db, result.touched, ms);
 
@@ -651,6 +668,8 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   for (const m of recalled.active) next[m] = STICKY_TURNS;
   db.run('UPDATE sessions SET model = ?, modules = ?, updated = ? WHERE id = ?', sess.model, JSON.stringify(next), nowIso, sessionId);
 
+  // Impronte dei ricordi nuovi, in background: non rallenta la risposta.
+  deps.defer?.(semantic.backfill(db, env, deps.fetchFn, 10).catch(() => 0));
   const pending = summarizeIfNeeded(db, env, deps, sessionId);
   if (deps.defer) deps.defer(pending); else await pending;
   return result;

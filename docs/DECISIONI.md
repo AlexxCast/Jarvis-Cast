@@ -406,3 +406,31 @@ Diagnosi fatta leggendo i 1.589 messaggi salvati. Decisioni:
 
 ### Errori 500 muti (2026-11-18)
 Se il Durable Object si blocca (riavvio durante un aggiornamento, limite di CPU o memoria, migrazione fallita), Cloudflare rispondeva con una pagina 500 senza dettagli e l'app mostrava solo "Errore 500". Ora `server/src/forward.js` riprova una volta gli errori passeggeri e altrimenti risponde 503 con il motivo vero; il Durable Object risponde sempre in JSON anche se fallisce la migrazione all'avvio. Se l'errore torna, il testo mostrato dall'app dice cosa è successo.
+
+### Limite di scritture di Cloudflare (2026-11-18)
+Il vero motivo dell'"Errore 500": "Exceeded allowed rows written in Durable Objects free tier". Il piano gratuito concede 100.000 righe scritte al giorno (si azzera a mezzanotte UTC). Il programma del PC manda un battito ogni 2 secondi da due cicli diversi e ogni battito riscriveva `devicesRegistry`: circa 86.000 scritture al giorno da solo.
+- `devices.js`: lo stato più recente dei dispositivi resta in memoria; nel database si salva solo se cambiano nome, piattaforma, app o profili, oppure ogni 5 minuti. Un'ora simulata di traffico (PC, telefono, app, battito) ora fa circa 40 scritture invece di 3.600.
+- `db.js`: la migrazione salva la firma dello schema e all'avvio non riscrive nulla se è uguale.
+- Con il limite esaurito l'app si apre in sola lettura e mostra un messaggio chiaro invece di "Errore 500".
+Regola: niente scritture nel database a ogni richiesta frequente (battiti, polling); tenere in memoria e salvare a intervalli.
+- Anche le richieste hanno un limite gratuito (100.000 al giorno) e il PC da solo ne faceva circa 86.000. Ora il server risponde al battito con `nextPollMs`: 2 secondi per 10 minuti dopo un messaggio o un comando, 8 secondi quando è tutto fermo, 30 secondi per la finestra quando il demone in background è attivo. Il programma del PC (`desktop/jarvis_desktop.py`) segue quel ritmo e, se il server non risponde, riprova dopo 10 secondi. Va aggiornato a mano sul PC: il vecchio programma continua a chiedere ogni 2 secondi, ma senza più scrivere nel database.
+- Grafica: il Capo vuole "una punta di verde in più". Sfondi leggermente verdi, testi secondari e titoli delle schede in verde chiaro, bordo superiore delle schede e della barra in verde, puntino "attivo" verde. I pulsanti principali restano viola.
+
+### Conferma prima di inviare o chiamare (2026-11-18)
+Scelta del Capo: l'agente del telefono invia messaggi e avvia chiamate senza chiedere solo quando il telefono ha appena verificato il Capo (oggi: parola d'ordine detta negli ultimi 10 minuti, `VoiceId.isTrusted()`); altrimenti si ferma con ask dicendo a chi e cosa invia. Il telefono manda `voiceTrusted` a `/api/phone/step`, il server sceglie la regola con `phone.systemFor`. Rimossa dal prompt la parola d'ordine scritta in chiaro. App 2.33 (versionCode 35).
+
+### Ricordi per significato e cassetti chiesti dal modello (2026-11-18)
+Dubbio del Capo: senza parole chiave i cassetti giusti possono restare fuori, e una frase può toccare più cassetti. Scelta: niente IA intermedia a ogni messaggio (latenza e crediti), invece:
+- `semantic.js`: impronta (embedding Gemini `gemini-embedding-001`, 256 numeri, riserva `text-embedding-004`) per ogni ricordo, colonna `memories.vec`, calcolata una volta (40 per battito, 10 dopo ogni chat). A ogni messaggio un'impronta sola (tetto 1,5 s). In `memory.recall` il significato si somma alle parole; il punteggio è relativo (quanto il ricordo spicca rispetto agli altri), così non dipende dalla scala del modello. Se Gemini non risponde resta la ricerca per parole.
+- Azione `recall {module?, query?}`: il modello, vedendo l'indice dei cassetti, può chiedere quello che manca e risponde di nuovo (come `web_search`).
+
+### Continuità tra le chat e Kestra "viva" (2026-11-18)
+Richiesta del Capo: un contesto allargato e schematico che dia continuità alle azioni, e una Kestra che riprende i fili da sola senza essere imboccata.
+- `continuity.js` (kv `continuity`, una scrittura per messaggio): ultime azioni fatte davvero, fili aperti (piani detti dal Capo con la loro data, l'ultima domanda di Kestra), argomenti recenti, ultimo scambio delle altre chat. Entra sempre nel contesto subito dopo il nucleo, al massimo ~1.200 caratteri. L'ultimo scambio di un'altra chat entra solo se il Capo lo riprende ("allora?", "a che punto siamo") o parla della stessa cosa.
+- Prompt: Kestra è la stessa in tutte le chat; riprende un filo quando c'entra, una volta, senza domande di riempimento.
+- Iniziativa: il giorno dopo un piano ("domani ho l'esame"), tra le 9 e le 21, chiede com'è andata una volta; se il Capo ne ha già parlato, non chiede.
+- `test/conversazioni.test.js`: conversazioni su più giorni e più chat, riassunto dopo 30 messaggi, una frase che tocca più cassetti, messaggi strani e modello che risponde male.
+- Punteggio di significato con mediana e deviazione mediana (robusto con pochi o tanti ricordi pertinenti).
+
+### Modelli gratuiti aggiornati (2026-11-18)
+Richiesta del Capo: altri modelli gratuiti, più potenti. Elenco predefinito (`models.js`) rifatto dai cataloghi ufficiali del 18/11/2026: tolti i Gemini 2.0 (spenti); aggiunti Gemini 3.8 Flash e 3.1 Pro (anteprima, gratis con pochi messaggi al giorno), Qwen3.8-27B e MiniMax M2.7 su Groq, Cerebras (gpt-oss-120b, Qwen3.8), NVIDIA Nemotron 3 Ultra 550B e GLM-5.3, OpenRouter gratuiti (Nemotron Ultra, Inkling 2 Small, Gemma 4 31B, ERNIE 5.5 Flash). Per i compiti "smart" il router preferisce i modelli pesanti (`isHeavyModel`); se un modello viene ritirato risponde 404 e resta in pausa 24 ore. Attenzione: un elenco salvato a mano in Modelli (kv `models`) sostituisce questi predefiniti.

@@ -49,11 +49,32 @@ const ADDED_COLUMNS = [
   "ALTER TABLE reminders ADD COLUMN place_event TEXT NOT NULL DEFAULT ''",
   "ALTER TABLE topics ADD COLUMN parent TEXT NOT NULL DEFAULT ''",
   "ALTER TABLE jobs ADD COLUMN project TEXT NOT NULL DEFAULT ''",
+  "ALTER TABLE memories ADD COLUMN vec TEXT NOT NULL DEFAULT ''",
 ];
 
+/** Firma dello schema: se nel database c'è già la stessa, la migrazione non tocca nulla (zero scritture all'avvio). */
+export function schemaSignature() {
+  const text = SCHEMA + ADDED_COLUMNS.join(';');
+  let h = 0;
+  for (let i = 0; i < text.length; i++) h = (h * 31 + text.charCodeAt(i)) | 0;
+  return `${text.length}:${h}`;
+}
+
 export function migrate(db) {
+  const sig = schemaSignature();
+  try { if (db.get('SELECT value FROM kv WHERE key = ?', 'schemaSignature')?.value === JSON.stringify(sig)) return false; } catch { /* database nuovo */ }
   for (const stmt of SCHEMA.split(';').map(s => s.trim()).filter(Boolean)) db.run(stmt);
   for (const stmt of ADDED_COLUMNS) { try { db.run(stmt); } catch { /* già presente */ } }
+  kvSet(db, 'schemaSignature', sig);
+  return true;
+}
+
+/** Il limite gratuito di scritture giornaliere di Cloudflare (si azzera a mezzanotte UTC). */
+export const WRITE_LIMIT_RE = /exceeded allowed rows written|rows written in durable objects free tier/i;
+export function friendlyError(e) {
+  const msg = String(e?.message || e || '');
+  if (WRITE_LIMIT_RE.test(msg)) return 'Oggi ho finito le scritture gratuite di Cloudflare: posso leggere ma non salvare nulla finché il limite non si azzera a mezzanotte UTC (in Italia l\'1 di notte, le 2 con l\'ora legale).';
+  return msg;
 }
 
 export function kvGet(db, key, fallback = null) {

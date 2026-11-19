@@ -1,6 +1,6 @@
 // API HTTP di Jarvis (gira dentro il Durable Object, una richiesta alla volta).
 
-import { kvGet, kvSet, logEvent } from './db.js';
+import { kvGet, kvSet, logEvent, WRITE_LIMIT_RE, friendlyError } from './db.js';
 import { handleChat, isAddressed, applyActions, addMessage } from './brain.js';
 import { loadDiary, saveDiary, mergeLegacy, patchProfile, DIET_ACTIONS } from './diet.js';
 import * as N from './nutrition.js';
@@ -75,6 +75,7 @@ export async function handleApi(db, env, deps, request) {
 
   try {
     if (path === '/api/chat' && method === 'POST') {
+      devices.markActive(db, ms); // il Capo sta parlando: il PC torna a chiedere comandi ogni 2 secondi
       const b = await body(request);
       const image = typeof b.image === 'string' && b.image.length > 100 ? b.image.replace(/^data:image\/\w+;base64,/, '') : null;
       const files = Array.isArray(b.files) ? b.files.slice(0, 4).filter(f => f && f.name && typeof f.content === 'string').map(f => ({
@@ -130,6 +131,7 @@ export async function handleApi(db, env, deps, request) {
     if (path === '/api/devices/heartbeat' && method === 'POST') return json(devices.heartbeat(db, await body(request), ms));
     if (path === '/api/devices/command' && method === 'POST') {
       const b = await body(request);
+      devices.markActive(db, ms);
       const cmd = devices.enqueueCommand(db, b.targetDevice || 'desktop', b, ms);
       return json({ command: cmd, devices: devices.listDevices(db, ms), history: devices.listCommandHistory(db) });
     }
@@ -506,7 +508,8 @@ export async function handleApi(db, env, deps, request) {
     }
     return bad('non trovato', 404);
   } catch (e) {
-    logEvent(db, nowIsoOf(deps.now(), tz), 'error', `${method} ${path}: ${e.message}`);
+    try { logEvent(db, nowIsoOf(deps.now(), tz), 'error', `${method} ${path}: ${e.message}`); } catch { /* database in sola lettura */ }
+    if (WRITE_LIMIT_RE.test(e.message || '')) return bad(friendlyError(e), 503);
     return bad(e.message || 'errore interno', /JSON|grande/.test(e.message || '') ? 400 : 500);
   }
 }
