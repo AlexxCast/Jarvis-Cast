@@ -431,7 +431,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
                                 updateNotification("Ti ascolto…")
                             }
                             main.removeCallbacks(wakeStopRunnable)
-                            main.postDelayed(wakeStopRunnable, 850L)
+                            main.postDelayed(wakeStopRunnable, 650L)
                         }
                     }
                     override fun onResults(results: Bundle?) {
@@ -442,7 +442,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
                         if (busy || yielded || Speaker.isSpeaking()) return
                         val all = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION).orEmpty()
                         // Il primo risultato può non contenere il nome mentre un'alternativa sì ("Jarvis" detto piano).
-                        val text = all.firstOrNull { VoiceText.containsWake(it, Settings.sensitivity) } ?: all.firstOrNull().orEmpty()
+                        val text = VoiceText.pickHeard(all, Settings.sensitivity)
                         if (wakeHeard && VoiceText.wake(text, Settings.sensitivity) == VoiceText.Wake.None) {
                             // I parziali avevano sentito "Jarvis" ma la frase finale l'ha perso: vale come chiamata.
                             wakeHeard = false
@@ -601,21 +601,14 @@ class JarvisService : LifecycleService(), SensorEventListener {
     private var wakeFromScreenOff = false
 
     private var lastWakeGreetingIdx = -1
+    // Saluti brevi: dopo la chiamata Kestra torna in ascolto quasi subito. Tutti riconosciuti come sua eco.
     private val wakeGreetings = listOf(
-        "Eccomi, signore.",
         "Eccomi, Capo.",
-        "Dimmi tutto, Capo.",
+        "Dimmi, Capo.",
         "Sono qui, Capo.",
-        "Agli ordini, Capo.",
         "Comandi, Capo.",
-        "Ti ascolto, Capo.",
+        "Ti ascolto.",
         "Pronta, Capo.",
-        "Sì, Capo?",
-        "Sempre operativa.",
-        "Qual è il piano, Capo?",
-        "Eccomi qui, spara pure.",
-        "Tutto orecchi, Capo.",
-        "Dimmi pure.",
     )
 
     private fun nextWakeGreeting(): String {

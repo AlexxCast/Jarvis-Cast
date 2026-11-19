@@ -434,3 +434,13 @@ Richiesta del Capo: un contesto allargato e schematico che dia continuità alle 
 
 ### Modelli gratuiti aggiornati (2026-11-18)
 Richiesta del Capo: altri modelli gratuiti, più potenti. Elenco predefinito (`models.js`) rifatto dai cataloghi ufficiali del 18/11/2026: tolti i Gemini 2.0 (spenti); aggiunti Gemini 3.8 Flash e 3.1 Pro (anteprima, gratis con pochi messaggi al giorno), Qwen3.8-27B e MiniMax M2.7 su Groq, Cerebras (gpt-oss-120b, Qwen3.8), NVIDIA Nemotron 3 Ultra 550B e GLM-5.3, OpenRouter gratuiti (Nemotron Ultra, Inkling 2 Small, Gemma 4 31B, ERNIE 5.5 Flash). Per i compiti "smart" il router preferisce i modelli pesanti (`isHeavyModel`); se un modello viene ritirato risponde 404 e resta in pausa 24 ore. Attenzione: un elenco salvato a mano in Modelli (kv `models`) sostituisce questi predefiniti.
+
+### Icona a tutto sfondo e chiamata al primo colpo (app 2.34, 2026-11-19)
+- Icona: il Capo non voleva il bordo bianco intorno al logo. Era un PNG semplice che il launcher metteva su un riquadro bianco; ora è un'icona adattiva (`mipmap-anydpi-v26/ic_launcher.xml`) con sfondo #040806 che riempie tutta la forma e il logo nella zona sicura.
+- Parola d'attivazione: il Capo doveva chiamare Kestra anche 5 volte, ma non vuole che si attivi a ogni parola simile. Il riconoscimento italiano scrive "Kestra" come parole vicine ("kesta", "che stra", "questa"). Ora queste contano solo in posizione di chiamata, cioè all'inizio della frase e dopo al massimo parole come "ehi/ok/allora":
+  - sensibilità media: serve un saluto prima ("ehi kesta");
+  - alta (predefinita): basta l'inizio; "questa" o "cesta" valgono solo dopo un saluto o dette da sole.
+  - In mezzo al discorso e nei parziali non contano mai.
+  - "destra", "extra" e simili non chiamano mai.
+  - Tra le 5 alternative del riconoscimento si sceglie quella che chiama Kestra.
+  - Chiusura dopo il nome più rapida (650 ms) e saluti più brevi, così torna in ascolto prima.
