@@ -1,12 +1,12 @@
 :root {
   --bg: #040806; --surface: #08100d; --surface2: #0f1a16; --line: rgba(168,85,247,.28); --divider: rgba(57,255,20,.10);
   --text: #eef7f1; --muted: #86c9a4; --primary: #a855f7; --on-primary: #ffffff; --accent: #39ff14; --error: #f87171;
-  /* Sfondo vario coi colori del personaggio Kestra (viola, petrolio, smeraldo, prugna, un filo d'ambra), molto scuro. */
-  --bg-art: radial-gradient(120% 70% at 0% 0%, rgba(150,70,205,.34), transparent 60%),
-    radial-gradient(90% 60% at 100% 18%, rgba(45,170,185,.24), transparent 62%),
-    radial-gradient(110% 70% at 100% 100%, rgba(205,85,175,.26), transparent 60%),
-    radial-gradient(100% 60% at 0% 85%, rgba(40,200,130,.22), transparent 62%),
-    radial-gradient(60% 40% at 55% 55%, rgba(215,145,70,.09), transparent 70%);
+  /* Sfondo vario coi colori della figura di Kestra (prugna, viola del mantello, petrolio dei guanti, cuoio), molto scuro. */
+  --bg-art: radial-gradient(120% 70% at 0% 0%, rgba(150,60,170,.30), transparent 60%),
+    radial-gradient(90% 60% at 100% 18%, rgba(57,172,153,.18), transparent 62%),
+    radial-gradient(110% 70% at 100% 100%, rgba(170,50,140,.24), transparent 60%),
+    radial-gradient(100% 60% at 0% 85%, rgba(57,150,140,.16), transparent 62%),
+    radial-gradient(60% 40% at 55% 55%, rgba(190,120,70,.08), transparent 70%);
   --radius: 14px; --nav-h: 62px; --mood: 57,255,20; --mood-a: 0;
 }
 * { box-sizing: border-box; }

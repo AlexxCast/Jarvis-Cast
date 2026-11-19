@@ -34,19 +34,19 @@ const toHsl = ([r, g, b]) => {
   const h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
   return [(h * 60 + 360) % 360, sat, l];
 };
-/** Palette del personaggio Kestra (il disegno di Alessio, non lo sfondo): mantello viola, pantaloni prugna,
- *  capelli blu petrolio, guanti e fasce smeraldo, cuoio ambrato, fibbia dorata, pelle, nome verde. */
+/** Palette presa SOLO dalla figura di Kestra nel disegno di Alessio (pixel del personaggio, niente sfondo né
+ *  scritte): stesse tonalità, solo un po' più luminose per staccare dal fondo scuro. */
 const KESTRA_PALETTE = [
-  [150, 70, 205],  // viola del mantello
-  [45, 170, 185],  // capelli petrolio
-  [40, 200, 130],  // smeraldo dei guanti
-  [205, 85, 175],  // prugna dei pantaloni
-  [215, 145, 70],  // cuoio degli stivali
-  [75, 120, 215],  // blu dei riflessi dei capelli
-  [120, 190, 105], // verde del nome
-  [215, 190, 90],  // oro della fibbia
-  [185, 135, 235], // lilla delle luci del mantello
-  [220, 150, 115], // pelle
+  hsl(313, 0.62, 0.55), // prugna di pantaloni e ombre del mantello
+  hsl(172, 0.5, 0.45),  // verde petrolio di guanti e fasce
+  hsl(25, 0.5, 0.52),   // cuoio di stivali e cintura
+  hsl(292, 0.5, 0.63),  // viola del mantello alla luce
+  hsl(182, 0.28, 0.58), // grigio petrolio del gilet
+  hsl(250, 0.42, 0.64), // blu viola dei capelli
+  hsl(32, 0.42, 0.64),  // pelle ambrata
+  hsl(55, 0.38, 0.55),  // oro della fibbia
+  hsl(100, 0.1, 0.76),  // argento di bende e lame
+  hsl(305, 0.38, 0.72), // lilla dei riflessi del mantello
 ];
 /** Ogni ramo prende un colore della palette (in ordine sparso, così due rami vicini non si somigliano);
  *  ogni foglia è una sfumatura diversa del colore del suo ramo, sempre dentro il tema. */
@@ -55,7 +55,7 @@ const leafColor = (base, k) => {
   const [h, sat, l] = toHsl(base);
   const f = (((k + 1) * 0.618034) % 1) - 0.5;          // -0.5..0.5, diverso per ogni foglia
   const g = (((k + 1) * 0.381966 + 0.25) % 1) - 0.5;
-  return hsl((h + f * 34 + 360) % 360, Math.min(0.95, sat), Math.max(0.4, Math.min(0.78, l + g * 0.26)));
+  return hsl((h + f * 22 + 360) % 360, Math.min(0.9, sat), Math.max(0.4, Math.min(0.8, l + g * 0.24)));
 };
 
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
