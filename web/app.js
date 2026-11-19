@@ -1441,6 +1441,38 @@ function viewIniziativa() {
       h('div', { class: 'list' }, store.initiative.history.map(x => h('div', { class: 'item small' }, h('span', { class: 'muted num' }, ago(x.at).slice(5)), ' ', x.text)))) : null);
 }
 
+/** Account collegati: Gmail, agenda Google (anche quella di famiglia), Outlook delle università, documenti. */
+function viewAccounts() {
+  if (!store.accounts) { api('GET', '/accounts').then(r => { store.accounts = r; render(); }).catch(() => {}); return h('div', { class: 'card' }, h('h2', {}, 'Account'), h('p', { class: 'empty' }, 'Carico…')); }
+  const { accounts = [], ready = {} } = store.accounts;
+  const reload = async () => { store.accounts = await api('GET', '/accounts'); render(); };
+  const openOut = (url) => { if (native) nativeCall('openUrl', url); else window.open(url, '_blank', 'noopener'); };
+  const connect = (provider) => guard(async () => {
+    const r = await api('POST', '/accounts/connect', { provider });
+    openOut(r.url);
+    toast('Accedi nel browser, poi torna qui: l\'account comparirà da solo.');
+    let n = 0; const t = setInterval(async () => { if (++n > 20) return clearInterval(t); const before = accounts.length; await reload(); if ((store.accounts.accounts || []).length > before) { clearInterval(t); toast('Account collegato.'); } }, 6000);
+  });
+  const icsUrl = h('input', { type: 'url', placeholder: 'Link .ics del calendario (https o webcal)', 'aria-label': 'Link del calendario .ics' });
+  const icsLabel = h('input', { type: 'text', placeholder: 'Nome (es. Lezioni Klagenfurt)', 'aria-label': 'Nome del calendario' });
+  const icon = { google: 'G', microsoft: 'M', ics: '📅' };
+  return h('div', { class: 'card' }, h('h2', {}, 'Account'),
+    h('p', { class: 'muted small' }, 'Kestra legge posta, agende e documenti degli account collegati. Prima di inviare una mail o mettere un evento ti chiede sempre conferma. I codici di verifica non vengono mai letti ad alta voce.'),
+    accounts.length ? h('div', { class: 'list' }, accounts.map(a => h('div', { class: 'item row' },
+      h('span', { class: 'num' }, icon[a.provider] || '•'),
+      h('div', { class: 'grow' }, h('div', {}, a.label), h('div', { class: 'muted small' }, `${a.email}${a.status === 'reconnect' ? ' · da ricollegare' : ''}`)),
+      a.status === 'reconnect' && a.provider !== 'ics' ? h('button', { class: 'btn', onclick: connect(a.provider) }, 'Ricollega') : null,
+      h('button', { class: 'btn ghost danger', onclick: guard(async () => { await api('DELETE', `/accounts/${encodeURIComponent(a.id)}`); await reload(); }) }, 'Scollega')))) : h('p', { class: 'empty' }, 'Nessun account collegato.'),
+    h('div', { class: 'row wrap', style: 'margin-top:8px' },
+      h('button', { class: 'btn primary', disabled: !ready.google || !ready.key, onclick: connect('google') }, 'Collega Google (Gmail, Calendar, Drive)'),
+      h('button', { class: 'btn primary', disabled: !ready.microsoft || !ready.key, onclick: connect('microsoft') }, 'Collega Microsoft (Outlook, OneDrive)')),
+    (!ready.google || !ready.microsoft || !ready.key) ? h('p', { class: 'muted small' }, `Per attivare i pulsanti mancano su Cloudflare: ${[!ready.key && 'ACCOUNTS_KEY', !ready.google && 'GOOGLE_CLIENT_ID e GOOGLE_CLIENT_SECRET', !ready.microsoft && 'MS_CLIENT_ID e MS_CLIENT_SECRET'].filter(Boolean).join(', ')}. Le istruzioni sono in docs/ACCOUNT.md.`) : null,
+    h('details', {}, h('summary', { class: 'small' }, 'L\'università non permette il collegamento? Aggiungi il calendario con un link'),
+      h('p', { class: 'muted small' }, 'In Outlook sul web: Impostazioni › Calendario › Calendari condivisi › Pubblica un calendario › copia il link ICS. Kestra lo legge soltanto.'),
+      icsUrl, icsLabel,
+      h('button', { class: 'btn', disabled: !ready.key, onclick: guard(async () => { await api('POST', '/accounts/ics', { url: icsUrl.value.trim(), label: icsLabel.value.trim() }); await reload(); toast('Calendario aggiunto.'); }) }, 'Aggiungi calendario')));
+}
+
 function viewImpostazioni() {
   const cfg = nativeJson('getConfig');
   const toggle = (label, key, method) => h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: cfg[key], onchange: (e) => { nativeCall(method, e.target.checked); setTimeout(render, 300); } }), label);
@@ -1490,6 +1522,7 @@ function viewImpostazioni() {
       h('div', { class: 'row wrap' },
         h('button', { class: 'btn', onclick: guard(async () => { store.state.legacyImported = null; await importLegacyIfNeeded(); render(); }) }, 'Reimporta i dati del telefono'),
         h('button', { class: 'btn ghost danger', onclick: () => nativeCall('disconnectCloud') }, 'Torna all\'app classica'))) : null,
+    viewAccounts(),
     viewIniziativa(),
     h('div', { class: 'card' }, h('h2', {}, 'Dati'),
       h('p', { class: 'muted' }, store.state.legacyImported ? `Dati della vecchia app importati il ${store.state.legacyImported.replace('T', ' alle ')}.` : 'I dati vivono sul tuo server Cloudflare.'),

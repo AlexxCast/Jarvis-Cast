@@ -119,6 +119,7 @@ docs/     guide
 - **Modelli opzionali:** `CEREBRAS_API_KEY`, `MISTRAL_API_KEY`, `DEEPSEEK_API_KEY`, `ANTHROPIC_API_KEY`.
 - **Jarvis programmatore:** `GITHUB_TOKEN` (fine-grained, Contents e Pull requests in lettura e scrittura) e `GITHUB_REPO`.
 - **Fuso orario:** `TZ_NAME`.
+- **Account collegati:** `ACCOUNTS_KEY` (cifra gli accessi, non cambiarla), `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`, `MS_CLIENT_ID`/`MS_CLIENT_SECRET`. Istruzioni in `docs/ACCOUNT.md`.
 
 ---
 
@@ -492,3 +493,30 @@ Anche con la 2.34 il Capo doveva chiamarla molte volte. Il riconoscimento di And
   opposta (punte esterne strette); la punta centrale parte dalle ginocchia. Aggiornati insieme: `web/logo.png` e
   `app/.../drawable/logo.png` (icona dell'app), `ic_launcher.xml`, il simbolo nel popup (`overlay.js`) e
   nell'HUD del PC (`jarvis_desktop.py`).
+
+## Posta, agende e documenti collegati (19/11/2026)
+- Alessio vuole che Kestra acceda direttamente alle sue app: Outlook delle università di Udine e Klagenfurt, più
+  account Gmail (gratuiti e privati), l'agenda Google condivisa con la famiglia, i documenti.
+- **Scelta:** API ufficiali invece di far aprire Outlook/Google sul PC o sul telefono. Prima la richiesta
+  "collegati alle mie email" faceva partire l'automatismo "google su PC" e non leggeva nulla. Le API ufficiali sono
+  gratuite, veloci e restituiscono dati veri che si possono verificare.
+- `server/src/accounts.js`: Google (Gmail, Calendar, Drive) e Microsoft Graph (Outlook, calendario, OneDrive) con
+  OAuth; i refresh token stanno nella tabella `accounts`, cifrati con AES-GCM (`ACCOUNTS_KEY`). I token brevi
+  restano in memoria: nessuna scrittura a ogni richiesta (regola del limite di scritture). Fanno eccezione i
+  refresh token Microsoft, che cambiano a ogni rinnovo, quindi al massimo una scrittura all'ora.
+- Ritorno dal login su `/oauth/<servizio>/callback`, senza token di Kestra: lo protegge uno `state` monouso valido
+  15 minuti (kv `oauthStates`). Il login si apre nel browser esterno, perché Google blocca il login dentro le
+  WebView.
+- **Lettura**: azioni `mail_search`, `mail_read`, `calendar_list`, `docs_search`, `doc_read`, con un secondo
+  giro del modello come per `web_search`. Se la domanda è chiaramente su posta o agenda, i dati vengono letti
+  subito (`prefetch`), con un giro di modello in meno.
+- **Scrittura**: `mail_send` e `event_add` non partono mai subito. Vanno in kv `accountPending` (10 minuti) e la
+  risposta ripete i dettagli e chiede "Confermi?". Solo "sì" li esegue e la risposta riporta l'esito vero
+  dell'API; "no" annulla. Kestra non elimina e non sposta mai le mail.
+- Le domande su posta, agenda e documenti saltano Jarvis Core e gli automatismi del telefono e del PC, quando c'è
+  almeno un account collegato o la frase chiede di collegarne uno.
+- Dati minimi al modello: anteprime di 180 caratteri, testo intero solo su richiesta; codici di verifica, numeri
+  di carta e IBAN mascherati (`scrub`).
+- Gli account delle università possono richiedere l'approvazione dell'amministratore. Come ripiego c'è un
+  calendario `.ics` pubblicato da Outlook, in sola lettura, con ripetizioni giornaliere e settimanali.
+- Schermata: Impostazioni › Account (`viewAccounts` in `web/app.js`). Non serve un nuovo APK.
