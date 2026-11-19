@@ -13,8 +13,8 @@ android {
         applicationId = "com.jarvisfit.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 44
-        versionName = "2.42"
+        versionCode = 45
+        versionName = "2.43"
         // Solo telefoni a 64 bit (come quello di Alessio): la libreria del modello di "Kestra" pesa ~12 MB per tipo.
         ndk { abiFilters += listOf("arm64-v8a") }
     }

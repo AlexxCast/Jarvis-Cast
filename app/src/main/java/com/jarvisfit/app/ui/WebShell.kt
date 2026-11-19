@@ -100,6 +100,29 @@ class JarvisBridge(
         put("version", runCatching { activity.packageManager.getPackageInfo(activity.packageName, 0).versionName }.getOrNull() ?: "")
     }.toString()
 
+    /**
+     * Salva un file (es. il backup) nella cartella Download del telefono: dentro l'app i download del browser
+     * non funzionano. Ritorna dove l'ha messo, oppure "" se non ci è riuscito.
+     */
+    @JavascriptInterface
+    fun saveDownload(name: String, text: String): String = runCatching {
+        val safe = name.replace(Regex("[^A-Za-z0-9._-]"), "_").ifBlank { "kestra.json" }
+        if (Build.VERSION.SDK_INT >= 29) {
+            val values = android.content.ContentValues().apply {
+                put(android.provider.MediaStore.Downloads.DISPLAY_NAME, safe)
+                put(android.provider.MediaStore.Downloads.MIME_TYPE, "application/json")
+            }
+            val uri = activity.contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                ?: error("cartella Download non disponibile")
+            activity.contentResolver.openOutputStream(uri)!!.use { it.write(text.toByteArray()) }
+            "Download/$safe"
+        } else {
+            val dir = activity.getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS) ?: activity.filesDir
+            java.io.File(dir, safe).writeText(text)
+            java.io.File(dir, safe).absolutePath
+        }
+    }.getOrElse { "" }
+
     /** Il diario salvato sul telefono dall'app classica (resta dov'è: viene solo letto). */
     @JavascriptInterface
     fun exportLegacyDiary(): String = Store.exportJson()

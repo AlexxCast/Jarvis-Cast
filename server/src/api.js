@@ -1,6 +1,6 @@
 // API HTTP di Jarvis (gira dentro il Durable Object, una richiesta alla volta).
 
-import { kvGet, kvSet, logEvent, WRITE_LIMIT_RE, friendlyError } from './db.js';
+import { kvGet, kvSet, logEvent, WRITE_LIMIT_RE, friendlyError, setWriteSource, writeReport } from './db.js';
 import { handleChat, isAddressed, applyActions, addMessage } from './brain.js';
 import { loadDiary, saveDiary, mergeLegacy, patchProfile, DIET_ACTIONS } from './diet.js';
 import * as N from './nutrition.js';
@@ -74,6 +74,7 @@ export async function handleApi(db, env, deps, request) {
   const method = request.method;
   const ms = deps.now(), tz = deps.tz;
   const startJob = (j) => { jobs.createJob(db, j, deps.now(), tz); deps.schedule?.(deps.now() + 500); };
+  setWriteSource(`${method} ${path.replace(/\/[0-9a-z_-]*\d[0-9a-z_-]*(?=\/|$)/gi, '/:id')}`);
   const chatDeps = { ...deps, startJob };
 
   try {
@@ -154,6 +155,7 @@ export async function handleApi(db, env, deps, request) {
       const b = await body(request);
       try { return json({ addressed: await isAddressed(db, env, deps, b.text) }); } catch { return json({ addressed: false, error: true }); }
     }
+    if (path === '/api/writes' && method === 'GET') return json(writeReport());
     if (path === '/api/state' && method === 'GET') return json(statePayload(db, ms, tz, env));
 
     if (path === '/api/history' && method === 'GET') {

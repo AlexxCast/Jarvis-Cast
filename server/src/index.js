@@ -2,7 +2,7 @@
 // che custodisce database, memoria e allarmi (promemoria e compiti in background).
 
 import { DurableObject } from 'cloudflare:workers';
-import { wrapDurableSql, migrate, friendlyError, WRITE_LIMIT_RE } from './db.js';
+import { wrapDurableSql, migrate, friendlyError, WRITE_LIMIT_RE, kvGet, kvSet, setWriteSource, restoreWriteStats, writeStats } from './db.js';
 import { handleApi } from './api.js';
 import * as agenda from './agenda.js';
 import * as jobs from './jobs.js';
@@ -24,6 +24,7 @@ export class JarvisDO extends DurableObject {
     this.db = wrapDurableSql(ctx.storage.sql);
     // Se l'aggiornamento dello schema fallisce, l'oggetto deve comunque rispondere spiegando il perché.
     try { migrate(this.db); this.bootError = null; } catch (e) { this.bootError = e; console.error('Migrazione fallita:', e?.stack || e); }
+    try { restoreWriteStats(kvGet(this.db, 'writeStats', null)); } catch { /* niente conti salvati */ }
   }
 
   deps() {
@@ -62,6 +63,7 @@ export class JarvisDO extends DurableObject {
   }
 
   async alarm() {
+    setWriteSource('battito');
     const deps = this.deps();
     const pulse = jarvisCore.selfInterrogate(this.db, this.env, Date.now(), deps.tz);
     const nextDue = agenda.fireDue(this.db, Date.now(), deps.tz);
@@ -71,6 +73,11 @@ export class JarvisDO extends DurableObject {
     // Battito: anche senza promemoria o compiti, Kestra si risveglia ogni 15 minuti per il motore di iniziativa.
     const candidates = [nextDue, pulse?.nextTimed, delay != null ? Date.now() + delay : null, Date.now() + 15 * 60_000].filter(x => x != null);
     if (candidates.length) await this.ctx.storage.setAlarm(Math.max(Math.min(...candidates), Date.now() + 100));
+    // I conti delle scritture si salvano al massimo ogni 15 minuti (2 righe), così sopravvivono ai riavvii.
+    if (Date.now() - (this.statsSavedAt || 0) > 14 * 60_000) {
+      this.statsSavedAt = Date.now();
+      try { kvSet(this.db, 'writeStats', writeStats); } catch { /* limite esaurito: pazienza */ }
+    }
   }
 }
 

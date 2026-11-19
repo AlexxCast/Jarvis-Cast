@@ -226,7 +226,8 @@ export function ingestNotifications(db, list, ms, tz) {
       if (propose(db, { key: `call:${title}`, text: `Hai una chiamata persa: ${title || text}. Vuoi che richiami?`, cooldownMs: 30 * 60_000 }, ms, tz) === 'sent') alerts++;
     }
   }
-  kvSet(db, 'phoneNotifications', keep.slice(-60));
+  // Solo se è arrivato qualcosa di nuovo: ogni scrittura conta nel limite gratuito di Cloudflare.
+  if (stored) kvSet(db, 'phoneNotifications', keep.slice(-60));
   return { stored, alerts };
 }
 

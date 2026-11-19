@@ -1536,10 +1536,20 @@ function viewImpostazioni() {
     viewIniziativa(),
     h('div', { class: 'card' }, h('h2', {}, 'Dati'),
       h('p', { class: 'muted' }, store.state.legacyImported ? `Dati della vecchia app importati il ${store.state.legacyImported.replace('T', ' alle ')}.` : 'I dati vivono sul tuo server Cloudflare.'),
+      store.writes ? h('p', { class: 'small' }, `Scritture di oggi su Cloudflare: ${store.writes.total.toLocaleString('it-IT')} su ${store.writes.limit.toLocaleString('it-IT')}` +
+        (store.writes.sources?.length ? ` (di più: ${store.writes.sources.slice(0, 3).map(x => `${x.name} ${x.rows}`).join(', ')})` : '') + '.') :
+        h('button', { class: 'btn ghost small', onclick: guard(async () => { store.writes = await api('GET', '/writes'); render(); }) }, 'Quante scritture oggi?'),
       h('div', { class: 'row wrap' },
         h('button', { class: 'btn', onclick: guard(async () => {
           const data = await api('GET', '/export');
-          const a = h('a', { href: URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' })), download: `jarvis-backup-${data.exportedAt.slice(0, 10)}.json` });
+          const name = `jarvis-backup-${data.exportedAt.slice(0, 10)}.json`;
+          // Dentro l'app Android il download del browser non parte: il file lo salva l'app nella cartella Download.
+          if (native?.saveDownload) {
+            const where = native.saveDownload(name, JSON.stringify(data, null, 1));
+            toast(where ? `Backup salvato in ${where}` : 'Non sono riuscita a salvare il backup sul telefono.');
+            return;
+          }
+          const a = h('a', { href: URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' })), download: name });
           a.click(); URL.revokeObjectURL(a.href);
         }) }, 'Scarica un backup'),
         h('button', { class: 'btn', onclick: importBackupFile }, 'Importa un backup'),
