@@ -486,7 +486,9 @@ Anche con la 2.34 il Capo doveva chiamarla molte volte. Il riconoscimento di And
     l'ultimo problema. Serve a capire dal telefono vero cosa non va.
 
 ## Logo con le punte strette (app 2.39, 19/11/2026)
-- Schizzo di Alessio: le punte in basso del simbolo sono più strette della testa a rombo. Le due punte esterne
-  partono dagli angoli della testa e scendono verso l'interno (a circa 2/3 della larghezza della testa), la punta
-  centrale resta al centro. Aggiornati insieme: `web/logo.png` e `app/.../drawable/logo.png` (icona dell'app),
-  `ic_launcher.xml`, il simbolo nel popup (`overlay.js`) e nell'HUD del PC (`jarvis_desktop.py`).
+- Schizzo di Alessio (ricalcato linea per linea dopo una prima versione sbagliata): testa a rombo col volto; da
+  ogni angolo della testa una gamba scende verso l'interno fino al "ginocchio" (a circa 2/3 della larghezza) e poi
+  dritta in giù; due diagonali partono dagli angoli, si incrociano sotto la testa e finiscono in fondo alla gamba
+  opposta (punte esterne strette); la punta centrale parte dalle ginocchia. Aggiornati insieme: `web/logo.png` e
+  `app/.../drawable/logo.png` (icona dell'app), `ic_launcher.xml`, il simbolo nel popup (`overlay.js`) e
+  nell'HUD del PC (`jarvis_desktop.py`).
