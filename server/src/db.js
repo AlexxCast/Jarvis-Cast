@@ -134,7 +134,8 @@ export function migrate(db) {
   const sig = schemaSignature();
   try { if (db.get('SELECT value FROM kv WHERE key = ?', 'schemaSignature')?.value === JSON.stringify(sig)) return false; } catch { /* database nuovo */ }
   for (const stmt of SCHEMA.split(';').map(s => s.trim()).filter(Boolean)) db.run(stmt);
-  for (const stmt of ADDED_COLUMNS) { try { db.run(stmt); } catch { /* già presente */ } }
+  // Una colonna già presente va bene; il limite di scritture no: la migrazione si riprova alla prossima richiesta.
+  for (const stmt of ADDED_COLUMNS) { try { db.run(stmt); } catch (e) { if (WRITE_LIMIT_RE.test(String(e?.message || e))) throw e; } }
   kvSet(db, 'schemaSignature', sig);
   return true;
 }

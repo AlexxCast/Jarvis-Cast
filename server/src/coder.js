@@ -31,8 +31,15 @@ export const enabled = (env) => !!env.GITHUB_TOKEN;
 const repoOf = (env) => env.GITHUB_REPO || 'AlexxCast/Jarvis-Cast';
 
 export function listProposals(db) {
-  return db.all('SELECT id, request, summary, status, branch, pr, error, created, updated, area, attempts, files FROM code_proposals ORDER BY created DESC LIMIT 10')
-    .map(x => ({ ...x, files: safeList(x.files) }));
+  let rows;
+  try {
+    rows = db.all('SELECT id, request, summary, status, branch, pr, error, created, updated, area, attempts, files FROM code_proposals ORDER BY created DESC LIMIT 10');
+  } catch (e) {
+    // Colonne nuove non ancora create (migrazione bloccata dal limite di scritture): si legge quello che c'è.
+    if (!/no such column/i.test(String(e?.message || e))) throw e;
+    rows = db.all('SELECT * FROM code_proposals ORDER BY created DESC LIMIT 10').map(x => ({ area: 'web', attempts: 0, ...x }));
+  }
+  return rows.map(x => ({ ...x, files: safeList(x.files) }));
 }
 const safeList = (t) => { try { const v = JSON.parse(t || '[]'); return Array.isArray(v) ? v : []; } catch { return []; } };
 const getProposal = (db, id) => db.get('SELECT * FROM code_proposals WHERE id = ?', String(id || ''));

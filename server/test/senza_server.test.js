@@ -93,3 +93,21 @@ test('sync: un messaggio scritto offline va al modello con la sua ora, le azioni
   assert.ok(r.body.replies[0].reply, JSON.stringify(r.body.replies));
   assert.ok(seen.some(t => /server non rispondeva/.test(t) && /mela/.test(t)));
 });
+
+test('scritture finite durante un aggiornamento: le colonne nuove mancano ma /api/state risponde', async () => {
+  resetWriteBlock();
+  const { db, flag } = blockableDb();
+  // Database "vecchio": code_proposals senza le colonne aggiunte dopo (area, attempts...).
+  db.run('DROP TABLE code_proposals');
+  db.run("CREATE TABLE code_proposals (id TEXT PRIMARY KEY, request TEXT NOT NULL, summary TEXT NOT NULL DEFAULT '', status TEXT NOT NULL, branch TEXT NOT NULL DEFAULT '', pr INTEGER NOT NULL DEFAULT 0, files TEXT NOT NULL DEFAULT '[]', error TEXT NOT NULL DEFAULT '', created TEXT NOT NULL, updated TEXT NOT NULL)");
+  db.run("INSERT INTO code_proposals (id, request, status, created, updated) VALUES ('c1', 'colori', 'ready', '2026-11-19', '2026-11-19')");
+  db.run("DELETE FROM kv WHERE key = 'schemaSignature'");
+  flag.blocked = true;
+  assert.throws(() => migrate(db), /rows written/, 'la migrazione non deve fingere di essere riuscita');
+  const d = { ...deps(fakeFetch(() => reply({}))), schedule: () => {} };
+  const r = await handleApi(db, { ...ENV, GITHUB_TOKEN: 'x' }, d, new Request('https://x/api/state'));
+  assert.equal(r.status, 200);
+  const body = await r.json();
+  assert.equal(body.code[0].area, 'web');
+  resetWriteBlock();
+});

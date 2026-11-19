@@ -61,10 +61,13 @@ function statePayload(db, ms, tz, env = {}) {
     legacyImported: kvGet(db, 'legacyImported', null),
     layout: ui.loadLayout(db),
     mood: mood.current(db, ms),
-    code: coder.enabled(env) ? coder.listProposals(db).filter(x => ['working', 'ready', 'testing'].includes(x.status)) : null,
+    code: coder.enabled(env) ? safe(() => coder.listProposals(db), []).filter(x => ['working', 'ready', 'testing'].includes(x.status)) : null,
     server: serverStatus(),
   };
 }
+
+/** Una parte secondaria dello stato che si rompe non deve impedire all'app di aprirsi. */
+function safe(fn, fallback) { try { return fn(); } catch (e) { console.error('stato:', e?.message || e); return fallback; } }
 
 /** Stato del server per l'app: con le scritture finite si legge tutto, le modifiche le tiene il telefono. */
 function serverStatus() {
