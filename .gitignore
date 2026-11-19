@@ -17,5 +17,3 @@ __pycache__/
 desktop/config.local.json
 desktop/jarvis_bg.log
 desktop/jarvis_bg.version
-app/src/main/assets/kws/
-app/src/main/jniLibs/

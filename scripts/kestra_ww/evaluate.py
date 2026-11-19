@@ -55,3 +55,12 @@ if __name__ == "__main__":
             for g in (1.0, 0.1):
                 h, s = run(fe, score, x, thr, g)
                 print(f"{p.split('/')[-1]} soglia {thr} volume x{g}: {len(h)} chiamate a {h}  (max {max(s):.2f})")
+
+
+def false_alarms_per_hour(score, windows, thr, stride_s=0.32):
+    """Falsi allarmi all'ora su finestre di vettori già pronte (es. neg_val_test.npy, passo 4 vettori = 0,32 s)."""
+    last = -9; n = 0
+    for i, f in enumerate(windows):
+        t = i * stride_s
+        if score(f.astype(np.float32)) > thr and t - last > 1.5: n += 1; last = t
+    return n / (len(windows) * stride_s / 3600)

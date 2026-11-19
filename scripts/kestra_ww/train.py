@@ -13,6 +13,8 @@ ap.add_argument("kit"); ap.add_argument("out")
 ap.add_argument("--pos", nargs="*", default=[]); ap.add_argument("--neg", nargs="*", default=[])
 ap.add_argument("--hidden", type=int, default=64); ap.add_argument("--epochs", type=int, default=40)
 ap.add_argument("--real-weight", type=float, default=4.0, help="peso degli esempi reali rispetto ai sintetici")
+ap.add_argument("--neg-npy", nargs="*", default=[], help="negativi già in vettori [N,16,96] (fetch_negatives.py)")
+ap.add_argument("--neg-npy-weight", type=float, default=1.0)
 ap.add_argument("--mine", type=int, default=2, help="giri di caccia ai falsi allarmi sulle registrazioni senza Kestra")
 args = ap.parse_args()
 rng = np.random.default_rng(1)
@@ -57,6 +59,9 @@ def f16(x):
 kit = np.load(f"{args.kit}/kit.npz")
 P = kit["pos"].astype(np.float32); N = kit["neg"].astype(np.float32)
 print("kit", P.shape, N.shape)
+EXT = [np.load(p).astype(np.float32) for p in args.neg_npy]
+EXT = np.concatenate(EXT) if EXT else np.zeros((0, WIN, 96), np.float32)
+print("negativi esterni", EXT.shape)
 RP, RN = [], []
 STEP = 1280
 
@@ -94,10 +99,11 @@ for x in negs:
             if f is not None: RN.append(f)
 print("reali: positivi", len(RP), "negativi", len(RN))
 nreal_p, nreal_n = len(RP), len(RN)
-X = np.concatenate([P] + ([np.array(RP)] if RP else []) + [N] + ([np.array(RN)] if RN else [])).reshape(-1, WIN * 96)
-y = np.concatenate([np.ones(len(P) + nreal_p), np.zeros(len(N) + nreal_n)]).astype(np.float32)
+X = np.concatenate([P] + ([np.array(RP)] if RP else []) + [N] + ([np.array(RN)] if RN else []) + [EXT]).reshape(-1, WIN * 96)
+y = np.concatenate([np.ones(len(P) + nreal_p), np.zeros(len(N) + nreal_n + len(EXT))]).astype(np.float32)
 # Gli esempi veri contano di più: sono la voce e la stanza in cui il modello lavorerà.
-sw = np.concatenate([np.ones(len(P)), np.full(nreal_p, args.real_weight), np.ones(len(N)), np.full(nreal_n, args.real_weight)]).astype(np.float32)
+sw = np.concatenate([np.ones(len(P)), np.full(nreal_p, args.real_weight), np.ones(len(N)), np.full(nreal_n, args.real_weight),
+                     np.full(len(EXT), args.neg_npy_weight)]).astype(np.float32)
 idx = rng.permutation(len(X)); X, y, sw = X[idx], y[idx], sw[idx]
 nv = len(X) // 10; Xv, yv, Xt, yt, swt = X[:nv], y[:nv], X[nv:], y[nv:], sw[nv:]
 mu = Xt.mean(0); sd = Xt.std(0) + 1e-3
