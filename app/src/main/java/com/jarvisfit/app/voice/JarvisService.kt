@@ -337,7 +337,21 @@ class JarvisService : LifecycleService(), SensorEventListener {
         sessionActive = true
         lastRecognizerActivityMs = System.currentTimeMillis()
         guard?.sessionStarted()
+        if (command) muteRecognizerBeep()
         rec.startListening(intent)
+    }
+
+    /**
+     * Il riconoscimento di Google fa un bip ogni volta che apre il microfono: Alessio non vuole bip, solo la voce
+     * di Kestra. Zittisce per un attimo i suoni di sistema e di notifica (solo se erano accesi) e li riaccende.
+     */
+    private fun muteRecognizerBeep() {
+        val am = getSystemService(AUDIO_SERVICE) as? AudioManager ?: return
+        val streams = listOf(AudioManager.STREAM_SYSTEM, AudioManager.STREAM_NOTIFICATION)
+            .filter { runCatching { !am.isStreamMute(it) }.getOrDefault(false) }
+        val muted = streams.filter { runCatching { am.adjustStreamVolume(it, AudioManager.ADJUST_MUTE, 0); true }.getOrDefault(false) }
+        if (muted.isEmpty()) return
+        main.postDelayed({ muted.forEach { runCatching { am.adjustStreamVolume(it, AudioManager.ADJUST_UNMUTE, 0) } } }, 900)
     }
 
     private fun stopSession(cancel: Boolean) {
@@ -659,18 +673,13 @@ class JarvisService : LifecycleService(), SensorEventListener {
 
     private var lastWakeGreetingIdx = -1
     // Saluti brevi: dopo la chiamata Kestra torna in ascolto quasi subito. Tutti riconosciuti come sua eco.
-    private val wakeGreetings = listOf(
-        "Eccomi, Capo.",
-        "Dimmi, Capo.",
-        "Sono qui, Capo.",
-        "Comandi, Capo.",
-        "Ti ascolto.",
-        "Pronta, Capo.",
-    )
+    /** Risposte brevi quando la si chiama (niente bip, richiesta di Alessio): tante, per non ripetersi. */
+    private val wakeGreetings = WakeGreetings.ALL
+
+    private val recentGreetings = ArrayDeque<Int>()
 
     private fun nextWakeGreeting(): String {
-        var idx = kotlin.random.Random.nextInt(wakeGreetings.size)
-        if (idx == lastWakeGreetingIdx) idx = (idx + 1) % wakeGreetings.size
+        val idx = WakeGreetings.pick(wakeGreetings.size, recentGreetings, kotlin.random.Random.Default)
         lastWakeGreetingIdx = idx
         return wakeGreetings[idx]
     }
@@ -719,11 +728,9 @@ class JarvisService : LifecycleService(), SensorEventListener {
         // 3. Se ha già detto il comando (es. "Jarvis cosa mangio?"), elabora subito;
         //    altrimenti saluta a voce ("Eccomi, signore.", "Mi dica.", ecc.) invece del beep e poi ascolta la richiesta.
         if (remainingCommand.isNotBlank()) {
-            tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 90)
-            main.postDelayed({ process(remainingCommand) }, 250)
-        } else if (quick) {
-            tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 90)
-            main.postDelayed({ listenForCommand() }, 200)
+            // Ha già detto la richiesta: niente bip né saluto, risponde direttamente.
+            if (!Settings.speakReplies) tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 90)
+            main.postDelayed({ process(remainingCommand) }, 150)
         } else if (Settings.speakReplies) {
             val greet = nextWakeGreeting()
             lastSpokenText = greet

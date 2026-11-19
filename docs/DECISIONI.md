@@ -573,3 +573,24 @@ modello solo per "Kestra".
   modello deve superare la soglia per 2 passi di fila (`KestraKws.CONSECUTIVE`, 160 ms). Le soglie salgono:
   Bassa 0,93, Media 0,87, Alta 0,79. Sulle prove: dalla scrivania 11 su 12 (prima 12). Su 5,3 ore di audio vario,
   calcolate passo per passo, i falsi allarmi scendono da ~9 a ~1,5 l'ora.
+
+## Niente bip alla chiamata, contatore delle scritture, backup dal telefono (app 2.43, 19/11/2026)
+- **Chiamata**: Alessio non vuole bip, solo la voce. Quando la si chiama, Kestra risponde a voce con una frase breve
+  presa da un repertorio di 30 ("Ciao Capo.", "Sì Capo?", "Dimmi tutto."...), mai una delle ultime 10
+  (`voice/WakeGreetings.kt`). Se la richiesta è già nella frase ("Kestra, che ore sono") risponde e basta. Il
+  bip del riconoscimento di Google all'apertura del microfono è coperto zittendo per 0,9 s i suoni di sistema e
+  di notifica, solo se erano accesi e solo per l'ascolto della richiesta. Il bip resta solo con le risposte a
+  voce spente.
+- **Scritture di Cloudflare** (il limite di 100.000 righe al giorno è finito di nuovo il 19/11): `db.js` conta le
+  righe scritte davvero (`rowsWritten` del cursore SQL) per richiesta (`POST /api/chat`, `battito`...) e per
+  tabella. I conti si salvano in kv `writeStats` al massimo ogni 15 minuti. Si vedono in `GET /api/writes` e in
+  Impostazioni › Dati ("Quante scritture oggi?"). Le notifiche del telefono scrivono solo se ne arriva una nuova.
+- **Backup dall'app**: nel WebView i download del browser non partono, quindi `JarvisNative.saveDownload` salva il
+  file nella cartella Download.
+
+## Ricette con grammi e calorie per ogni ingrediente (19/11/2026)
+- Problema visto dal Capo: il totale di una ricetta era un numero unico detto dal modello, che si dimenticava la piadina; e la schermata della ricetta non poteva mostrare le calorie accanto agli ingredienti (le teneva solo come testo "150 g").
+- Ora ogni ingrediente della sessione di cucina ha grammi, kcal e macro di QUELLA dose; il totale lo calcola il server sommando gli ingredienti (`cooking.totals`), mai più il numero del modello quando ci sono i valori.
+- Se il modello non dà le calorie di un ingrediente, `server/src/foods.js` le stima da una tabella piccola di cibi comuni (valori medi per 100 g, pezzi tipo "1 piadina" = 110 g, cucchiai); a schermo hanno "~". Se non si può stimare, l'ingrediente è segnato "? kcal" e compare in "Senza calorie" invece di sparire.
+- La scheda mostra "nome · dose · kcal · proteine" per riga e sotto il totale con proteine, carboidrati e grassi. Il ricettario della dieta riceve i valori veri.
+- Per le correzioni il modello vede nel contesto gli ingredienti con le calorie e rimanda `recipe` con lo stesso titolo: passaggi e punto in cui eri restano.

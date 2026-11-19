@@ -528,7 +528,10 @@ function renderCooking() {
   if (!c) return null;
   const have = new Set(c.have || []);
   const steps = c.steps || [];
-  const info = [c.servings ? `${c.servings} ${c.servings === 1 ? 'porzione' : 'porzioni'}` : '', c.kcal ? `${c.kcal} kcal` : '', c.minutes ? `${c.minutes} min` : ''].filter(Boolean).join(' · ');
+  const info = [c.servings ? `${c.servings} ${c.servings === 1 ? 'porzione' : 'porzioni'}` : '', c.kcal ? `${c.kcal} kcal${c.kcalServing ? ` (${c.kcalServing} a porzione)` : ''}` : '', c.minutes ? `${c.minutes} min` : ''].filter(Boolean).join(' · ');
+  const n1 = (v) => (v == null ? '' : String(Math.round(v * 10) / 10).replace('.', ','));
+  const dose = (it) => it.qty || (it.grams ? `${it.grams} g` : '');
+  const kcalOf = (it) => (it.kcal == null ? '? kcal' : `${it.est ? '~' : ''}${it.kcal} kcal`);
   return h('div', { class: 'card cooking', role: 'region', 'aria-label': 'Sessione di cucina' },
     h('div', {}, h('h2', { style: 'margin:0' }, '🍳 ' + c.title), info ? h('span', { class: 'muted small' }, info) : null),
     h('div', { class: 'row', style: 'gap:8px;justify-content:flex-end' },
@@ -538,7 +541,14 @@ function renderCooking() {
       h('b', { class: 'small' }, 'Ingredienti'),
       (c.ingredients || []).map((it, i) => h('label', { class: 'check small', style: 'cursor:pointer' },
         h('input', { type: 'checkbox', checked: have.has(i), onchange: guard(() => act({ type: 'recipe_toggle', index: i })) }),
-        h('span', { style: have.has(i) ? 'text-decoration:line-through;color:var(--muted)' : '' }, it.qty ? h('b', { class: 'num' }, it.qty + ' ') : null, it.name)))) : null,
+        h('span', { class: 'grow', style: have.has(i) ? 'text-decoration:line-through;color:var(--muted)' : '' }, it.name, dose(it) ? h('b', { class: 'num' }, ' ' + dose(it)) : null),
+        h('span', { class: 'num muted', style: 'margin-left:auto;white-space:nowrap' + (it.kcal == null ? ';color:var(--warn,#f5a524)' : ''), title: it.est ? 'Stima dalla tabella dei cibi comuni' : '' },
+          kcalOf(it) + (it.protein != null ? ` · P ${n1(it.protein)} g` : ''))))) : null,
+    c.kcal ? h('div', { class: 'small', style: 'display:flex;flex-wrap:wrap;gap:4px 12px;border-top:1px solid rgba(255,255,255,.08);padding-top:6px' },
+      h('b', {}, `Totale ${c.kcal} kcal`),
+      c.protein != null ? h('span', { class: 'num' }, `Proteine ${n1(c.protein)} g · Carboidrati ${n1(c.carbs)} g · Grassi ${n1(c.fat)} g`) : null,
+      (c.missing || []).length ? h('span', { style: 'color:var(--warn,#f5a524)' }, `Senza calorie: ${c.missing.join(', ')}`) : null,
+      (c.ingredients || []).some(it => it.est) ? h('span', { class: 'muted' }, '~ = stima dai valori medi') : null) : null,
     steps.length ? h('div', { class: 'cook-steps' },
       h('b', { class: 'small' }, `Passaggi · ${c.step + 1} di ${steps.length}`),
       h('ol', { style: 'margin:4px 0;padding-left:22px;display:flex;flex-direction:column;gap:6px' }, steps.map((st, i) => h('li', {
@@ -1536,10 +1546,20 @@ function viewImpostazioni() {
     viewIniziativa(),
     h('div', { class: 'card' }, h('h2', {}, 'Dati'),
       h('p', { class: 'muted' }, store.state.legacyImported ? `Dati della vecchia app importati il ${store.state.legacyImported.replace('T', ' alle ')}.` : 'I dati vivono sul tuo server Cloudflare.'),
+      store.writes ? h('p', { class: 'small' }, `Scritture di oggi su Cloudflare: ${store.writes.total.toLocaleString('it-IT')} su ${store.writes.limit.toLocaleString('it-IT')}` +
+        (store.writes.sources?.length ? ` (di più: ${store.writes.sources.slice(0, 3).map(x => `${x.name} ${x.rows}`).join(', ')})` : '') + '.') :
+        h('button', { class: 'btn ghost small', onclick: guard(async () => { store.writes = await api('GET', '/writes'); render(); }) }, 'Quante scritture oggi?'),
       h('div', { class: 'row wrap' },
         h('button', { class: 'btn', onclick: guard(async () => {
           const data = await api('GET', '/export');
-          const a = h('a', { href: URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' })), download: `jarvis-backup-${data.exportedAt.slice(0, 10)}.json` });
+          const name = `jarvis-backup-${data.exportedAt.slice(0, 10)}.json`;
+          // Dentro l'app Android il download del browser non parte: il file lo salva l'app nella cartella Download.
+          if (native?.saveDownload) {
+            const where = native.saveDownload(name, JSON.stringify(data, null, 1));
+            toast(where ? `Backup salvato in ${where}` : 'Non sono riuscita a salvare il backup sul telefono.');
+            return;
+          }
+          const a = h('a', { href: URL.createObjectURL(new Blob([JSON.stringify(data, null, 1)], { type: 'application/json' })), download: name });
           a.click(); URL.revokeObjectURL(a.href);
         }) }, 'Scarica un backup'),
         h('button', { class: 'btn', onclick: importBackupFile }, 'Importa un backup'),

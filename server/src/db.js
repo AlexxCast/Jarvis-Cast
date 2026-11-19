@@ -24,12 +24,37 @@ CREATE TABLE IF NOT EXISTS project_chats (id TEXT PRIMARY KEY, project TEXT NOT 
 CREATE INDEX IF NOT EXISTS project_chats_project ON project_chats(project);
 `;
 
+// Contatore delle scritture (il piano gratuito di Cloudflare ne concede 100.000 righe al giorno): per ogni
+// richiesta o battito si sa quante righe ha scritto e in quale tabella. Si vede in Impostazioni › Dati.
+export const writeStats = { day: '', total: 0, bySource: {}, byTable: {} };
+let writeSource = 'altro';
+export function setWriteSource(label) { writeSource = String(label || 'altro').slice(0, 60); }
+export function tallyWrites(q, n, now = Date.now()) {
+  if (!n) return;
+  const day = new Date(now).toISOString().slice(0, 10); // il limite si azzera a mezzanotte UTC
+  if (writeStats.day !== day) Object.assign(writeStats, { day, total: 0, bySource: {}, byTable: {} });
+  const table = (/\b(?:INTO|UPDATE|FROM|TABLE(?: IF NOT EXISTS)?)\s+(\w+)/i.exec(q) || [])[1] || '?';
+  writeStats.total += n;
+  writeStats.bySource[writeSource] = (writeStats.bySource[writeSource] || 0) + n;
+  writeStats.byTable[table] = (writeStats.byTable[table] || 0) + n;
+}
+/** Riprende i conti di oggi salvati (il Durable Object può essere riavviato in qualsiasi momento). */
+export function restoreWriteStats(saved, now = Date.now()) {
+  if (!saved || saved.day !== new Date(now).toISOString().slice(0, 10) || writeStats.day === saved.day) return;
+  Object.assign(writeStats, { day: saved.day, total: saved.total || 0, bySource: { ...saved.bySource }, byTable: { ...saved.byTable } });
+}
+export function writeReport(limit = 8) {
+  const top = (o) => Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, limit).map(([name, rows]) => ({ name, rows }));
+  return { day: writeStats.day, total: writeStats.total, limit: 100_000, sources: top(writeStats.bySource), tables: top(writeStats.byTable) };
+}
+
 /** Adatta ctx.storage.sql (Durable Object) all'interfaccia { all, get, run }. */
 export function wrapDurableSql(sql) {
+  const exec = (q, p) => { const c = sql.exec(q, ...p); return c; };
   return {
-    all: (q, ...p) => sql.exec(q, ...p).toArray(),
-    get: (q, ...p) => sql.exec(q, ...p).toArray()[0] ?? null,
-    run: (q, ...p) => { sql.exec(q, ...p); },
+    all: (q, ...p) => { const c = exec(q, p); const rows = c.toArray(); tallyWrites(q, c.rowsWritten); return rows; },
+    get: (q, ...p) => { const c = exec(q, p); const rows = c.toArray(); tallyWrites(q, c.rowsWritten); return rows[0] ?? null; },
+    run: (q, ...p) => { const c = exec(q, p); c.toArray(); tallyWrites(q, c.rowsWritten); },
   };
 }
 
@@ -38,7 +63,7 @@ export function wrapNodeSqlite(database) {
   return {
     all: (q, ...p) => database.prepare(q).all(...p).map(row => ({ ...row })),
     get: (q, ...p) => { const row = database.prepare(q).get(...p); return row ? { ...row } : null; },
-    run: (q, ...p) => { database.prepare(q).run(...p); },
+    run: (q, ...p) => { const r = database.prepare(q).run(...p); tallyWrites(q, Number(r?.changes || 0)); },
   };
 }
 

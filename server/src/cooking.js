@@ -2,6 +2,7 @@
 // e si può salvare per rifarla. Un solo kv per la sessione aperta e uno per le ricette salvate.
 import { kvGet, kvSet } from './db.js';
 import { loadDiary, saveDiary } from './diet.js';
+import { findFood, gramsOf, estimate } from './foods.js';
 
 const SESSION_KEY = 'cookingSession';
 const SAVED_KEY = 'recipes';
@@ -12,21 +13,58 @@ export const COOKING_ACTIONS = new Set(['recipe', 'recipe_step', 'recipe_save', 
 const clip = (v, n) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(0, n);
 const slug = (t) => clip(t, 60).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'ricetta';
 
+const numOr = (v) => (v === '' || v == null || !Number.isFinite(Number(v)) || Number(v) < 0 ? null : Number(v));
+const r1 = (v) => Math.round(v * 10) / 10;
+
+/**
+ * Un ingrediente con nome, dose, grammi e valori di QUELLA dose. Se il modello non dà le calorie le stima dalla
+ * tabella dei cibi comuni (est: true); se non si può, kcal resta null e l'ingrediente finisce tra i "mancanti".
+ */
+function normalizeIngredient(it) {
+  if (typeof it === 'string') it = { name: it };
+  const name = clip(it?.name || it?.label, 80);
+  if (!name) return null;
+  const food = findFood(name);
+  let qty = clip(it?.qty || it?.quantity || '', 30);
+  let grams = numOr(it?.grams ?? it?.g);
+  if (!grams) grams = gramsOf(qty, food) || null;
+  if (!qty && grams) qty = `${Math.round(grams)} g`;
+  const out = { name, qty, grams: grams ? Math.round(grams) : null, kcal: numOr(it?.kcal), protein: numOr(it?.protein), carbs: numOr(it?.carbs), fat: numOr(it?.fat), est: false };
+  if (out.kcal == null && food && (grams || food.kcal === 0)) {
+    Object.assign(out, estimate(food, grams || 0), { est: true });
+  } else if (out.kcal != null && food && grams) {
+    // Macro mancanti con le calorie date: le completa la tabella, scalate sulle calorie del modello.
+    const e = estimate(food, grams);
+    const k = e.kcal > 0 ? out.kcal / e.kcal : 1;
+    for (const m of ['protein', 'carbs', 'fat']) if (out[m] == null) out[m] = r1(e[m] * k);
+  }
+  if (out.kcal != null) out.kcal = Math.round(out.kcal);
+  return out;
+}
+
+/** Totali della ricetta = somma degli ingredienti, così nessuno (la piadina!) resta fuori dal conto. */
+export function totals(ingredients, fallbackKcal = null) {
+  const counted = ingredients.filter(i => i.kcal != null);
+  const missing = ingredients.filter(i => i.kcal == null && !/\bq\.?\s?b\.?\b/i.test(i.qty)).map(i => i.name);
+  if (!counted.length) return { kcal: fallbackKcal, protein: null, carbs: null, fat: null, missing, fromIngredients: false };
+  const sum = (k) => r1(counted.reduce((x, i) => x + (i[k] || 0), 0));
+  return { kcal: Math.round(sum('kcal')), protein: sum('protein'), carbs: sum('carbs'), fat: sum('fat'), missing, fromIngredients: true };
+}
+
 /** Normalizza una ricetta arrivata dal modello o dall'interfaccia. Ritorna null se manca l'essenziale. */
 export function normalizeRecipe(a = {}) {
   const title = clip(a.title || a.name, 80);
-  const ingredients = (Array.isArray(a.ingredients) ? a.ingredients : []).slice(0, 30).map(it => {
-    if (typeof it === 'string') return { name: clip(it, 80), qty: '' };
-    return { name: clip(it?.name || it?.label, 80), qty: clip(it?.qty || it?.quantity || [it?.grams && `${it.grams} g`].filter(Boolean)[0], 30) };
-  }).filter(it => it.name);
+  const ingredients = (Array.isArray(a.ingredients) ? a.ingredients : []).slice(0, 30).map(normalizeIngredient).filter(Boolean);
   const steps = (Array.isArray(a.steps) ? a.steps : []).slice(0, 25)
     .map(s => clip(typeof s === 'string' ? s : (s?.text || s?.label), 300).replace(/^\d+[.)]\s*/, ''))
     .filter(Boolean);
   if (!title || (!ingredients.length && !steps.length)) return null;
+  const servings = Number(a.servings) > 0 ? Math.min(20, Math.round(Number(a.servings))) : null;
+  const t = totals(ingredients, Number(a.kcal) > 0 ? Math.round(Number(a.kcal)) : null);
   return {
-    id: slug(title), title, ingredients, steps,
-    servings: Number(a.servings) > 0 ? Math.min(20, Math.round(Number(a.servings))) : null,
-    kcal: Number(a.kcal) > 0 ? Math.round(Number(a.kcal)) : null,
+    id: slug(title), title, ingredients, steps, servings,
+    kcal: t.kcal, protein: t.protein, carbs: t.carbs, fat: t.fat, missing: t.missing,
+    kcalServing: t.kcal && servings > 1 ? Math.round(t.kcal / servings) : null,
     minutes: Number(a.minutes) > 0 ? Math.round(Number(a.minutes)) : null,
     notes: clip(a.notes, 300),
   };
@@ -44,9 +82,9 @@ function saveRecipe(db, r, ms) {
   d.savedRecipes = (d.savedRecipes || []).filter(x => x.id !== 'rec-' + r.id);
   d.savedRecipes.push({
     id: 'rec-' + r.id, title: r.title,
-    ingredients: r.ingredients.map(i => ({ name: i.name, grams: grams(i.qty), kcal: 0, protein: 0, carbs: 0, fat: 0 })),
+    ingredients: r.ingredients.map(i => ({ name: i.name, grams: i.grams || grams(i.qty), kcal: i.kcal || 0, protein: i.protein || 0, carbs: i.carbs || 0, fat: i.fat || 0 })),
     instructions: r.steps.map((st, i) => `${i + 1}. ${st}`).join('\n'),
-    totalKcal: r.kcal || 0, totalProtein: 0, totalCarbs: 0, totalFat: 0, createdAt: new Date(ms).toISOString().slice(0, 10),
+    totalKcal: r.kcal || 0, totalProtein: r.protein || 0, totalCarbs: r.carbs || 0, totalFat: r.fat || 0, createdAt: new Date(ms).toISOString().slice(0, 10),
   });
   saveDiary(db, d);
 }
@@ -56,11 +94,16 @@ export function apply(db, a = {}, ms = Date.now()) {
   const cur = session(db);
   switch (a.type) {
     case 'recipe': {
-      const r = normalizeRecipe(a);
+      // Correzione della ricetta aperta: quello che il modello non rimanda (passaggi o ingredienti) resta com'era.
+      const same = cur && slug(a.title || a.name || cur.title) === cur.id;
+      const merged = same ? { ...a, title: a.title || cur.title, ingredients: a.ingredients?.length ? a.ingredients : cur.ingredients, steps: a.steps?.length ? a.steps : cur.steps,
+        servings: a.servings || cur.servings, minutes: a.minutes || cur.minutes } : a;
+      const r = normalizeRecipe(merged);
       if (!r) return false;
-      const next = { ...r, step: 0, have: [], startedAt: ms, saved: !!a.save };
+      const keep = same && r.steps.length === cur.steps.length;
+      const next = { ...r, step: keep ? cur.step : 0, have: keep && r.ingredients.length === cur.ingredients.length ? cur.have : [], startedAt: same ? cur.startedAt : ms, saved: !!a.save || (same && cur.saved) };
       kvSet(db, SESSION_KEY, next);
-      if (a.save) saveRecipe(db, next, ms);
+      if (next.saved) saveRecipe(db, next, ms);
       return true;
     }
     case 'recipe_step': {
@@ -89,7 +132,7 @@ export function apply(db, a = {}, ms = Date.now()) {
       let r = listSaved(db).find(x => x.id === q) || listSaved(db).find(x => x.id.includes(q) || q.includes(x.id));
       if (!r) {
         const old = (loadDiary(db).savedRecipes || []).find(x => slug(x.title) === q || slug(x.title).includes(q));
-        r = old ? normalizeRecipe({ title: old.title, kcal: old.totalKcal, ingredients: (old.ingredients || []).map(i => ({ name: i.name, qty: i.grams ? `${i.grams} g` : '' })), steps: String(old.instructions || '').split(/\n+/) }) : null;
+        r = old ? normalizeRecipe({ title: old.title, kcal: old.totalKcal, ingredients: (old.ingredients || []).map(i => ({ name: i.name, grams: i.grams, kcal: i.kcal || null, protein: i.protein, carbs: i.carbs, fat: i.fat })), steps: String(old.instructions || '').split(/\n+/) }) : null;
       }
       if (!r) return false;
       kvSet(db, SESSION_KEY, { ...r, step: 0, have: [], startedAt: ms, saved: true });
@@ -129,5 +172,8 @@ export function voiceStep(db, text, ms = Date.now()) {
 export function contextLine(db) {
   const cur = session(db);
   if (!cur) return '';
-  return `SESSIONE DI CUCINA APERTA: "${cur.title}", passo ${cur.step + 1}/${cur.steps.length}${cur.saved ? ' (salvata)' : ' (non ancora salvata)'}. Per modificarla rimanda l'azione recipe completa con le correzioni.`;
+  const ing = (cur.ingredients || []).map(i => `${i.name} ${i.qty || (i.grams ? i.grams + ' g' : '')} = ${i.kcal != null ? i.kcal + ' kcal' : '? kcal'}${i.protein != null ? ` P${i.protein}` : ''}${i.est ? ' (stima tabella)' : ''}`).join('; ');
+  const tot = cur.kcal ? ` TOTALE ${cur.kcal} kcal${cur.protein != null ? ` (P${cur.protein} C${cur.carbs} G${cur.fat})` : ''}${cur.kcalServing ? `, ${cur.kcalServing} kcal a porzione` : ''}` : '';
+  const miss = cur.missing?.length ? ` Senza calorie: ${cur.missing.join(', ')}.` : '';
+  return `SESSIONE DI CUCINA APERTA: "${cur.title}", passo ${cur.step + 1}/${cur.steps.length}${cur.saved ? ' (salvata)' : ' (non ancora salvata)'}.\nIngredienti: ${ing}.${tot}.${miss}\nIl totale lo calcola l'app sommando gli ingredienti: per modificarla rimanda recipe con lo stesso title e TUTTI gli ingredienti (con grams e kcal di ognuno); i passaggi puoi ometterli se non cambiano. Quando dici le calorie usa questo totale.`;
 }
