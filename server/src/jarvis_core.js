@@ -10,6 +10,7 @@ import { cleanSpoken, unitLabel } from './parlato.js';
 import { kvGet, kvSet, pushInbox } from './db.js';
 import * as flows from './flows.js';
 import * as devices from './devices.js';
+import * as eyes from './pc_eyes.js';
 import * as memory from './memory.js';
 import * as router from './router.js';
 import * as agents from './agents.js';
@@ -870,7 +871,8 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
   }
 
   // 3. Richiesta di vedere lo schermo del PC in sovraimpressione
-  if (PC_SCREEN_RE.test(clean)) {
+  // "cosa c'è sullo schermo" con il PC che sa guardare: risponde l'elenco a voce (occhi), non la sola foto.
+  if (PC_SCREEN_RE.test(clean) && !(eyes.pcHasEyes(db, nowMs) && /\bcosa\b/i.test(clean))) {
     return dispatchPcScreenView(db, nowMs);
   }
 
@@ -893,6 +895,16 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
 
   const focus = getFocus(db, sessionId, nowMs);
   const PHONE_REF_RE = /\b(?:sul|al|nel|dal|su|da)\s+(?:mio\s+)?(?:telefono|cellulare|smartphone|android)\b/i;
+
+  // 4a. Occhi sul PC: "che video ci sono", "il terzo", "guarda quel video lì", "vai giù"… "fermo".
+  if (!PHONE_REF_RE.test(clean)) {
+    const onPc = isPcTarget(db, clean) || (focus?.domain === 'dispositivo' && focus?.device === 'pc') || getNavMode(db, sessionId, nowMs)?.device === 'pc';
+    const seen = eyes.handleEyes(db, stripPcWords(db, clean), nowMs, { onPc, sessionId });
+    if (seen) {
+      setNavMode(db, sessionId, true, 'pc', nowMs);
+      return seen;
+    }
+  }
 
   // 4b. Cambio contesto esplicito verso il Telefono ("ora fai la stessa cosa sul telefono", "aprilo sul telefono")
   if (PHONE_REF_RE.test(clean) && !isPcTarget(db, clean)) {
@@ -1058,6 +1070,7 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
     if (moreScroll) {
       const up = /\bsu\b|alto/i.test(moreScroll[1]) || (/^ancora$/i.test(moreScroll[1]) && kvGet(db, `lastScroll:${sessionId}`, 'down') === 'up');
       devices.enqueueCommand(db, 'desktop', { kind: 'scroll', target: up ? 'up' : 'down' }, nowMs);
+      eyes.markScrolled(db, nowMs);
       kvSet(db, `lastScroll:${sessionId}`, up ? 'up' : 'down');
       setNavMode(db, sessionId, true, 'pc', nowMs);
       return { reply: up ? 'Su.' : 'Giù.', expectReply: true, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
@@ -1138,11 +1151,13 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
     }
     if (/\b(scorri(?:\s+la\s+pagina|\s+gi[uù]|\s+verso\s+il\s+basso)?|scendi)\b/i.test(withoutPc) && !/\bsu\b|\balto\b/i.test(withoutPc)) {
       devices.enqueueCommand(db, 'desktop', { kind: 'scroll', target: 'down' }, nowMs);
+      eyes.markScrolled(db, nowMs);
       setNavMode(db, sessionId, true, 'pc', nowMs);
       return { reply: 'Scorro la pagina verso il basso sul PC, Capo.', expectReply: true, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
     if (/\b(scorri\s+(?:in\s+)?su|scorri\s+verso\s+l'alto|sali)\b/i.test(withoutPc)) {
       devices.enqueueCommand(db, 'desktop', { kind: 'scroll', target: 'up' }, nowMs);
+      eyes.markScrolled(db, nowMs);
       setNavMode(db, sessionId, true, 'pc', nowMs);
       return { reply: 'Scorro la pagina verso l\'alto sul PC, Capo.', expectReply: true, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }

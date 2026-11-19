@@ -17,6 +17,12 @@ Finché `Jarvis Desktop` è aperto sul computer, il PC compare **Online** nella 
 - *"Jarvis metti in pausa sul PC"* / *"alza il volume sul PC"* / *"blocca il PC"*
 - *"Jarvis qual è lo stato del PC?"* (ti legge l'uso della RAM e la finestra attiva sul computer)
 
+## Kestra guarda lo schermo (Prime, YouTube, Netflix…)
+- "che video ci sono?" → Kestra fa una foto dello schermo e ti legge i video con i numeri.
+- "il terzo", "apri l'ultimo", "guarda quel video lì", "quello col gatto" → clicca lei nel punto giusto.
+- "vai giù" / "scendi piano" / "scorri veloce" → la pagina scorre da sola; "fermo" la ferma (torna indietro del ritardo).
+- Serve il programma aggiornato: `git pull` e riavvia `Avvia_Jarvis_PC.bat`. Funziona sullo schermo principale.
+
 ## Parlare con Kestra dal PC (microfono)
 
 Utile quando il telefono è lontano (per esempio sul comodino) e tu sei alla scrivania.

@@ -439,6 +439,159 @@ def capture_and_upload_screen(cfg: dict, log_fn, title: str = "Schermo PC") -> N
         log_fn(f"Errore cattura schermo: {e}")
 
 
+# ---------------------------------------------------------------- occhi sullo schermo e scorrimento continuo
+# Kestra guarda una foto dello schermo, il server (modello con la vista) dice dove sono i video e dove cliccare,
+# qui si clicca davvero. Le coordinate arrivano da 0 a 1000 sulla foto, che copre tutto lo schermo principale.
+
+EYES_CAPS = ["look", "click", "autoscroll"]
+
+
+def make_dpi_aware() -> None:
+    """Con lo zoom di Windows al 125-150% i pixel "finti" non coincidono con quelli veri: si usano sempre quelli veri."""
+    if os.name != "nt":
+        return
+    try:
+        ctypes.windll.shcore.SetProcessDpiAwareness(2)
+    except Exception:
+        try:
+            ctypes.windll.user32.SetProcessDPIAware()
+        except Exception:
+            pass
+
+
+def screen_size() -> tuple:
+    try:
+        return ctypes.windll.user32.GetSystemMetrics(0), ctypes.windll.user32.GetSystemMetrics(1)
+    except Exception:
+        return 0, 0
+
+
+def cursor_pos() -> dict:
+    try:
+        class POINT(ctypes.Structure):
+            _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+        pt = POINT()
+        ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
+        return {"x": pt.x, "y": pt.y}
+    except Exception:
+        return {}
+
+
+def grab_screen_b64(width: int = 1280):
+    """Foto JPEG dello schermo principale, larga `width`. Ritorna (base64, larghezza vera, altezza vera) o None."""
+    if os.name != "nt":
+        return None
+    ps = (
+        "Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public class KDpi { "
+        "[DllImport(\"user32.dll\")] public static extern bool SetProcessDPIAware(); }'; "
+        "[KDpi]::SetProcessDPIAware() | Out-Null; "
+        "Add-Type -AssemblyName System.Windows.Forms,System.Drawing; "
+        "$b = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds; "
+        "$bmp = New-Object System.Drawing.Bitmap($b.Width, $b.Height); "
+        "$g = [System.Drawing.Graphics]::FromImage($bmp); "
+        "$g.CopyFromScreen($b.Location, [System.Drawing.Point]::Empty, $b.Size); "
+        f"$w = {int(width)}; $h = [int]($b.Height * ($w / $b.Width)); "
+        "$small = New-Object System.Drawing.Bitmap($bmp, $w, $h); "
+        "$ms = New-Object System.IO.MemoryStream; "
+        "$small.Save($ms, [System.Drawing.Imaging.ImageFormat]::Jpeg); "
+        "Write-Output (\"$($b.Width) $($b.Height) \" + [Convert]::ToBase64String($ms.ToArray()))"
+    )
+    out = subprocess.check_output(
+        ["powershell", "-NoProfile", "-WindowStyle", "Hidden", "-Command", ps],
+        creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        timeout=12,
+    ).decode("utf-8", errors="ignore").strip()
+    parts = out.split(" ", 2)
+    if len(parts) < 3 or not parts[2]:
+        return None
+    return parts[2], int(parts[0]), int(parts[1])
+
+
+def click_at(x1000: float, y1000: float) -> None:
+    """Clic sinistro nel punto (da 0 a 1000) dello schermo principale."""
+    w, h = screen_size()
+    if not w or not h:
+        raise RuntimeError("dimensioni dello schermo sconosciute")
+    x = int(max(0, min(1000, float(x1000))) / 1000 * (w - 1))
+    y = int(max(0, min(1000, float(y1000))) / 1000 * (h - 1))
+    u = ctypes.windll.user32
+    u.SetCursorPos(x, y)
+    time.sleep(0.05)
+    u.mouse_event(0x0002, 0, 0, 0, 0)  # giù
+    time.sleep(0.04)
+    u.mouse_event(0x0004, 0, 0, 0, 0)  # su
+
+
+def look_and_act(cmd: dict, cfg: dict, log_fn) -> None:
+    """Foto dello schermo → il server dice cosa c'è e dove cliccare → clic e risposta a voce."""
+    shot = grab_screen_b64()
+    if not shot:
+        speak_tts("Non riesco a fare la foto dello schermo.")
+        raise RuntimeError("foto dello schermo non riuscita")
+    b64, w, h = shot
+    res = api_call(cfg, "POST", "/pc/look", {
+        "image": b64, "w": w, "h": h, "cursor": cursor_pos(),
+        "mode": cmd.get("args") or "list", "phrase": cmd.get("target") or "",
+        "title": (get_pc_metrics() or {}).get("activeWindow", ""),
+    }, timeout=45)
+    click = res.get("click")
+    if click:
+        click_at(click.get("x", 500), click.get("y", 500))
+        log_fn(f"Clic su {click} ({res.get('say', '')})")
+    if res.get("say"):
+        speak_tts(res["say"])
+    if not res.get("ok"):
+        raise RuntimeError(res.get("say") or "non riuscito")
+
+
+_scroll = {"ev": None, "steps": []}
+
+
+def _wheel(delta: int) -> None:
+    try:
+        ctypes.windll.user32.mouse_event(0x0800, 0, 0, delta, 0)
+    except Exception:
+        press_hotkey("pageup" if delta > 0 else "pagedown")
+
+
+def start_auto_scroll(up: bool, fast: bool = False) -> None:
+    """La pagina scorre da sola (al massimo 40 secondi) finché non arriva "fermo"."""
+    stop_auto_scroll(None)
+    ev = threading.Event()
+    steps = []
+    _scroll.update(ev=ev, steps=steps)
+    delta = 120 if up else -120
+    pause = 0.2 if fast else 0.4
+
+    def run():
+        t0 = time.time()
+        while not ev.is_set() and time.time() - t0 < 40:
+            _wheel(delta)
+            steps.append((time.time(), delta))
+            ev.wait(pause)
+
+    threading.Thread(target=run, daemon=True).start()
+
+
+def stop_auto_scroll(said_at_ms) -> None:
+    """Ferma lo scorrimento. Il "fermo" arriva qui un paio di secondi dopo: si torna indietro dei passi fatti nel frattempo."""
+    ev = _scroll.get("ev")
+    if ev is None:
+        return
+    ev.set()
+    _scroll["ev"] = None
+    if said_at_ms is None:
+        return
+    now = time.time()
+    since = float(said_at_ms) / 1000 - 0.8  # il Capo l'ha detto un po' prima che il server lo scrivesse
+    if not (now - 10 < since <= now):  # orologi troppo diversi: si torna indietro dell'ultimo secondo e mezzo
+        since = now - 1.5
+    extra = [d for (t, d) in _scroll.get("steps", []) if t >= since]
+    for d in extra[:12]:
+        _wheel(-d)
+        time.sleep(0.02)
+
+
 def find_project_path(project_name: str) -> Path:
     clean = (project_name or "Jarvis-Cast").strip()
     roots = [Path("G:/"), Path.home(), Path.home() / "Desktop", Path.home() / "Documents", Path.home() / "Projects"]
@@ -579,7 +732,25 @@ def execute_pc_command(cmd: dict, log_fn, cfg: dict = None) -> None:
             log_fn(f"Errore scrittura testo: {e}")
         return
 
+    if kind == "scroll" and os.name == "nt" and str(target).lower() == "stop":
+        stop_auto_scroll(cmd.get("createdAt"))
+        return
+
+    if kind == "scroll" and os.name == "nt" and str(args).startswith("auto"):
+        start_auto_scroll(str(target).lower() == "up", fast=str(args) == "auto-fast")
+        return
+
+    if kind == "look" and os.name == "nt":
+        look_and_act(cmd, cfg or load_config(), log_fn)
+        return
+
+    if kind == "click" and target and os.name == "nt":
+        xs, ys = (str(target).split(",") + ["500"])[:2]
+        click_at(float(xs), float(ys))
+        return
+
     if kind == "scroll" and os.name == "nt":
+        stop_auto_scroll(None)
         delta = 520 if str(target).lower() == "up" else -520
         try:
             ctypes.windll.user32.mouse_event(0x0800, 0, 0, delta, 0)
@@ -1028,7 +1199,7 @@ def poll_wait(res) -> float:
 DAEMON_PORT = 47621
 LOG_PATH = DIR / "jarvis_bg.log"
 # Cambia a ogni aggiornamento del demone: la finestra riavvia un demone vecchio rimasto acceso.
-DAEMON_VERSION = "2026-11-19-ascolto"
+DAEMON_VERSION = "2026-11-19-occhi"
 VERSION_PATH = DIR / "jarvis_bg.version"
 
 
@@ -1137,6 +1308,7 @@ def run_background_daemon() -> None:
         VERSION_PATH.write_text(DAEMON_VERSION, encoding="utf-8")
     except Exception:
         pass
+    make_dpi_aware()
     bg_log("Demone Jarvis Desktop avviato in background.")
     pc_name = f"PC {socket.gethostname()}"
     plat = f"{platform.system()} {platform.release()}"
@@ -1162,6 +1334,7 @@ def run_background_daemon() -> None:
                         "metrics": get_pc_metrics(),
                         "profiles": list_chrome_profiles(),
                         "apps": apps,
+                        "caps": EYES_CAPS,
                     },
                 )
                 last_err = ""

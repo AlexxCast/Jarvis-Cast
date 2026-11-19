@@ -645,3 +645,25 @@ parole ripetute, errori del riconoscimento) e con modelli che rispondono male. I
   per addestrare: con la TV sotto la voce il nuovo modello sente 11-12 nomi su 15 invece di 3-4, ma in silenzio ne perde
   1-2, fa più falsi risvegli col rumore rosa/bianco e i falsi allarmi all'ora su audio vario salgono da 3,9 a 6,2-6,8
   (soglia Media). Peggio nella vita normale, quindi resta il modello 2.41. Idea per dopo: usarlo solo quando la TV è accesa.
+
+## Occhi di Kestra sul PC (19/11/2026, sera)
+
+Il Capo voleva poter dire, su una pagina di Prime o YouTube già aperta, "vai giù", "fermo", "guarda quel video lì",
+"il terzo". Prima il PC era cieco: "scorri" = un solo scatto di rotellina, "clicca su X" = Ctrl+F sulla scritta X.
+- `server/src/pc_eyes.js`: il PC manda una foto dello schermo (`POST /api/pc/look`), un modello con la vista
+  (tier vision del router) elenca video e risultati in ordine di lettura con il centro da 0 a 1000 e, se c'è una frase,
+  sceglie quale cliccare. Il PC clicca lì e dice la risposta ad alta voce (il telefono la saprebbe solo minuti dopo).
+- "che video ci sono" → elenco a voce con i numeri (kv `pcLook`). "il terzo" subito dopo clicca senza un'altra foto;
+  dopo uno scorrimento o un clic i numeri non valgono più (kv `pcScrollAt`) e si riguarda lo schermo.
+- Il modello non può cliccare a caso: numero inesistente → nessun clic e si chiede; coordinate fuori schermo riportate
+  dentro; se non capisce quale, chiede ("Quale, quello rosso o quello col cane?").
+- "quello lì è bello", "quella è mia sorella" (commenti) non cliccano: senza verbo "quello…" deve dire quale.
+  "metti il video di X" resta la ricerca su YouTube di prima.
+- Scorrimento continuo: "vai giù", "scendi piano", "scorri veloce", "continua a scorrere" → il PC scorre da solo (max 40 s)
+  finché "fermo/stop/basta/lì". Il "fermo" arriva con 1-3 s di ritardo: il PC torna indietro dei passi fatti dopo
+  che il Capo l'ha detto (usa `createdAt` del comando). "un po' più giù" resta il passo singolo.
+- `fermo`, `il terzo`, `quello col gatto` passano l'ascolto aperto senza dire Kestra (followupVerdict).
+- Il programma del PC annuncia `caps: ['look','click','autoscroll']` nell'heartbeat; con il programma vecchio Kestra
+  dice di aggiornarlo invece di far finta. Solo lo schermo principale. DPI aware: con lo zoom di Windows i clic
+  cadono nel punto giusto.
+- Mai provato su un PC vero: le prove sono sul server con modelli finti e sulla logica di scorrimento in Python.

@@ -754,8 +754,8 @@ export function followupVerdict(text, lastAssistant = '') {
   if (/\?\s*$/.test(String(lastAssistant || '').trim()) && words.length <= 8) return 'yes';
   // Frasi brevi: "sì", "grazie", "va bene", "basta" sono per Kestra; "buonasera a tutti" o "a voi la linea" sono la TV.
   // Prima bastavano 3 parole qualsiasi per far rispondere Kestra alla televisione.
-  if (words.length <= 3 && /^(?:s[iì]|si|no|ok|okay|grazie|va\s+bene|perfetto|certo|esatto|giusto|bravo|brava|basta|stop|avanti|indietro|ripeti|fatto|dai|vai|aspetta|annulla|ciao|kestra|chestra|ancora|altro|poi|e\s+poi|niente|lascia\s+stare|non\s+importa|ottimo|top|benissimo|capito|come|cosa)(?=\s|$)/.test(t)) return 'yes';
-  if (words.length <= 12 && /^(?:e\s+|poi\s+|ora\s+|adesso\s+|allora\s+|no\s+|s[iì]\s+)?(?:apri|aprimi|metti|mettimi|aggiungi|segna|registra|togli|cancella|chiama|cerca|cercami|ricordami|ricorda|dimmi|mostrami|mostra|fai|fammi|leggi|leggimi|scrivi|manda|invia|imposta|spegni|accendi|quanto|quanti|quante|qual|quale|cosa|come|perch[eé]|dove|quando|puoi|sai|mi\s+(?:dici|serve|servono)|ho\s+(?:mangiato|bevuto|fatto))\b/.test(t)) return 'yes';
+  if (words.length <= 3 && /^(?:s[iì]|si|no|ok|okay|grazie|va\s+bene|perfetto|certo|esatto|giusto|bravo|brava|basta|stop|ferm[oa]|fermati|l[iì]|quell[oa]|(?:il\s+|la\s+|l')?(?:prim|second|terz|quart|quint|ultim)[oa]|avanti|indietro|ripeti|fatto|dai|vai|aspetta|annulla|ciao|kestra|chestra|ancora|altro|poi|e\s+poi|niente|lascia\s+stare|non\s+importa|ottimo|top|benissimo|capito|come|cosa)(?=\s|$)/.test(t)) return 'yes';
+  if (words.length <= 12 && /^(?:e\s+|poi\s+|ora\s+|adesso\s+|allora\s+|no\s+|s[iì]\s+)?(?:apri|aprimi|metti|mettimi|clicca|seleziona|scorri|scendi|aggiungi|segna|registra|togli|cancella|chiama|cerca|cercami|ricordami|ricorda|dimmi|mostrami|mostra|fai|fammi|leggi|leggimi|scrivi|manda|invia|imposta|spegni|accendi|quanto|quanti|quante|qual|quale|cosa|come|perch[eé]|dove|quando|puoi|sai|mi\s+(?:dici|serve|servono)|ho\s+(?:mangiato|bevuto|fatto))\b/.test(t)) return 'yes';
   return 'ask';
 }
 
