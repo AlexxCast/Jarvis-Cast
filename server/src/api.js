@@ -495,10 +495,13 @@ export async function handleApi(db, env, deps, request) {
     }
     if (path === '/api/models' && method === 'PUT') {
       const b = await body(request);
-      if (b.reset) { kvSet(db, 'models', null); return json({ ok: true, count: DEFAULT_MODELS.length }); }
+      if (b.reset) { kvSet(db, 'models', null); kvSet(db, 'modelsRemoved', []); return json({ ok: true, count: DEFAULT_MODELS.length }); }
       const list = sanitizeModels(b.models);
       if (!list.length) return bad('elenco modelli vuoto o non valido');
       kvSet(db, 'models', list);
+      // Chi salva un elenco suo sceglie anche cosa lasciare fuori: i modelli del catalogo assenti non vengono riaggiunti.
+      const keep = new Set(list.map(m => `${m.provider}:${m.model}`));
+      kvSet(db, 'modelsRemoved', DEFAULT_MODELS.map(m => `${m.provider}:${m.model}`).filter(k => !keep.has(k)));
       return json({ ok: true, count: list.length });
     }
     if (path === '/api/models/unblock' && method === 'POST') { db.run('UPDATE model_state SET blocked_until = 0, fails = 0, low_until = 0'); return json({ ok: true }); }
