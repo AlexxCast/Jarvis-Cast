@@ -28,6 +28,9 @@ const TIMED_ACTION_RE = /^\W*(?:ehi\s+|ciao\s+|ok\s+)?(?:(?:kestra|chestra|quest
 // I numeri a parole ("dieci minuti") arrivano già in cifre da cleanSpoken: prima "dieci minuti" diventava l'etichetta
 // di un timer da 1 minuto.
 const TIMER_RE = /^\W*(?:ehi\s+|ciao\s+|ok\s+)?(?:(?:kestra|chestra|questra|jarvis)\s+)?(?:metti(?:mi)?|mi\s+metti|imposta(?:mi)?|avvia|fai\s+partire|crea|setta|parti\s+con)\s+(?:un\s+|il\s+|lo\s+)?(timer|conto\s+alla\s+rovescia|cronometro)\s*(?:di|da)?\s*(?:(\d{1,3})\s*(second\w*|minut\w*|or[ae]))?(?:\s+(?:per|di|chiamato)\s+(?!\d)(.{2,100}))?\W*$/i;
+// Inizio di un comando al PC (dopo il nome del PC tolto): "apri…", "ok chiudi…", "scorri giù", "più giù", "pausa".
+const PC_CMD_START = /^(?:(?:ok|no|sì|ora|adesso|poi|invece|dai|e|ma|per\s+favore|puoi|potresti|mi|ti\s+prego)\s+)*(?:apri\w*|avvi\w*|lanci\w*|chiud\w*|termin\w*|ferm\w*|cerc\w*|trov\w*|vai|scrivi|digita|incolla|blocca|sospendi|metti\w*|riavvia|spegni|alza|abbassa|muto|smuta|togli|pausa|play|riprendi|stop|prossim\w*|precedente|successiv\w*|salta|nuova|ricarica|aggiorna|torna|indietro|schermo|fullscreen|scorri|scendi|sali|gi[uù]|su|pi[uù]|ancora|cambia|mostra\w*|minimizza|riduci|clicca|invio|conferma|seleziona|usa|tab|esegui|fai|fammi|riproduci|ascolta|volume|fallo|falla|alt)(?![\p{L}])/iu;
+const CONFIRMED_GOAL_RE = /\b(?:ha\s+confermato|confermato\s+dall'utente)\b/i;
 const PASSPHRASE_RE = /^\W*(?:la\s+parola\s+d'ordine\s+[eè]\s+|parola\s+d'ordine\s+)?niente\s+pi[uù]\s+fili\W*$/i;
 const SELF_PROMPT_ECHO_RE = /^\W*(?:parola\s+d'ordine(?:\s+non\s+corretta.*)?|certamente\s+signore.*|subito\s+signore.*|ricevuto\s+signore.*|ottimo\s+lavoro\s+signore.*|ho\s+avviato\s+la\s+riproduzione.*|signore\s+ho\s+riscontrato.*)\W*$/i;
 
@@ -484,8 +487,33 @@ function stripPcWords(db, text) {
 }
 
 /** Invia l'apertura di un'app o servizio web al PC Desktop. */
+// Nomi che il riconoscimento storpia: "giotube", "iutub", "spotifai", "netflics", "crome".
+const PC_NAMES = ['youtube', 'prime video', 'gmail', 'instagram', 'whatsapp', 'netflix', 'twitch', 'github', 'chatgpt', 'google', 'amazon', 'wikipedia', 'spotify', 'gemini', 'facebook', 'linkedin', 'reddit', 'chrome', 'discord', 'telegram', 'vscode', 'antigravity', 'steam', 'edge'];
+function editDistance(a, b) {
+  const d = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
+  for (let j = 1; j <= b.length; j++) d[0][j] = j;
+  for (let i = 1; i <= a.length; i++) for (let j = 1; j <= b.length; j++) d[i][j] = Math.min(d[i - 1][j] + 1, d[i][j - 1] + 1, d[i - 1][j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
+  return d[a.length][b.length];
+}
+/** Il nome vero di un'app/sito capito male, oppure il testo com'era. */
+export function canonicalPcName(raw) {
+  const t = String(raw || '').toLowerCase().replace(/^(?:tipo|cioè|quell[oa]|il|la|lo|l')\s+/i, '').trim();
+  if (!t || PC_NAMES.includes(t) || t.includes(' ')) return t;
+  // Suoni italiani di parole inglesi: gi/ju → y, ai finale → y, ks → x.
+  const sound = t.replace(/^gi|^iu|^ju/, 'you').replace(/ai$/, 'y').replace(/ics$|ks$/, 'x').replace(/^cr/, 'chr');
+  let best = null, bestD = 9;
+  for (const n of PC_NAMES) {
+    const dist = Math.min(editDistance(t, n), editDistance(sound, n));
+    if (dist < bestD) { best = n; bestD = dist; }
+  }
+  const allowed = t.length >= 7 ? 2 : t.length >= 4 ? 1 : 0;
+  return best && bestD <= allowed ? best : t;
+}
+
 export function dispatchPcOpen(db, rawTarget, nowMs = Date.now()) {
-  const clean = String(rawTarget || '').replace(/[.!?]+$/, '').trim();
+  const said = String(rawTarget || '').replace(/[.!?]+$/, '').trim();
+  const fixed = canonicalPcName(said);
+  const clean = fixed && fixed !== said.toLowerCase() ? fixed : said.replace(/^(?:tipo|cioè)\s+/i, '');
   if (!clean) return null;
   const low = clean.toLowerCase();
   // "helluva boss su prime video": un titolo dentro un servizio → pagina di ricerca del servizio, non un'app inesistente.
@@ -529,7 +557,7 @@ export function extractMediaQuery(raw) {
     .replace(/\b(?:apri\s+youtube\s+e|vai\s+su\s+youtube\s+e)\b/gi, ' ')
     .replace(/\b(?:su|sul|sullo|da|dal|in|nel|con)\s+(?:youtube|pc|computer|desktop|gh?ideon)\b/gi, ' ')
     .replace(/\b(?:per\s+favore|subito|adesso|di\s+nuovo|grazie|dai)\b/gi, ' ')
-    .replace(/^(?:un\s+video\s+(?:di|su)|una\s+canzone\s+di|la\s+canzone|il\s+video\s+(?:di\s+)?|musica\s+di|un\s+po'\s+di)\s+/i, '')
+    .replace(/^(?:un\s+video\s+(?:di|su)|una\s+canzone\s+(?:di|del|della|dei)|la\s+canzone(?:\s+(?:di|del|della|dei))?|il\s+video(?:\s+(?:di|del|della))?|il\s+brano(?:\s+(?:di|del))?|musica\s+di|un\s+po'\s+di)\s+/i, '')
     .replace(/^\s*youtube\s*$/i, '')
     .replace(/[.!?]+$/, '')
     .replace(/\s+/g, ' ')
@@ -712,6 +740,20 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
   }
 
   // 1b. Timer o Cronometro esplicito ("metti un timer di 5 minuti", "avvia un cronometro")
+  // Compito sul telefono fermo su "Invio il messaggio. Procedo?": il "sì" lo riprende subito, senza modello,
+  // con la conferma scritta nell'obiettivo (phone.guardMove la riconosce). "no" lo annulla.
+  const phoneWait = kvGet(db, 'phonePending', null);
+  if (phoneWait?.goal && nowMs - Number(phoneWait.at || 0) < 15 * 60_000 && /\bProcedo\?\s*$/.test(String(phoneWait.say || ''))) {
+    if (/^(?:s[iì]|si|ok|vai|procedi|conferm\w*|certo|invia(?:lo|la)?|manda(?:lo|la)?|chiama(?:lo|la)?|fallo|pure)(?:\W+(?:s[iì]|vai|procedi|invia(?:lo|la)?|manda(?:lo|la)?|chiama(?:lo|la)?|pure|grazie|certo))*\W*$/i.test(clean)) {
+      kvSet(db, 'phonePending', null);
+      const goal = CONFIRMED_GOAL_RE.test(phoneWait.goal) ? phoneWait.goal : `${phoneWait.goal} (l'utente ha confermato: procedi)`;
+      return { reply: 'Procedo.', device: [{ type: 'phone_task', goal }], actions: ['phone_task'], touched: ['automazioni'], touchedLeaves: [] };
+    }
+    if (/^(?:no|annulla|lascia\s+stare|non\s+(?:inviare|mandare|chiamare|farlo)|aspetta|stop|fermati)\b/i.test(clean)) {
+      kvSet(db, 'phonePending', null);
+      return { reply: 'Ok, mi fermo.', device: [], actions: [], touched: ['automazioni'], touchedLeaves: [] };
+    }
+  }
   // Conferma di una telefonata a un numero di emergenza (entro 60 secondi dalla domanda).
   const callConfirm = kvGet(db, 'callConfirm', null);
   if (callConfirm && nowMs - callConfirm.at < 60_000) {
@@ -728,12 +770,15 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
   if (pcConfirm && nowMs - pcConfirm.at < 60_000) {
     if (/^(?:s[iì]|si|conferm\w*|vai|procedi|fallo|ok|certo|spegni(?:lo)?|riavvia(?:lo)?)(?:\s+(?:s[iì]|pure|grazie|conferm\w*|vai|spegni(?:lo)?|riavvia(?:lo)?))*\W*$/i.test(clean)) {
       kvSet(db, 'pcConfirm', null);
-      devices.enqueueCommand(db, 'desktop', { kind: 'system', target: pcConfirm.target }, nowMs);
-      return { reply: pcConfirm.target === 'restart' ? 'Riavvio il PC tra 10 secondi, Capo.' : 'Spengo il PC tra 10 secondi, Capo.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+      const kind = pcConfirm.kind || 'system';
+      devices.enqueueCommand(db, 'desktop', { kind, target: pcConfirm.target }, nowMs);
+      const said = kind === 'shell' ? 'Eseguo il comando sul PC, Capo.' : kind === 'close_app' ? 'Chiudo tutti i programmi sul PC, Capo.'
+        : pcConfirm.target === 'restart' ? 'Riavvio il PC tra 10 secondi, Capo.' : 'Spengo il PC tra 10 secondi, Capo.';
+      return { reply: said, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
     kvSet(db, 'pcConfirm', null);
     if (/^(?:no|annulla|lascia\s+stare|non\s+farlo|aspetta|stop)\b/i.test(clean)) {
-      return { reply: 'Ok, il PC resta acceso.', device: [], actions: [], touched: ['automazioni'], touchedLeaves: [] };
+      return { reply: pcConfirm.kind === 'shell' || pcConfirm.kind === 'close_app' ? 'Ok, non faccio niente sul PC.' : 'Ok, il PC resta acceso.', device: [], actions: [], touched: ['automazioni'], touchedLeaves: [] };
     }
   }
   // Risposta a "Di quanto lo metto?": "10 minuti", "di 5", "mezz'ora" (entro 2 minuti dalla domanda).
@@ -851,7 +896,8 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
 
   // 4b. Cambio contesto esplicito verso il Telefono ("ora fai la stessa cosa sul telefono", "aprilo sul telefono")
   if (PHONE_REF_RE.test(clean) && !isPcTarget(db, clean)) {
-    const sameRef = /\b(?:stessa\s+cosa|lo\s+stesso|aprilo|fallo|eseguilo|mettilo|anche\s+l[iì]|anche\s+sul)\b/i.test(clean);
+    const sameRef = /\b(?:stessa\s+cosa|lo\s+stesso|aprilo|fallo|eseguilo|mettilo|anche\s+l[iì]|anche\s+sul)\b/i.test(clean)
+      || /^(?:(?:ma|no|ok|invece|e)\s+)*(?:sul|nel|al)\s+(?:mio\s+)?(?:telefono|cellulare|smartphone)\W*$/i.test(clean); // "ma no sul telefono"
     if (sameRef && focus?.target) {
       const target = focus.target;
       setFocus(db, sessionId, { domain: 'dispositivo', device: 'telefono', target, action: focus.action || 'apri' }, nowMs);
@@ -926,7 +972,12 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
   // 5. Comandi verso il PC Desktop (espliciti oppure ereditati dal contesto attivo "dispositivo(pc(...))")
   const PC_CONTINUATION_RE = /^(?:per\s+favore\s+)?(?:(?:ok|no|s[iì]|ora|adesso|poi|invece|dai)\s+){0,3}(?:apri|aprire|aprilo|aprila|avvia|avviare|lancia|chiudi|chiudere|chiudilo|chiudila|termina|cerca|cercare|trova|vai\s+su|scrivi|digita|nuova\s+scheda|chiudi\s+(?:la\s+)?(?:scheda|pagina)|ricarica|aggiorna|schermo\s+intero|scorri|cambia\s+finestra|mostra\s+desktop|minimizza|alza\s+il\s+volume|abbassa\s+il\s+volume|muto|pausa|play|prossim[ao]|precedente|blocca|fallo|falla|seleziona\s+(?:il\s+)?(?:profilo|account)|usa\s+(?:il\s+|l')?(?:profilo|account))\b/i;
   const PC_EXPLICIT_APP_RE = /^(?:per\s+favore\s+)?(?:(?:ok|no|s[iì]|ora|adesso|poi|invece|dai)\s+){0,3}(?:chiudi|chiudere|termina|apri|aprire|avvia)\s+(?:google\s+chrome|chrome|prime\s+video|prime|vscode|vs\s+code|esplora\s+file|blocco\s+note|task\s+manager)\b/i;
-  const inheritPc = !isPcTarget(db, clean) && !PHONE_REF_RE.test(clean) && ((focus?.domain === 'dispositivo' && focus?.device === 'pc' && PC_CONTINUATION_RE.test(clean)) || PC_EXPLICIT_APP_RE.test(clean));
+  // Navigazione dal vivo: dopo un comando al PC, "più giù", "torna su", "ancora", "clicca su…", "metti la canzone…"
+  // restano sul PC. "scrivi a Marco…" / "manda…" sono messaggi a una persona, non testo da digitare sul PC.
+  const NAV_MORE_RE = /^(?:(?:ok|e|ora|adesso|poi|dai)\s+)*(?:(?:scorri|vai|scendi)\s+)?(?:ancora(?:\s+(?:gi[uù]|su))?|pi[uù]\s+(?:gi[uù]|su|in\s+basso|in\s+alto)|(?:torna\s+)?(?:su|gi[uù])|clicca\b.*|metti(?:mi)?\s+(?:la\s+canzone|il\s+video|la\s+musica|il\s+film|un\s+video|una\s+canzone)\b.*|riproduci\b.*|fai\s+partire\b.*)\W*$/i;
+  const messageToPerson = /^(?:(?:ok|e|ora|adesso|poi|dai)\s+)*(?:scrivi|manda|invia)\s+(?:un\s+messaggio\s+)?a\s+\p{L}/iu.test(clean) || /\b(whatsapp|telegram|sms|messaggio)\b/i.test(clean);
+  const onPcNow = focus?.domain === 'dispositivo' && focus?.device === 'pc';
+  const inheritPc = !isPcTarget(db, clean) && !PHONE_REF_RE.test(clean) && !messageToPerson && ((onPcNow && (PC_CONTINUATION_RE.test(clean) || NAV_MORE_RE.test(clean))) || (getNavMode(db, sessionId, nowMs) && NAV_MORE_RE.test(clean)) || PC_EXPLICIT_APP_RE.test(clean));
 
   if (isPcTarget(db, clean) || inheritPc) {
     const withoutPc = stripPcWords(db, clean);
@@ -1001,6 +1052,19 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
         };
       }
     }
+
+    // "più giù", "ancora", "torna su": la stessa pagina continua a scorrere.
+    const moreScroll = /^(?:(?:ok|e|ora|adesso|poi|dai)\s+)*(?:(?:scorri|vai|scendi)\s+)?(ancora(?:\s+(?:gi[uù]|su))?|pi[uù]\s+(?:gi[uù]|su|in\s+basso|in\s+alto)|(?:torna\s+)?(?:su|gi[uù]))\W*$/i.exec(withoutPc);
+    if (moreScroll) {
+      const up = /\bsu\b|alto/i.test(moreScroll[1]) || (/^ancora$/i.test(moreScroll[1]) && kvGet(db, `lastScroll:${sessionId}`, 'down') === 'up');
+      devices.enqueueCommand(db, 'desktop', { kind: 'scroll', target: up ? 'up' : 'down' }, nowMs);
+      kvSet(db, `lastScroll:${sessionId}`, up ? 'up' : 'down');
+      setNavMode(db, sessionId, true, 'pc', nowMs);
+      return { reply: up ? 'Su.' : 'Giù.', expectReply: true, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+    }
+    // Una frase che racconta ("il pc si blocca sempre", "il computer va in sleep da solo") non è un comando:
+    // prima bloccava o sospendeva il PC davvero. Da qui in giù serve un verbo di comando all'inizio.
+    if (!PC_CMD_START.test(withoutPc)) return null;
 
     // Controlli completi di sistema, media e browser sul PC
     if (/\b(blocca|lock)\b/i.test(clean)) {
@@ -1100,7 +1164,11 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
       setNavMode(db, sessionId, true, 'pc', nowMs);
       return { reply: 'Passo al prossimo elemento, Capo.', expectReply: true, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
-    const findPageMatch = /^(?:cerca\s+nella\s+pagina|clicca(?:\s+su)?|apri\s+(?:il\s+link|la\s+voce|il\s+risultato)|vai\s+sul\s+titolo|seleziona(?:\s+su)?|su\s+questa\s+pagina\s+(?:cerca|clicca|apri))\s+(.+)$/i.exec(withoutPc);
+    // "clicca sul primo video": il PC sa cercare un testo nella pagina, non contare i risultati. Meglio dirlo.
+    if (/^(?:clicca|apri|seleziona|metti)\s+(?:su\s*)?(?:il|l[ao]|sul|sull[ao']?)?\s*(?:prim[oa]|second[oa]|terz[oa]|quart[oa]|ultim[oa])\s+(?:video|risultato|link|voce|canzone)\b/i.test(withoutPc)) {
+      return { reply: 'Non riesco ancora a contare i risultati sulla pagina: dimmi una parola del titolo e lo cerco io.', expectReply: true, device: [], actions: [], touched: ['automazioni'], touchedLeaves: [] };
+    }
+    const findPageMatch = /^(?:cerca\s+nella\s+pagina|clicca(?:\s+su(?:l|lla|llo|i|gli|lle|ll')?)?|apri\s+(?:il\s+link|la\s+voce|il\s+risultato)|vai\s+sul\s+titolo|seleziona(?:\s+su)?|su\s+questa\s+pagina\s+(?:cerca|clicca|apri))\s+(.+)$/i.exec(withoutPc);
     if (findPageMatch) {
       const q = findPageMatch[1].replace(/[.!?]+$/, '').trim();
       devices.enqueueCommand(db, 'desktop', { kind: 'find_on_page', target: q, args: 'open' }, nowMs);
@@ -1118,6 +1186,10 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
       const norm = /^(?:questa\s+finestra|finestra|la\s+finestra)$/i.test(target) ? 'window'
         : /^(?:tutto|tutte\s+le\s+app|tutti\s+i\s+programmi)$/i.test(target) ? 'all'
         : target;
+      if (norm === 'all') {
+        kvSet(db, 'pcConfirm', { at: nowMs, kind: 'close_app', target: 'all', session: sessionId });
+        return { reply: 'Chiudo tutti i programmi sul PC? Il lavoro non salvato si perde. Dimmi "sì" per confermare.', expectReply: true, device: [], actions: [], touched: ['automazioni'], touchedLeaves: [] };
+      }
       devices.enqueueCommand(db, 'desktop', { kind: 'close_app', target: norm }, nowMs);
       setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target, action: 'chiudi' }, nowMs);
       return { reply: `Chiudo ${target} sul PC, Capo.`, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
@@ -1140,10 +1212,12 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
     }
 
     // Esecuzione comando shell esplicito sul PC ("esegui comando dir sul pc")
-    const shellMatch = /^(?:esegui\s+comando|lancia\s+comando|terminale)\s+(.+)$/i.exec(withoutPc);
+    // Un comando di sistema detto a voce (o sentito dalla TV) può cancellare file: si ripete e si aspetta il "sì".
+    const shellMatch = /^(?:esegui\s+(?:il\s+)?comando|lancia\s+(?:il\s+)?comando|terminale)\s+(.+)$/i.exec(clean.replace(/\s+(?:sul|nel|al)\s+(?:pc|computer)\b.*$/i, ''));
     if (shellMatch) {
-      devices.enqueueCommand(db, 'desktop', { kind: 'shell', target: shellMatch[1].trim() }, nowMs);
-      return { reply: `Eseguo il comando sul PC, Capo.`, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+      const cmdText = shellMatch[1].trim();
+      kvSet(db, 'pcConfirm', { at: nowMs, kind: 'shell', target: cmdText, session: sessionId });
+      return { reply: `Eseguo sul PC il comando "${cmdText.slice(0, 80)}"? Dimmi "sì" per confermare.`, expectReply: true, device: [], actions: [], touched: ['automazioni'], touchedLeaves: [] };
     }
 
     // Far partire un video, un film o una canzone su YouTube sul PC (solo se NON chiede esplicitamente "non su youtube", "prime video" o ricerca "su chrome/google/online")

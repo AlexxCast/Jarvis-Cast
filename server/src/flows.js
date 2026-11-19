@@ -3,6 +3,7 @@
 // Il modello torna in gioco solo per scelte aperte, testi da scrivere, schermi imprevisti,
 // letture da riassumere e qualunque azione irreversibile o sensibile (sempre).
 
+import { cleanSpoken } from './parlato.js';
 import { kvGet, kvSet } from './db.js';
 import { keywords, slug } from './memory.js';
 import { calleeOf, holdEmergencyCall, INSIDE_WORDS, INTERNAL_JARVIS_WORDS } from './phone.js';
@@ -93,13 +94,14 @@ export function extractParam(flow, goal) {
     const part = (s) => escapeRe(s.trim()).replace(/\s+/g, '\\s+');
     const re = new RegExp(`^\\W*${pre.trim() ? part(pre) + '\\s+' : ''}(.+?)${post.trim() ? '\\s+' + part(post) : ''}\\W*$`, 'i');
     const m = re.exec(g);
-    if (m && m[1].trim()) return m[1].trim();
+    if (m && m[1].trim()) return stripFiller(m[1]);
   }
   // Riserva: le parole dell'obiettivo che non fanno parte del flow.
   const fixed = new Set(flow.tokens || []), app = norm(flow.app);
   const kept = g.split(/\s+/).filter(w => { const t = contentTokens(w); return t.length && !t.some(x => fixed.has(x)) && norm(w) !== app; });
-  return kept.length ? kept.join(' ') : null;
+  return kept.length ? stripFiller(kept.join(' ')) || null : null;
 }
+const stripFiller = (t) => cleanSpoken(t).replace(/^(?:tipo|cioè|quell[ao]\s+di|qualcosa\s+di)\s+/i, '').trim();
 
 export function listFlows(db) {
   return kvGet(db, FLOWS_KEY, []);
@@ -381,7 +383,8 @@ export function gatekeepChat(db, userText, { hasImage = false, hasPendingPhone =
   const text = String(userText || '').trim();
   if (!text || hasImage || hasPendingPhone) return null;
   if (text.length > 140 || COMPLEX_CHAT.test(text) || CREATIVE_WORDS.test(text) || INTERNAL_JARVIS_WORDS.test(text)) return null;
-  const goal = text.replace(/^\W*(ehi|ciao|ok)?\W*jarvis\W*/i, '').replace(/[.!]+$/, '').trim();
+  // "eh cerca tipo ligabue su joytify" → "cerca ligabue su joytify": il telefono non deve scrivere "tipo ligabue".
+  const goal = cleanSpoken(text).replace(/\b(?:tipo|cioè)\s+/gi, '').replace(/[.!]+$/, '').trim();
   if (!goal || MULTI_INTENT.test(goal)) return null;
   const local = (reply, device) => ({ reply, device: [device], actions: [device.type], local: true });
 
@@ -550,6 +553,8 @@ export function findMatchingSkill(db, userText = '', activeDevice = null) {
 
   // Serve un verbo di comando: "collegati alla mia agenda Google" non deve far partire "google su PC".
   if (!/\b(apri|aprimi|avvia|metti|mettimi|cerca|cercami|guarda|riproduci|vai\s+su|fai\s+partire|fammi\s+partire|accendi|lancia)\b/i.test(userText)) return null;
+  // "non aprire youtube", "non mi mettere netflix": una negazione non fa mai partire un automatismo.
+  if (/\bnon\s+(?:mi\s+|ti\s+|lo\s+|la\s+)?(?:apri\w*|avvi\w*|mett\w*|cerc\w*|riprodu\w*|lanci\w*|accend\w*|far\s+partire)/i.test(userText)) return null;
   const skills = listSkills(db).filter(s => s.verified && isSaneSkill(s));
   let best = null;
   let bestScore = 0;

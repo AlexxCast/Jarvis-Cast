@@ -82,7 +82,7 @@ export async function step(db, env, deps, b) {
       tier: stepTier, maxTokens: 300, fetchFn: deps.fetchFn, now: deps.now, tz: deps.tz,
       build: () => [{ role: 'system', content: systemFor(b.voiceTrusted === true) }, { role: 'user', content: user }],
     });
-    const move = parseMove(res.text);
+    const move = guardMove(parseMove(res.text), screen, goal, b.voiceTrusted === true);
     flows.recordTrace(db, { goal, step: n, screen, move, nowMs: deps.now() });
     // Se si ferma a chiedere, il compito resta in sospeso: alla risposta dell'utente ("sì, invia")
     // la chat lo riprende da dove era rimasto.
@@ -93,6 +93,30 @@ export async function step(db, env, deps, b) {
     logEvent(db, nowIso(deps.now(), deps.tz), 'error', `telefono: ${e.message}`);
     return { do: 'ask', say: 'Non riesco a ragionare in questo momento, Capo. Riprova tra poco.' };
   }
+}
+
+const SENSITIVE_FIELD = /\b(password|passwort|passcode|pin|otp|codice\s+(?:di\s+)?(?:verifica|sicurezza|accesso)|cvv|cvc|iban|numero\s+(?:della\s+)?carta|card\s+number)\b/i;
+const MONEY_OR_DELETE = /\b(paga\w*|pagamento|acquist\w*|compra\w*|buy|pay|ordina\s+e\s+paga|conferma\s+(?:l'?)?ordine|bonifico|abbonati|subscribe|elimina\w*|delete|cancella\s+(?:account|tutto|chat)|svuota|disinstalla|uninstall|ripristina|reset|formatta)\b/i;
+const SEND_OR_CALL = /\b(send|invia\w*|chiama|call|avvia\s+chiamata)\b/i;
+const CONFIRMED_RE = /\b(?:ha\s+confermato|confermato\s+dall'utente|l'utente\s+ha\s+detto\s+s[iì])\b/i;
+
+/**
+ * Regole che valgono SEMPRE, qualunque cosa dica il modello (prima stavano solo nel prompt):
+ * mai scrivere password o codici, mai pagare o cancellare senza un "sì", mai inviare o chiamare senza
+ * conferma se la voce non è stata riconosciuta, mai toccare un elemento che non esiste sullo schermo.
+ */
+export function guardMove(move, screen = {}, goal = '', voiceTrusted = false) {
+  if (!move || (move.do !== 'tap' && move.do !== 'type')) return move;
+  const items = Array.isArray(screen.items) ? screen.items : [];
+  const item = items.find(i => Number(i.n) === Number(move.n));
+  if (!item) return { do: 'ask', say: 'Non trovo quel tasto sullo schermo: mi dici cosa devo toccare?' };
+  const label = String(item.text || '').replace(/\[cursore qui\]/gi, '').replace(/\s+/g, ' ').trim();
+  if (move.do === 'type' && SENSITIVE_FIELD.test(label)) return { do: 'ask', say: 'Questo è un campo per password o codici: scrivilo tu, io non lo faccio.' };
+  if (move.do !== 'tap' || CONFIRMED_RE.test(goal)) return move;
+  const shown = label.replace(/\(icona:\s*([^)]+)\)/i, '$1').slice(0, 40);
+  if (MONEY_OR_DELETE.test(label)) return { do: 'ask', say: `Sto per toccare "${shown}". Procedo?` };
+  if (!voiceTrusted && SEND_OR_CALL.test(label)) return { do: 'ask', say: /chiama|call/i.test(label) ? 'Avvio la chiamata. Procedo?' : 'Invio il messaggio. Procedo?' };
+  return move;
 }
 
 /** Compito sul telefono fermo in attesa di una risposta dell'utente (ultimi 15 minuti), per la chat. */

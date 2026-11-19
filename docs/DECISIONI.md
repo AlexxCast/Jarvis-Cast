@@ -626,3 +626,17 @@ parole ripetute, errori del riconoscimento) e con modelli che rispondono male. I
   sotto la voce sente il nome 5 volte su 15; con un rumore forte e costante (ventola, cappa) scatta da sola
   (9 volte nei test a 10 dB). Chiedere 3 punteggi di fila invece di 2 porta i falsi da 9 a 3 e perde 1 nome su 15:
   non applicato, da decidere col Capo. Per la TV serve riaddestrare con nomi mescolati alla TV.
+- **Seconda parte: automatismi, dispositivi, navigazione dal vivo.**
+  - PC: da metà del blocco comandi in giù serve un verbo di comando all'inizio (`PC_CMD_START`): "il pc si blocca
+    sempre" bloccava davvero il PC, "va in sleep da solo" lo sospendeva. "esegui comando…" (shell) e "chiudi tutto"
+    ripetono cosa faranno e aspettano il "sì" (kv `pcConfirm` con `kind`).
+  - Navigazione dal vivo: "scorri ancora", "più giù", "torna su", "metti la canzone…" restano sul PC; "scrivi a Marco…"
+    non viene più digitato sul PC; "ma no sul telefono" sposta lì l'ultima cosa; "clicca sul primo video" dice che non sa
+    contare i risultati invece di cercare "sul primo video" nella pagina.
+  - Nomi storpiati ("giotube", "spotifai", "crome", "tipo spotify") → `canonicalPcName` (distanza di modifica sui nomi noti).
+  - Automatismi del telefono: l'obiettivo passa da `cleanSpoken` (prima scriveva "tipo ligabue" nella ricerca). Una
+    negazione ("non aprire youtube") non fa mai partire un automatismo.
+  - Agente del telefono, regole nel codice e non solo nel prompt (`phone.guardMove`): mai scrivere in campi password/codici,
+    mai pagare o eliminare senza "sì", mai inviare o chiamare senza conferma se la voce non è riconosciuta, mai toccare un
+    numero che non c'è sullo schermo. Prima il modello poteva fare tutte queste cose. Il "sì invialo" dopo "Procedo?"
+    riprende il compito senza modello con "(l'utente ha confermato: procedi)" nell'obiettivo.

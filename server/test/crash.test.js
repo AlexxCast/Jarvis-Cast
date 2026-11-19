@@ -265,3 +265,112 @@ test('API: 51 rotte con corpi spazzatura non danno mai errore 500', async () => 
     assert.ok(res.status < 500, `${m} ${p} ${b} → ${res.status}`);
   }
 });
+
+// ---------------------------------------------------------------- Seconda parte: automatismi, dispositivi, navigazione dal vivo
+import * as phone from '../src/phone.js';
+import * as flows from '../src/flows.js';
+import { canonicalPcName } from '../src/jarvis_core.js';
+
+const chatPc = async (lines) => {
+  const db = makeDb();
+  const clock = { ms: SERA };
+  const out = [];
+  let seen = 0;
+  for (const text of lines) {
+    clock.ms += 8000;
+    const r = await say(db, fakeFetch(() => reply({ reply: 'MODELLO' })), text, clock);
+    const q = pcQueue(db);
+    out.push({ r, pc: q.slice(seen) });
+    seen = q.length;
+  }
+  return out;
+};
+
+test('PC: frasi che raccontano un problema non bloccano, non sospendono e non riavviano il PC', async () => {
+  for (const text of ['il pc si blocca sempre quando apro chrome', 'il computer va in sleep da solo', 'il pc si riavvia da solo da ieri', 'ho comprato un pc nuovo']) {
+    const [{ r, pc }] = await chatPc([text]);
+    assert.equal(pc.length, 0, text);
+    assert.notEqual(r.model, 'jarvis-core', `${text}: risponde il modello`);
+  }
+});
+
+test('PC: comandi di sistema e "chiudi tutto" si ripetono e aspettano il sì', async () => {
+  const [a, b] = await chatPc(['esegui comando del C:\\Windows sul pc', 'sì']);
+  assert.match(a.r.reply, /"del C:\\Windows"\? Dimmi "sì"/);
+  assert.equal(a.pc.length, 0);
+  assert.deepEqual(b.pc.map(c => [c.kind, c.target]), [['shell', 'del C:\\Windows']]);
+  const [c, d] = await chatPc(['chiudi tutto sul pc', 'no']);
+  assert.match(c.r.reply, /Chiudo tutti i programmi sul PC\?/);
+  assert.equal(c.pc.length + d.pc.length, 0);
+});
+
+test('navigazione dal vivo: "scorri ancora", "più giù", "torna su", "metti la canzone…" restano sul PC', async () => {
+  const steps = await chatPc(['scorri giù sul pc', 'scorri ancora', 'più giù', 'torna su', 'metti la canzone di vasco albachiara']);
+  assert.deepEqual(steps.slice(0, 4).map(s => s.pc.map(c => c.kind + ':' + c.target).join()), ['scroll:down', 'scroll:down', 'scroll:down', 'scroll:up']);
+  assert.deepEqual(steps[4].pc.map(c => [c.kind, c.target]), [['play_youtube', 'vasco albachiara']]);
+});
+
+test('navigazione dal vivo: "scrivi a Marco…" è un messaggio, non testo da digitare sul PC; "ma no sul telefono" sposta', async () => {
+  const [, msg] = await chatPc(['apri youtube sul pc', 'scrivi a marco che arrivo tra 10 minuti']);
+  assert.equal(msg.pc.length, 0);
+  const [, tel] = await chatPc(['apri youtube sul pc', 'ma no sul telefono']);
+  assert.deepEqual(tel.r.device, [{ type: 'open_url', url: 'https://www.youtube.com' }]);
+});
+
+test('navigazione dal vivo: "clicca sul primo video" non finge di saperlo fare', async () => {
+  const [, c] = await chatPc(['apri youtube sul pc', 'clicca sul primo video']);
+  assert.equal(c.pc.length, 0);
+  assert.match(c.r.reply, /dimmi una parola del titolo/);
+});
+
+test('PC: nomi storpiati dal riconoscimento ("giotube", "tipo spotify", "crome") aprono l\'app giusta', async () => {
+  assert.equal(canonicalPcName('giotube'), 'youtube');
+  assert.equal(canonicalPcName('spotifai'), 'spotify');
+  assert.equal(canonicalPcName('netflics'), 'netflix');
+  assert.equal(canonicalPcName('crome'), 'chrome');
+  assert.equal(canonicalPcName('word'), 'word', 'nomi veri restano');
+  const [a] = await chatPc(['apri apri giotube sul pc']);
+  assert.deepEqual(a.pc.map(c => c.target), ['https://www.youtube.com']);
+  const [b] = await chatPc(['eh apri tipo spotify sul computer']);
+  assert.deepEqual(b.pc.map(c => c.target), ['https://open.spotify.com']);
+});
+
+test('automatismi del telefono: "eh cerca tipo ligabue su joytify" ripete il compito imparato scrivendo solo "ligabue"', async () => {
+  const db = makeDb();
+  const clock = { ms: SERA };
+  const S = [{ app: 'launcher', items: [{ n: 1, kind: 'icona', text: 'Joytify' }] }, { app: 'com.joytify', items: [{ n: 1, kind: 'pulsante', text: '(icona: search) Cerca' }] },
+    { app: 'com.joytify', items: [{ n: 1, kind: 'campo', text: 'Cerca brani [cursore qui]' }] }, { app: 'com.joytify', items: [{ n: 2, kind: 'pulsante', text: '(icona: play) Riproduci' }] }];
+  const moves = [{ do: 'open_app', text: 'Joytify' }, { do: 'tap', n: 1 }, { do: 'type', n: 1, text: 'vasco' }, { do: 'tap', n: 2 }, { do: 'done', say: 'Parte.' }];
+  let k = 0;
+  const f = fakeFetch(() => JSON.stringify(moves[k++]));
+  for (let i = 0; i < 5; i++) { clock.ms += 2000; await phone.step(db, ENV, deps(f, clock), { goal: 'cerca vasco su joytify', step: i, screen: S[Math.min(i, 3)], history: [] }); }
+  const hit = flows.gatekeepChat(db, 'eh cerca tipo ligabue su joytify', { nowMs: clock.ms });
+  assert.deepEqual(hit.device, [{ type: 'phone_task', goal: 'cerca ligabue su joytify' }]);
+  const typed = [];
+  for (let i = 0; i < 5; i++) { clock.ms += 2000; const m = await phone.step(db, ENV, deps(noModel(), clock), { goal: hit.device[0].goal, step: i, screen: S[Math.min(i, 3)], history: [] }); if (m.do === 'type') typed.push(m.text); }
+  assert.deepEqual(typed, ['ligabue']);
+  assert.equal(flows.findMatchingSkill(db, 'non aprire youtube sul pc'), null);
+});
+
+test('telefono: regole sempre valide, qualunque mossa dica il modello', () => {
+  const scr = (text) => ({ app: 'x', items: [{ n: 1, kind: 'pulsante', text }] });
+  assert.equal(phone.guardMove({ do: 'type', n: 1, text: 'segreto' }, scr('Password [cursore qui]'), 'accedi', true).do, 'ask');
+  assert.equal(phone.guardMove({ do: 'tap', n: 1 }, scr('Paga ora 18,50 €'), 'ordina la pizza', true).do, 'ask', 'pagare chiede sempre');
+  assert.equal(phone.guardMove({ do: 'tap', n: 1 }, scr('Elimina per tutti'), 'pulisci', true).do, 'ask');
+  assert.equal(phone.guardMove({ do: 'tap', n: 1 }, scr('(icona: send)'), 'scrivi a marco', false).do, 'ask', 'voce non riconosciuta: si chiede');
+  assert.equal(phone.guardMove({ do: 'tap', n: 1 }, scr('(icona: send)'), 'scrivi a marco', true).do, 'tap', 'voce del Capo: si invia');
+  assert.equal(phone.guardMove({ do: 'tap', n: 1 }, scr('(icona: send)'), "scrivi a marco (l'utente ha confermato: procedi)", false).do, 'tap');
+  assert.equal(phone.guardMove({ do: 'tap', n: 9 }, scr('Ok'), 'x', true).do, 'ask', 'tasto che non esiste');
+});
+
+test('telefono: dopo "Invio il messaggio. Procedo?" il "sì invialo" riprende il compito con la conferma, il "no" lo ferma', async () => {
+  const db = makeDb();
+  db.run("INSERT INTO kv (key, value) VALUES ('phonePending', ?)", JSON.stringify({ goal: 'scrivi a marco ciao su whatsapp', say: 'Invio il messaggio. Procedo?', at: SERA }));
+  const yes = await say(db, noModel(), 'sì invialo', { ms: SERA + 5000 });
+  assert.deepEqual(yes.device, [{ type: 'phone_task', goal: "scrivi a marco ciao su whatsapp (l'utente ha confermato: procedi)" }]);
+  const db2 = makeDb();
+  db2.run("INSERT INTO kv (key, value) VALUES ('phonePending', ?)", JSON.stringify({ goal: 'scrivi a marco ciao', say: 'Invio il messaggio. Procedo?', at: SERA }));
+  const no = await say(db2, noModel(), 'no lascia stare', { ms: SERA + 5000 });
+  assert.equal(no.reply, 'Ok, mi fermo.');
+  assert.equal(kvGet(db2, 'phonePending', 'x'), null);
+});
