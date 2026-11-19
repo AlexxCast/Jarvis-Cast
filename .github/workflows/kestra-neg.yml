@@ -1,0 +1,34 @@
+name: Negativi per "Kestra"
+
+# Scarica da openWakeWord ore di parlato, musica e rumore (già trasformate in vettori di suoni) da usare come
+# esempi di "NON è Kestra". Il risultato va nella release "kestra-kit" accanto al kit sintetico.
+on:
+  workflow_dispatch:
+  push:
+    branches: ['claude/**']
+    paths: ['scripts/kestra_ww/fetch_negatives.py', '.github/workflows/kestra-neg.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  neg:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -q numpy
+      - run: python scripts/kestra_ww/fetch_negatives.py "$RUNNER_TEMP/neg"
+      - name: Pubblica i negativi
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd "$RUNNER_TEMP/neg"
+          ls -la
+          gh release view kestra-kit -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create kestra-kit -R "$GITHUB_REPOSITORY" --prerelease --title "Kit addestramento Kestra" \
+              --notes "Vettori di suoni per addestrare il riconoscimento di Kestra (nessuna registrazione reale)."
+          gh release upload kestra-kit -R "$GITHUB_REPOSITORY" --clobber neg_val_train.npy neg_val_test.npy neg_acav.npy
