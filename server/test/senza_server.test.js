@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { wrapNodeSqlite, migrate, resetWriteBlock, writesBlocked } from '../src/db.js';
+import { wrapNodeSqlite, migrate, resetWriteBlock, writesBlocked, noteWriteLimit } from '../src/db.js';
 import { handleApi } from '../src/api.js';
 import { fakeFetch, deps, reply, T0 } from './helpers.js';
 
@@ -15,8 +15,8 @@ const WRITE_RE = /^\s*(INSERT|UPDATE|DELETE|REPLACE|CREATE|ALTER|DROP)\b/i;
 /** Database di prova con l'interruttore "limite di scritture finito", come quello vero di Cloudflare. */
 function blockableDb() {
   const raw = new DatabaseSync(':memory:');
-  const flag = { blocked: false };
-  const fake = { prepare: (q) => { if (flag.blocked && WRITE_RE.test(q)) throw new Error('Exceeded allowed rows written in Durable Objects free tier.'); return raw.prepare(q); } };
+  const flag = { blocked: false, msg: 'Exceeded allowed rows written in Durable Objects free tier.' };
+  const fake = { prepare: (q) => { if (flag.blocked && WRITE_RE.test(q)) throw new Error(flag.msg); return raw.prepare(q); } };
   const db = wrapNodeSqlite(fake);
   migrate(db);
   return { db, flag };
@@ -109,5 +109,19 @@ test('scritture finite durante un aggiornamento: le colonne nuove mancano ma /ap
   assert.equal(r.status, 200);
   const body = await r.json();
   assert.equal(body.code[0].area, 'web');
+  resetWriteBlock();
+});
+
+test('limite noto: anche un errore di scrittura con un altro messaggio non svuota la sfera', async () => {
+  resetWriteBlock();
+  const { db, flag } = blockableDb();
+  const d = { ...deps(fakeFetch(() => reply({ reply: 'Ok.', actions: [{ type: 'remember', module: 'musica', text: 'ascolto Mannarino su Joytify' }] }))), schedule: () => {} };
+  const call = callOf(db, d);
+  await call('POST', '/api/chat', { text: 'ricorda che ascolto Mannarino' });
+  flag.blocked = true; flag.msg = 'SQLITE_ERROR: storage operation rejected';
+  noteWriteLimit();
+  const g = await call('GET', '/api/graph');
+  assert.equal(g.status, 200, JSON.stringify(g.body));
+  assert.ok(g.body.branches.some(b => b.id === 'musica'));
   resetWriteBlock();
 });

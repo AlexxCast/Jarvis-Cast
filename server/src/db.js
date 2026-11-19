@@ -73,7 +73,9 @@ function tolerate(raw) {
   // ne intreccia più d'una mentre aspetta un modello.
   const guard = (fn, empty) => function (...a) {
     try { return fn(...a); } catch (e) {
-      if (!WRITE_LIMIT_RE.test(String(e?.message || e))) throw e;
+      // Con il limite già noto, qualsiasi errore di una scrittura (Cloudflare non usa sempre lo stesso messaggio) conta come limite.
+      const limit = WRITE_LIMIT_RE.test(String(e?.message || e)) || (writesBlocked() && WRITE_SQL_RE.test(String(a[0] || '')));
+      if (!limit) throw e;
       noteWriteLimit();
       if (!this?.tolerant) throw e;
       this.swallowed++;
@@ -141,6 +143,7 @@ export function migrate(db) {
 }
 
 /** Il limite gratuito di scritture giornaliere di Cloudflare (si azzera a mezzanotte UTC). */
+const WRITE_SQL_RE = /^\s*(INSERT|UPDATE|DELETE|REPLACE)\b/i;
 export const WRITE_LIMIT_RE = /exceeded allowed rows written|rows written in durable objects free tier/i;
 export function friendlyError(e) {
   const msg = String(e?.message || e || '');
