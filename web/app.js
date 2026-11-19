@@ -3,6 +3,7 @@
 
 import { createOrb } from './orb.js';
 import { renderVisual, VISUAL_CSS } from './visual.js';
+import { cacheGet, cacheSet, queue, enqueue, dequeue, pendingMessages, REPLAYABLE, localAnswer, OFFLINE_HELP } from './offline.js';
 
 document.head.append(Object.assign(document.createElement('style'), { textContent: VISUAL_CSS }));
 // Ogni grafica si costruisce una volta sola: ridisegnare la pagina non fa ripartire l'animazione.
@@ -194,15 +195,46 @@ function toast(text) {
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.remove('show'), 3200);
 }
 
+// Senza server l'app non si ferma: ogni lettura riuscita resta copiata sul telefono e, se il server non risponde
+// (rete assente, Cloudflare giù, scritture finite), si mostra l'ultima copia. store.offline dice perché.
+function setOffline(reason) {
+  const was = store.offline?.reason || '';
+  store.offline = reason ? { reason, since: store.offline?.since || Date.now() } : null;
+  if (was !== (reason || '')) queueMicrotask(() => { if (store.state) render(); });
+}
 async function api(method, path, body) {
-  const res = await fetch('/api' + path, {
-    method, headers: { authorization: 'Bearer ' + store.token, ...(body ? { 'content-type': 'application/json' } : {}) },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  const ctrl = new AbortController();
+  // Le letture non aspettano all'infinito un server bloccato: dopo 9 secondi vale la copia sul telefono.
+  const timer = method === 'GET' ? setTimeout(() => ctrl.abort(), 9000) : 0;
+  let res;
+  try {
+    res = await fetch('/api' + path, {
+      method, signal: ctrl.signal, headers: { authorization: 'Bearer ' + store.token, ...(body ? { 'content-type': 'application/json' } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    clearTimeout(timer);
+    const hit = method === 'GET' ? cacheGet(path) : null;
+    setOffline(navigator.onLine === false ? 'rete' : 'server');
+    if (hit) return hit.data;
+    throw Object.assign(new Error(navigator.onLine === false ? 'sei senza connessione' : 'il server non risponde'), { offline: true });
+  }
+  clearTimeout(timer);
   let data = null;
   try { data = await res.json(); } catch { /* corpo vuoto */ }
   if (res.status === 401) { logout(false); throw new Error('Token non valido'); }
-  if (!res.ok) throw new Error(data?.error || `Errore ${res.status}`);
+  if (!res.ok) {
+    // 502/503/504 o scritture finite: il server è bloccato, non è un errore della richiesta.
+    const down = [502, 503, 504].includes(res.status) || !!data?.writesBlocked;
+    if (down) setOffline(data?.writesBlocked ? 'scritture' : 'server');
+    const hit = res.status >= 500 && method === 'GET' ? cacheGet(path) : null;
+    if (hit) return hit.data;
+    throw Object.assign(new Error(data?.error || `Errore ${res.status}`), { offline: down, writesBlocked: !!data?.writesBlocked });
+  }
+  if (method === 'GET') cacheSet(path, data);
+  // Lo stato dice anche se le scritture sono finite; le altre risposte riuscite tolgono solo "senza rete/server".
+  if (data?.server) setOffline(data.server.writesBlocked ? 'scritture' : null);
+  else if (store.offline?.reason !== 'scritture') setOffline(null);
   return data;
 }
 const guard = (fn) => async (...a) => { try { return await fn(...a); } catch (e) { toast(e.message || 'Errore'); } };
@@ -221,36 +253,120 @@ async function refresh() {
   store.error = '';
 }
 async function loadHistory() {
-  store.messages = (await api('GET', '/history')).messages;
+  // In fondo, quello che è ancora solo sul telefono (detto mentre il server era bloccato).
+  store.messages = [...((await api('GET', '/history')).messages || []), ...pendingMessages()];
 }
 async function act(...actions) {
-  store.state = (await api('POST', '/actions', { actions })).state;
+  try {
+    store.state = (await api('POST', '/actions', { actions })).state;
+  } catch (e) {
+    const keep = actions.filter(a => REPLAYABLE.has(a.type));
+    if (!e.offline || !keep.length) throw e;
+    enqueue({ kind: 'actions', actions: keep });
+    toast('Salvato sul telefono: lo mando al server appena torna.');
+  }
   render();
 }
 
+/** Manda al server quello che è rimasto in coda. Si ferma al primo errore: riprova al giro dopo. */
+let flushing = false;
+async function flushQueue() {
+  const ops = queue();
+  if (!ops.length || flushing || store.offline || store.state?.server?.writesBlocked) return;
+  flushing = true;
+  try {
+    const out = await api('POST', '/sync', { ops: ops.slice(0, 20) });
+    dequeue(out.done || []);
+    if (out.state) store.state = out.state;
+    if ((out.done || []).length) {
+      toast(`Ho salvato sul server ${out.done.length === 1 ? 'una cosa rimasta' : out.done.length + ' cose rimaste'} in attesa.`);
+      await loadHistory();
+      render();
+    }
+  } catch { /* server ancora giù: resta tutto in coda */ }
+  flushing = false;
+}
+
+/** Promemoria e timer che il telefono suona da solo quando il server non può avvisare. */
+const localTimers = new Map();
+function ring(text) {
+  toast(text);
+  try { navigator.vibrate?.([300, 150, 300]); } catch {}
+  nativeCall('speak', text);
+}
+function startTimer(ms, label) {
+  const id = 'timer:' + Date.now();
+  localTimers.set(id, setTimeout(() => { localTimers.delete(id); ring(`${label}: tempo scaduto.`); }, ms));
+}
+function armLocalReminders() {
+  if (!store.offline) return;
+  const now = Date.now();
+  for (const r of store.state?.reminders || []) {
+    const id = 'rem:' + r.id;
+    if (r.place || !r.dueMs || localTimers.has(id) || r.dueMs < now - 60_000 || r.dueMs > now + 12 * 3_600_000) continue;
+    localTimers.set(id, setTimeout(() => ring('Promemoria: ' + r.text), Math.max(0, r.dueMs - now)));
+  }
+}
+
+let loopsStarted = false;
 async function boot() {
   if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {});
   if (!store.token) return render();
+  // Subito l'ultima copia salvata sul telefono: l'app si apre anche se il server è lento o bloccato.
+  const cached = cacheGet('/state');
+  if (cached && !store.state) {
+    store.state = cached.data;
+    applyMood(store.state.mood);
+    store.messages = [...(cacheGet('/history')?.data?.messages || []), ...pendingMessages()];
+    const g = cacheGet('/graph');
+    if (g?.data?.branches) { store.graph = g.data.branches; orb.setGraph(store.graph); }
+    render(); scrollChat();
+  }
   try {
     await Promise.all([refresh(), loadHistory(), loadGraph(false)]);
-    await importLegacyIfNeeded();
-    syncSteps();
-    // Timer interno di ~1.5 minuti (90s): controlla attività in corso, messaggi in arrivo e stato generale.
-    setInterval(async () => {
-      if (!store.token || store.sending) return;
-      try {
-        const inb = await api('POST', '/inbox/consume');
-        for (const it of (inb.items || [])) {
-          const txt = String(it.text || '').replace(/\[(?:PHONE_TASK|OPEN_APP):[^\]]+\]\s*/g, '').trim();
-          if (txt) { toast(txt); if ((nativeJson('getConfig') || {}).speakReplies) nativeCall('speak', txt); }
-        }
-        await refresh();
-        await loadGraph(true);
-      } catch {}
-    }, 90_000);
-  } catch (e) { store.error = e.message; }
+    if (!store.offline) {
+      await importLegacyIfNeeded(); syncSteps(); flushQueue();
+      api('GET', '/projects').catch(() => {}); // copia dei progetti sul telefono, per vederli anche col server giù
+    }
+  } catch (e) { if (!store.state) store.error = e.message; }
+  armLocalReminders();
+  startLoops();
   render();
   scrollChat();
+}
+
+function startLoops() {
+  if (loopsStarted) return;
+  loopsStarted = true;
+  // Timer interno di ~1.5 minuti (90s): controlla attività in corso, messaggi in arrivo e stato generale.
+  setInterval(async () => {
+    if (!store.token || store.sending || store.offline) return;
+    try {
+      const inb = await api('POST', '/inbox/consume');
+      for (const it of (inb.items || [])) {
+        const txt = String(it.text || '').replace(/\[(?:PHONE_TASK|OPEN_APP):[^\]]+\]\s*/g, '').trim();
+        if (txt) { toast(txt); if ((nativeJson('getConfig') || {}).speakReplies) nativeCall('speak', txt); }
+      }
+      await refresh();
+      await loadGraph(true);
+      flushQueue();
+    } catch {}
+  }, 90_000);
+  // Senza server: ogni 20 secondi si riprova; appena risponde si ricarica tutto e si svuota la coda.
+  setInterval(async () => {
+    if (!store.token || store.sending || (!store.offline && store.state)) return;
+    try {
+      await refresh();
+      if (store.offline && store.offline.reason !== 'scritture') return;
+      await Promise.all([loadHistory(), loadGraph(false)]);
+      store.error = '';
+      flushQueue();
+      render();
+    } catch {}
+    armLocalReminders();
+  }, 20_000);
+  window.addEventListener('online', () => { setOffline(null); window.jarvisRefresh?.(); flushQueue(); });
+  window.addEventListener('offline', () => setOffline('rete'));
 }
 
 /** Primo avvio dentro l'app Android: porta nel cloud i dati salvati sul telefono, senza cancellarli. */
@@ -319,6 +435,12 @@ async function send(text) {
       setTimeout(() => loadGraph(true), 6000);
     }
     store.messages.push({ role: 'assistant', text: out.reply, card: out.card, model: out.model, visual: out.visual || null });
+    if (out.unsaved) {
+      // Scritture finite: la risposta c'è, ma il server non l'ha salvata. La tiene il telefono e la rimanda dopo.
+      setOffline('scritture');
+      if ((out.pendingActions || []).length) enqueue({ kind: 'actions', actions: out.pendingActions });
+      enqueue({ kind: 'history', messages: [{ role: 'user', text: labelText, at: Date.now() }, { role: 'assistant', text: out.reply, at: Date.now() }] });
+    }
     if ((out.actions || []).some(a => String(a).startsWith('project_'))) { store.projects = null; store.projectDetail = null; await refresh(); await loadHistory(); }
     if (out.photoRequest) toast('Kestra chiede una foto: ' + out.photoRequest);
     if ((nativeJson('getConfig') || {}).speakReplies) nativeCall('speak', out.reply);
@@ -326,11 +448,24 @@ async function send(text) {
     runDeviceActions(out.device);
     await refresh();
   } catch (e) {
-    store.messages.push({ role: 'assistant', text: 'Non riesco a contattare il server: ' + e.message });
+    store.messages.push({ role: 'assistant', text: e.offline ? offlineReply(text) : 'Non riesco a contattare il server: ' + e.message });
   }
   store.sending = false;
   render(); scrollChat();
   document.querySelector('.composer textarea')?.focus();
+}
+
+/** Senza server: quello che Kestra sa fare da sola sul telefono, il resto si segna e si registra dopo. */
+function offlineReply(text) {
+  const nat = native ? { openApp: (n) => nativeCall('openApp', n), callContact: (w) => nativeCall('callContact', w) } : null;
+  const ans = text ? localAnswer(text, { state: store.state, native: nat, startTimer }) : null;
+  const now = Date.now();
+  if (ans?.queue) enqueue({ kind: 'chat', text, at: now });
+  else enqueue({ kind: 'history', messages: [{ role: 'user', text, at: now }, { role: 'assistant', text: ans?.reply || OFFLINE_HELP, at: now }] });
+  const reply = ans?.reply || OFFLINE_HELP;
+  if ((nativeJson('getConfig') || {}).speakReplies) nativeCall('speak', reply);
+  markSpeaking(reply);
+  return reply;
 }
 
 async function extractPdfContent(file) {
@@ -1602,6 +1737,8 @@ function render() {
     h('img', { src: '/logo.png', alt: '', class: 'brand-logo' }),
     h('h1', { class: 'brand-title' }, title),
     native ? h('span', { class: 'muted small' }, listening ? 'in ascolto' : 'ascolto spento') : null, native ? h('span', { class: 'dot' + (listening ? ' on' : '') }) : null));
+  const banner = offlineBanner();
+  if (banner) app.append(banner);
   if (store.tab === 'chat') app.append(...viewChat().filter(Boolean));
   else app.append(h('main', {}, { progetti: viewProgetti, oggi: viewOggi, cucina: viewCucina, attivita: viewAttivita, altro: viewAltro }[store.tab]()));
   app.append(h('nav', { class: 'tabs', 'aria-label': 'Sezioni' }, TABS.map(([id, label]) =>
@@ -1609,6 +1746,25 @@ function render() {
   if (keep) { const ta = document.querySelector('.composer textarea'); if (ta) ta.value = keep; }
   if (scroll) { const m = document.querySelector('main'); if (m) m.scrollTop = scroll; }
   updateOrb(); orb.sync();
+}
+
+/** Striscia in alto quando il server è bloccato: cosa succede e quante modifiche aspettano sul telefono. */
+function offlineBanner() {
+  const reason = store.offline?.reason || (store.state?.server?.writesBlocked ? 'scritture' : '');
+  const waiting = queue().length;
+  if (!reason && !waiting) return null;
+  const saved = cacheGet('/state')?.at;
+  const when = saved ? new Date(saved).toLocaleString('it-IT', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '';
+  const until = store.state?.server?.until ? new Date(store.state.server.until).toLocaleTimeString('it-IT', { hour: '2-digit', minute: '2-digit' }) : '';
+  const text = {
+    rete: `Sei senza connessione: vedi i dati salvati sul telefono${when ? ` (${when})` : ''}.`,
+    server: `Il server non risponde: vedi i dati salvati sul telefono${when ? ` (${when})` : ''}.`,
+    scritture: `Scritture gratuite di Cloudflare finite${until ? ` fino alle ${until}` : ''}: leggo tutto, le modifiche le tiene il telefono.`,
+  }[reason] || 'Server di nuovo raggiungibile.';
+  return h('div', { class: 'offline-banner', role: 'status' },
+    h('span', {}, text, waiting ? ` ${waiting === 1 ? 'Una modifica' : waiting + ' modifiche'} in attesa.` : ''),
+    reason && reason !== 'scritture' ? h('button', { class: 'btn ghost', onclick: guard(async () => { await window.jarvisRefresh(); flushQueue(); }) }, 'Riprova') : null,
+    !reason && waiting ? h('button', { class: 'btn ghost', onclick: () => flushQueue() }, 'Invia ora') : null);
 }
 
 // ------------------------------------------------------------------ Video Call Live (Visione dal vivo)

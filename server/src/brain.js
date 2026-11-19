@@ -40,7 +40,8 @@ function session(db, id) {
   let row = db.get('SELECT * FROM sessions WHERE id = ?', id);
   if (!row) {
     db.run('INSERT INTO sessions (id) VALUES (?)', id);
-    row = db.get('SELECT * FROM sessions WHERE id = ?', id);
+    // Con le scritture finite la riga non nasce: si lavora con una sessione vuota in memoria.
+    row = db.get('SELECT * FROM sessions WHERE id = ?', id) || { id, summary: '', summarized_upto: 0, model: '', modules: '{}', updated: '' };
   }
   let modules = {};
   try { modules = JSON.parse(row.modules) || {}; } catch { /* vuoto */ }
@@ -136,6 +137,9 @@ export function appsPrompt(db) {
 export function applyActions(db, actions, ctx) {
   const out = { photoRequest: null, jobs: [], applied: [], device: [], code: [], failed: [], rememberedIds: [] };
   let diary = null;
+  // Con le scritture finite (db tollerante) le modifiche non restano: si rimandano al telefono, che le ripete dopo.
+  const swallowed0 = db.swallowed || 0;
+  const replay = [];
   // phone_task apre l'app da solo: un open_app in più la riaprirebbe a metà lavoro.
   if (actions.some(a => a?.type === 'phone_task')) actions = actions.filter(a => a?.type !== 'open_app');
   for (const a of actions.slice(0, 20)) {
@@ -203,6 +207,7 @@ export function applyActions(db, actions, ctx) {
         out.device.push({ type: 'open_url', url });
       } else { out.failed.push(String(a.type)); continue; }
       out.applied.push(a.type);
+      if (isReplayable(a.type)) replay.push(a);
     } catch (e) {
       out.failed.push(String(a.type));
       logEvent(db, ctx.nowIso, 'error', `azione ${a.type}: ${e.message}`);
@@ -212,7 +217,17 @@ export function applyActions(db, actions, ctx) {
     if (ctx.hadPhoto && !out.photoRequest) diary.pendingPhotoRequest = '';
     saveDiary(db, diary);
   }
+  if ((db.swallowed || 0) > swallowed0 && replay.length) {
+    out.unsaved = replay;
+    if (Array.isArray(db.pendingReplay)) db.pendingReplay.push(...replay);
+  }
   return out;
+}
+
+/** Azioni che si possono ripetere più tardi da /api/sync (diario, ricordi, promemoria, cucina): niente telefono né PC. */
+export function isReplayable(type) {
+  return (DIET_ACTIONS.has(type) && type !== 'request_photo') || cooking.COOKING_ACTIONS.has(type) ||
+    ['remember', 'forget', 'add_reminder', 'done_reminder'].includes(type);
 }
 
 /**
