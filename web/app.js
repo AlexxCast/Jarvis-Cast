@@ -32,18 +32,25 @@ function orbState() {
 }
 function updateOrb() { orb.setState(orbState()); }
 
-// Umore di Kestra dentro la sua palette viola/verde: gioia -> verde neon brillante, calma -> verde smeraldo/lilla, tensione -> viola/magenta intenso.
-const MOOD_RGB = { gioia: [110, 255, 120], tensione: [192, 38, 211], calma: [57, 255, 20] };
-const MOOD_BASE = { gioia: 0.45, tensione: 0.15, calma: 0.55 };
+// Umore di Kestra: colora solo i raggi che partono dal centro (i nodi hanno ognuno il suo colore).
+// Tranquilla -> verde, gioia (stato intermedio) -> azzurro, tensione/rabbia -> rosso magenta, confusione -> arancione rosato.
+const MOOD_RGB = { calma: [40, 255, 110], gioia: [70, 190, 255], tensione: [235, 30, 120], confusione: [255, 145, 110] };
+const MOOD_BASE = { gioia: 0.45, tensione: 0.15, calma: 0.55, confusione: 0.1 };
+/** Pesi dell'umore: a riposo vince la calma (verde); ogni emozione pesa per quanto si allontana dalla quiete. */
+function moodWeights(m) {
+  const dev = (k) => Math.max(0, (Number(m[k]) || MOOD_BASE[k]) - MOOD_BASE[k]);
+  const w = Object.fromEntries(Object.keys(MOOD_RGB).map(k => [k, (k === 'calma' ? 0.08 : 0) + dev(k)]));
+  for (const k of Object.keys(w)) w[k] = w[k] ** 1.6; // l'emozione dominante si vede, non una media grigia
+  const sum = Object.values(w).reduce((a, b) => a + b, 0) || 1;
+  return Object.fromEntries(Object.entries(w).map(([k, v]) => [k, v / sum]));
+}
 function applyMood(m) {
   if (!m) return;
-  const w = Object.fromEntries(Object.keys(MOOD_RGB).map(k => [k, Math.max(0.02, (m[k] || 0) - MOOD_BASE[k] + 0.12)]));
-  const sum = Object.values(w).reduce((a, b) => a + b, 0);
-  const rgb = [0, 1, 2].map(i => Object.keys(w).reduce((a, k) => a + MOOD_RGB[k][i] * w[k] / sum, 0));
-  const strength = Math.min(1, Math.max(...Object.keys(MOOD_RGB).map(k => Math.abs((m[k] || 0) - MOOD_BASE[k]))) * 2.5 + 0.15);
-  // Il colore va sulla rete e sugli impulsi della sfera, non sullo sfondo.
-  const parts = Object.keys(w).sort((a, b) => w[b] - w[a]).map(k => ({ rgb: MOOD_RGB[k], w: w[k] / sum }));
-  orb.setTint(rgb, strength, parts, m.tensione || 0);
+  const w = moodWeights(m);
+  const rgb = [0, 1, 2].map(i => Object.keys(w).reduce((a, k) => a + MOOD_RGB[k][i] * w[k], 0));
+  const strength = Math.min(1, Math.max(...Object.keys(MOOD_RGB).map(k => Math.abs((Number(m[k]) || MOOD_BASE[k]) - MOOD_BASE[k]))) * 2.5 + 0.15);
+  const parts = Object.keys(w).sort((a, b) => w[b] - w[a]).filter(k => w[k] > 0.01).map(k => ({ rgb: MOOD_RGB[k], w: w[k] }));
+  orb.setTint(rgb, strength, parts);
 }
 
 // I rami della sfera sono i moduli di memoria di Jarvis (più dieta, agenda e compiti).
@@ -1446,7 +1453,8 @@ function viewImpostazioni() {
         toggle('Riconoscimento forte di "Kestra" (offline, ascolta solo il suo nome)', 'strongWake', 'setStrongWake'),
         h('div', { class: 'muted small' }, cfg.strongWakeReady
           ? 'Sente il nome anche da lontano e con la musica accesa; dopo il bip di\' la richiesta.'
-          : 'Non disponibile su questo telefono: uso il riconoscimento di Android.')),
+          : 'Non disponibile su questo telefono: uso il riconoscimento di Android.'),
+        cfg.strongWakeInfo ? h('div', { class: 'muted small' }, 'Stato: ' + cfg.strongWakeInfo) : null),
       h('div', {}, h('div', { class: 'small' }, 'Sensibilità quando lo chiama'),
         h('div', { class: 'row wrap' }, [['Bassa', 0.2, 'solo "Ehi Kestra" all\'inizio'], ['Media', 0.5, 'consigliata'], ['Alta', 0.85, 'risponde anche a nomi simili']].map(([label, v, hint]) =>
           h('button', { class: 'btn' + (Math.abs((cfg.sensitivity ?? 0.5) - v) < 0.2 ? ' primary' : ''), title: hint, onclick: () => { nativeCall('setSensitivity', v); setTimeout(render, 200); } }, label))),

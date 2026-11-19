@@ -86,7 +86,8 @@ class JarvisBridge(
         put("speakReplies", Settings.speakReplies)
         put("sensitivity", Settings.sensitivity)
         put("strongWake", Settings.strongWake)
-        put("strongWakeReady", com.jarvisfit.app.voice.KestraKws.ready(activity))
+        put("strongWakeReady", com.jarvisfit.app.voice.KestraKws.ready(activity) || com.jarvisfit.app.voice.KestraKws.silenced())
+        put("strongWakeInfo", strongWakeInfo())
         put("micGuard", Settings.micGuard)
         put("overlay", Settings.overlay)
         put("overlayAllowed", com.jarvisfit.app.device.Overlay.allowed(activity))
@@ -122,6 +123,28 @@ class JarvisBridge(
 
     @JavascriptInterface
     fun setMicGuard(on: Boolean) { Settings.micGuard = on }
+
+    /** Diagnosi del riconoscimento forte, in parole semplici, per Impostazioni. */
+    private fun strongWakeInfo(): String {
+        val k = com.jarvisfit.app.voice.KestraKws
+        val parts = mutableListOf<String>()
+        parts += when {
+            !Settings.strongWake -> "Spento: uso il riconoscimento di Android."
+            k.silenced() -> "In pausa: Android ha dato al servizio un microfono muto, uso il riconoscimento di Android. Riaprire l'app lo riattiva."
+            k.running -> "Attivo adesso."
+            else -> "Non attivo in questo momento (sta ascoltando una richiesta o usa il riconoscimento di Android)."
+        }
+        if (k.running) {
+            val pct = (kotlin.math.sqrt(k.level.toDouble()) * 300).toInt().coerceIn(0, 100)
+            parts += "Volume del microfono: $pct%" + (if (k.gain > 1.2f) " (alzato ×${"%.1f".format(k.gain)})" else "") + "."
+        }
+        if (k.detections > 0) {
+            val at = java.text.SimpleDateFormat("HH:mm", java.util.Locale.ITALY).format(java.util.Date(k.lastWakeAtMs))
+            parts += "Ha sentito \"Kestra\" ${k.detections} ${if (k.detections == 1) "volta" else "volte"}, l'ultima alle $at."
+        } else if (Settings.strongWake) parts += "Non ha ancora sentito \"Kestra\" da quando il telefono è acceso."
+        if (k.lastError.isNotBlank()) parts += "Ultimo problema: ${k.lastError}."
+        return parts.joinToString(" ")
+    }
 
     @JavascriptInterface
     fun setStrongWake(on: Boolean) {
