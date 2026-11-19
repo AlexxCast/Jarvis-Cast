@@ -460,9 +460,13 @@ Anche con la 2.34 il Capo doveva chiamarla molte volte. Il riconoscimento di And
 - Si comporta come una sessione d'ascolto per MicGuard, la pausa durante la voce di Kestra e il controllo anti-blocco. Interruttore in Impostazioni (`strongWake`, acceso di default).
 
 ## Sfera a colori e riconoscimento forte più affidabile (app 2.37, 19/11/2026)
-- **Colori della sfera** (richiesta di Alessio): la sfera non è più di un solo colore. Ogni ramo ha una tonalità sua
-  presa con l'angolo aureo (copre tutto lo spettro e due rami vicini non si somigliano); ogni foglia resta nella
-  famiglia del suo ramo ma con una sfumatura diversa. Le piste sui livelli sfumano dal colore del nodo di partenza a
+- **Colori della sfera** (richiesta di Alessio): la sfera non è più di un solo colore, ma resta nel tema del
+  personaggio Kestra (il suo disegno: mantello viola, pantaloni prugna, capelli petrolio, guanti smeraldo, cuoio,
+  oro della fibbia, pelle, nome verde). NON tutto lo spettro: una prima versione arcobaleno è stata bocciata
+  ("troppi colori"). Ogni ramo prende un colore di `KESTRA_PALETTE` (orb.js); ogni foglia è una sfumatura diversa
+  del colore del suo ramo.
+- **Sfondo dell'app** (`--bg-art` in style.css): resta scuro ma non tutto verde, con macchie morbide di viola,
+  petrolio, prugna, smeraldo e un filo d'ambra, sempre i colori del personaggio. Le piste sui livelli sfumano dal colore del nodo di partenza a
   quello della foglia; i gusci dei livelli sono grigio-azzurri neutri.
 - **Le emozioni colorano SOLO i raggi** dal centro ai nodi (più il nucleo e gli impulsi che ci corrono sopra).
   Un cambio d'umore risale i raggi dal centro come un'onda. Palette: calma/tranquilla = verde, gioia (stato

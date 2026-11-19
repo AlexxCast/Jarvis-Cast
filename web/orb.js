@@ -25,11 +25,38 @@ const hsl = (h, sat = 0.92, lig = 0.6) => {
   const f = (n) => { const k = (n + h / 30) % 12; return Math.round(255 * (lig - a * Math.max(-1, Math.min(k - 3, 9 - k, 1)))); };
   return [f(0), f(8), f(4)];
 };
-/** Ogni ramo ha una tonalità sua (angolo aureo: tutto lo spettro, mai due vicine uguali);
- *  le sue foglie restano nella stessa famiglia ma ognuna con una sfumatura diversa. */
-const GOLDEN_HUE = 137.508;
-const branchHue = (i) => (i * GOLDEN_HUE + 125) % 360;
-const leafHue = (hue, k) => (hue + ((((k + 1) * 0.618034) % 1) - 0.5) * 100 + 360) % 360;
+/** Da [r,g,b] a [tonalità in gradi, saturazione, luminosità]. */
+const toHsl = ([r, g, b]) => {
+  r /= 255; g /= 255; b /= 255;
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), l = (mx + mn) / 2, d = mx - mn;
+  if (!d) return [0, 0, l];
+  const sat = d / (1 - Math.abs(2 * l - 1));
+  const h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return [(h * 60 + 360) % 360, sat, l];
+};
+/** Palette del personaggio Kestra (il disegno di Alessio, non lo sfondo): mantello viola, pantaloni prugna,
+ *  capelli blu petrolio, guanti e fasce smeraldo, cuoio ambrato, fibbia dorata, pelle, nome verde. */
+const KESTRA_PALETTE = [
+  [150, 70, 205],  // viola del mantello
+  [45, 170, 185],  // capelli petrolio
+  [40, 200, 130],  // smeraldo dei guanti
+  [205, 85, 175],  // prugna dei pantaloni
+  [215, 145, 70],  // cuoio degli stivali
+  [75, 120, 215],  // blu dei riflessi dei capelli
+  [120, 190, 105], // verde del nome
+  [215, 190, 90],  // oro della fibbia
+  [185, 135, 235], // lilla delle luci del mantello
+  [220, 150, 115], // pelle
+];
+/** Ogni ramo prende un colore della palette (in ordine sparso, così due rami vicini non si somigliano);
+ *  ogni foglia è una sfumatura diversa del colore del suo ramo, sempre dentro il tema. */
+const branchColor = (i) => KESTRA_PALETTE[(i * 3) % KESTRA_PALETTE.length];
+const leafColor = (base, k) => {
+  const [h, sat, l] = toHsl(base);
+  const f = (((k + 1) * 0.618034) % 1) - 0.5;          // -0.5..0.5, diverso per ogni foglia
+  const g = (((k + 1) * 0.381966 + 0.25) % 1) - 0.5;
+  return hsl((h + f * 34 + 360) % 360, Math.min(0.95, sat), Math.max(0.4, Math.min(0.78, l + g * 0.26)));
+};
 
 const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
 const clip = (s, n) => (s.length > n ? s.slice(0, n - 1) + '…' : s);
@@ -61,7 +88,7 @@ function layoutBranches(list, old) {
     const prev = old.get(b.id);
     // Livelli: i rami personali e leggeri stanno su un guscio interno, quelli pesanti e accessori fuori.
     const r = shellOf(b);
-    const hue = branchHue(i);
+    const base = branchColor(i);
     const hub = { ...onSphere(lat, lon, r), lat, lon, rad: r, heat: prev ? prev.hub.heat : 0 };
     // Dal centro: linea dritta fino al nodo sulla sfera.
     const spoke = [{ x: 0, y: 0, z: 0 }, hub];
@@ -81,7 +108,7 @@ function layoutBranches(list, old) {
       const before = prev?.leaves.find(l => l.id === c.id);
       const pos = { ...onSphere(llat, llon, r), lat: llat, lon: llon, rad: r };
       const isAuto = !!(c.auto || c.kind === 'flow' || b.auto || b.kind === 'flow');
-      return { id: c.id, label: String(c.label || ''), ...pos, path: surfaceTrace(hub, pos, r), heat: before ? before.heat : 0, auto: isAuto, rgb: hsl(leafHue(hue, k)) };
+      return { id: c.id, label: String(c.label || ''), ...pos, path: surfaceTrace(hub, pos, r), heat: before ? before.heat : 0, auto: isAuto, rgb: leafColor(base, k) };
     });
     const count = new Map();
     const pendingSubs = [...subs];
@@ -102,10 +129,10 @@ function layoutBranches(list, old) {
         const before = prev?.leaves.find(l => l.id === c.id);
         const pos = { ...onSphere(llat, llon, r), lat: llat, lon: llon, rad: r };
         const isAuto = !!(c.auto || c.kind === 'flow' || host.auto);
-        leaves.push({ id: c.id, label: String(c.label || ''), ...pos, parent: host.id, path: surfaceTrace(host, pos, r), heat: before ? before.heat : 0, sub: true, auto: isAuto, rgb: hsl(leafHue(hue, kids.length + leaves.length), 0.85, 0.66) });
+        leaves.push({ id: c.id, label: String(c.label || ''), ...pos, parent: host.id, path: surfaceTrace(host, pos, r), heat: before ? before.heat : 0, sub: true, auto: isAuto, rgb: leafColor(base, kids.length + leaves.length) });
       }
     }
-    return { id: b.id, label: String(b.label || b.id), kind: b.kind || 'module', auto: !!(b.auto || b.kind === 'flow'), ring: b.ring ?? 1, zone: i, dir: hub, hub, spoke, leaves, fade: prev?.fade ?? 0, rgb: hsl(hue, 0.95, 0.58) };
+    return { id: b.id, label: String(b.label || b.id), kind: b.kind || 'module', auto: !!(b.auto || b.kind === 'flow'), ring: b.ring ?? 1, zone: i, dir: hub, hub, spoke, leaves, fade: prev?.fade ?? 0, rgb: base };
   });
 }
 
@@ -127,7 +154,7 @@ export function createOrb() {
   let branches = [];
   let focus = null;
   let onPick = null;
-  // Colori: ogni nodo (e i suoi livelli) ha il suo colore dello spettro, fisso. L'umore colora SOLO i raggi
+  // Colori: ogni nodo ha il suo colore, preso dalla palette del personaggio Kestra, fisso. L'umore colora SOLO i raggi
   // che partono da Kestra verso i nodi, il nucleo e gli impulsi che corrono sui raggi. Un cambio d'umore
   // parte dal centro e risale i raggi come un'onda. Rabbia/tensione rosso-magenta, calma verde,
   // gioia azzurro, confusione arancione rosato (la mappa è in app.js).
