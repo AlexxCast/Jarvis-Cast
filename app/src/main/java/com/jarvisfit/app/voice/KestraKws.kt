@@ -48,6 +48,8 @@ object KestraKws {
     /** Ultimo punteggio del modello (0..1) e il più alto dall'avvio dell'app: aiutano a tarare la sensibilità. */
     @Volatile var lastScore = 0f; private set
     @Volatile var peakScore = 0f; private set
+    /** Chiamate a cui non è seguita nessuna richiesta (probabili falsi allarmi): le conta il servizio. */
+    @Volatile var emptyWakes = 0
     /** Android dà al servizio un microfono muto (succede se l'ascolto è ripartito mentre l'app era chiusa). */
     @Volatile var silencedUntilMs = 0L; private set
 
@@ -75,6 +77,9 @@ object KestraKws {
      * Sensibilità 0..1 dell'app → punteggio minimo (0..1) del modello per dire "ho sentito Kestra".
      * Valori tarati sulle registrazioni di Alessio con scripts/kestra_ww/evaluate.py.
      */
+    /** Quanti punteggi sopra soglia di fila ci sono adesso (0 se l'ultimo è sotto). */
+    internal fun streak(previous: Int, score: Float, thr: Float): Int = if (score >= thr) previous + 1 else 0
+
     internal fun threshold(sensitivity: Float): Float = (T_LOW - (T_LOW - T_HIGH) * sensitivity.coerceIn(0f, 1f))
 
     /**
@@ -99,8 +104,12 @@ object KestraKws {
     private const val TARGET_RMS = 0.08f
     private const val MAX_GAIN = 5f
     private const val SILENT_CHUNKS = 60 // 6 secondi di zeri esatti
-    private const val T_LOW = 0.95f // sensibilità 0 (Bassa 0,2 → 0,89)
-    private const val T_HIGH = 0.65f // sensibilità 1 (Media 0,5 → 0,8; Alta 0,88 → 0,69)
+    // Con 0,69 (2.41) scattava con orchestra, finestra e la TV: ~9 volte l'ora su audio vario.
+    private const val T_LOW = 0.97f // sensibilità 0 (Bassa 0,2 → 0,93)
+    private const val T_HIGH = 0.77f // sensibilità 1 (Media 0,5 → 0,87; Alta 0,88 → 0,79)
+    /** Punteggi sopra soglia di fila (80 ms l'uno) per dire "Kestra": un picco isolato è quasi sempre altro.
+     *  Sulle prove: stessi nomi riconosciuti, falsi allarmi da ~9 a ~1,5 l'ora. */
+    internal const val CONSECUTIVE = 2
     private val FILES = listOf("melspectrogram.onnx", "embedding_model.onnx", "kestra_ww.json")
 
 
@@ -164,6 +173,7 @@ object KestraKws {
             var g = gain.coerceIn(1f, MAX_GAIN)
             var lvl = 0f
             val started = System.currentTimeMillis()
+            var run = 0
             while (running && gen == my) {
                 val n = record.read(buf, 0, buf.size)
                 if (n < 0) throw IllegalStateException("lettura microfono: $n")
@@ -197,8 +207,10 @@ object KestraKws {
                 if (score < 0f) continue
                 lastScore = score
                 if (score > peakScore) peakScore = score
+                run = streak(run, score, thr)
                 // Il primo secondo dopo l'accensione riempie solo la memoria del modello.
-                if (score >= thr && System.currentTimeMillis() - started > 1000L) {
+                if (run >= CONSECUTIVE && System.currentTimeMillis() - started > 1000L) {
+                    run = 0
                     val now = System.currentTimeMillis()
                     if (now - lastWake > 1500L && running && gen == my) {
                         lastWake = now

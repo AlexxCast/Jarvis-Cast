@@ -566,3 +566,10 @@ modello solo per "Kestra".
   2,6 volte l'ora a soglia 0,8 e 1,3 a 0,9. Prima prova "onesta", addestrata solo coi nomi detti vicino: dalla
   scrivania ne ha sentiti 10 su 12. Se scatta troppo o troppo poco nella vita vera: guardare "Somiglianza" in
   Stato, cambiare la soglia, oppure aggiungere vocali e riaddestrare (vedi `scripts/kestra_ww/README.md`).
+- **Correzione dopo la prova sul telefono (app 2.42)**: con la 2.41 scattava con orchestra, finestra e la TV
+  accesa, e dopo una chiamata a vuoto faceva bip a raffica. Il bip veniva dalla "conversazione aperta" di 45 s:
+  il riconoscimento di Google ripartiva ogni mezzo secondo, con il suo bip. Ora, se dopo il nome non arriva
+  nessuna richiesta, si torna subito ad aspettare (`firstCommandPending`); Stato conta queste chiamate vuote. Il
+  modello deve superare la soglia per 2 passi di fila (`KestraKws.CONSECUTIVE`, 160 ms). Le soglie salgono:
+  Bassa 0,93, Media 0,87, Alta 0,79. Sulle prove: dalla scrivania 11 su 12 (prima 12). Su 5,3 ore di audio vario,
+  calcolate passo per passo, i falsi allarmi scendono da ~9 a ~1,5 l'ora.
