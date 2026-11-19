@@ -79,7 +79,9 @@ export function cleanVisual(a) {
 }
 
 /** Frasi con cui il modello dichiara di aver salvato o cambiato qualcosa. */
-export const CLAIM_WORDS = /\b(ho|l'ho|li ho|le ho|te l'ho|gliel'ho)\s+(appena\s+|già\s+|subito\s+|anche\s+)?(registrat|aggiunt|aggiornat|salvat|segnat|impostat|annotat|memorizzat|eliminat|cancellat|inserit|creat|modificat|spostat|tolt|rimoss|chius|apert)|\b(chiudo|apro|avvio|cerco|eseguo|seleziono)\s+(?:subito|ora|adesso|immediatamente)\b|\b(promemoria|piano|diario|pasto|peso|allenamento|dispensa|ricetta)\s+(è stat[oa]\s+)?(impostat|aggiornat|registrat|salvat|creat|aggiunt)[oa]\b|^\W*(fatto|registrato|aggiornato|salvato|segnato|annotato)\b/i;
+const ACTION_ASK = /\b(aggiungi|segna|segnami|registra|ricordami|ricorda|salva|crea|creami|apri|aprimi|prepara|preparami|organizza|cancella|elimina|togli|sposta|imposta|programma|clicca|seleziona|collegati|configura)\b/i;
+
+export const CLAIM_WORDS = /\b(ho|l'ho|li ho|le ho|te l'ho|gliel'ho)\s+(appena\s+|già\s+|subito\s+|anche\s+)?(registrat|aggiunt|aggiornat|salvat|segnat|impostat|annotat|memorizzat|eliminat|cancellat|inserit|creat|modificat|spostat|tolt|rimoss|chius|apert)|\b(chiudo|apro|avvio|cerco|eseguo|seleziono)\s+(?:subito|ora|adesso|immediatamente)\b|\b(apro|avvio|clicco|forzo|lancio|configuro|premo|faccio partire)\b|\bci penso io\b[^!?]{0,40}\b(apr|cerc|avvi|lanci|mett|clicc|prepar|configur)|\b(promemoria|piano|diario|pasto|peso|allenamento|dispensa|ricetta)\s+(è stat[oa]\s+)?(impostat|aggiornat|registrat|salvat|creat|aggiunt)[oa]\b|^\W*(fatto|registrato|aggiornato|salvato|segnato|annotato)\b/i;
 const FAIL_LABELS = { show: 'mostrare la grafica', web_search: 'cercare su internet', read_url: 'leggere la pagina', add_meal: 'registrare il pasto (mancano gli alimenti)', update_meal: 'modificare il pasto (non l\'ho trovato)', delete_meal: 'eliminare il pasto (non l\'ho trovato)', add_weight: 'registrare il peso', add_activity: 'registrare l\'allenamento', add_reminder: 'creare il promemoria (data non valida)', remember: 'salvare il ricordo', call: 'avviare la chiamata (manca il nome)', update_profile: 'aggiornare il profilo', delete_activity: 'eliminare l\'attività (non l\'ho trovata)' };
 const failLabel = (t) => FAIL_LABELS[t] || `completare l'operazione "${t}"`;
 const REPAIR_PROMPT = (failed) => `CONTROLLO AUTOMATICO: nella tua risposta ${failed.length ? `queste azioni non erano valide e NON sono state eseguite: ${failed.join(', ')}` : 'dichiari di aver fatto qualcosa ma il campo "actions" è vuoto o incompleto'}. Finora NON è stato salvato nulla. Rimanda SOLO il JSON completo, con in "actions" tutte le azioni corrette e complete (per un pasto: items con name, grams, kcal, protein, carbs, fat; per update/delete: l'id esatto preso dal contesto). Se davvero non c'è nulla da salvare, lascia "actions" vuoto e scrivi una reply che NON dica di aver salvato o fatto qualcosa.`;
@@ -397,9 +399,12 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   let remembered = [];
   let topicHits = { modules: [], leaves: [] };
   const tier = router.classifyTier(userText, !!image || !!pdfBase64);
+  // Richiesta che chiede di FARE qualcosa (PC, telefono, diario, agenda, sessioni): niente modelli lite,
+  // che rispondono "ci penso io" senza mettere l'azione nel JSON.
+  const needsActions = ACTION_ASK.test(userText) || phone.DOING_WORDS.test(userText) || jarvisCore.isPcTarget(db, userText);
   try {
     let res = await router.chat(db, env, {
-      tier, needsVision: !!image || !!pdfBase64, preferKey: sess.model, maxTokens: 2000,
+      tier, needsVision: !!image || !!pdfBase64, preferKey: sess.model, needsActions, maxTokens: 2000,
       build: (model) => buildMessages(model, parts), fetchFn: deps.fetchFn, now: deps.now, tz,
     });
     let parsed = parseReply(res.text);
@@ -518,6 +523,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
       if (svc.length >= 3 && !flows.findMatchingSkill(db, userText, 'pc')) {
         const proposed = flows.proposeSkill(db, sessionId, {
           name: `${svc} su PC`,
+          userText,
           service: svc,
           device: 'pc',
           defaults: { account: activeFocus?.profile || 'alexx cast' },
@@ -532,6 +538,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
       if (svc.length >= 3 && (devAct.type === 'open_app' || devAct.type === 'open_url') && !flows.findMatchingSkill(db, userText, 'telefono')) {
         const proposed = flows.proposeSkill(db, sessionId, {
           name: `${svc} su Telefono`,
+          userText,
           service: svc,
           device: 'telefono',
           steps: [{ kind: devAct.type, target: devAct.url || devAct.name, optional: false }],

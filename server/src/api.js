@@ -129,6 +129,7 @@ export async function handleApi(db, env, deps, request) {
     }
     if (path === '/api/devices' && method === 'GET') return json({ devices: devices.listDevices(db, ms), history: devices.listCommandHistory(db) });
     if (path === '/api/devices/heartbeat' && method === 'POST') return json(devices.heartbeat(db, await body(request), ms));
+    if (path === '/api/devices/result' && method === 'POST') return json(devices.reportResult(db, await body(request), ms));
     if (path === '/api/devices/command' && method === 'POST') {
       const b = await body(request);
       devices.markActive(db, ms);

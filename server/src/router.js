@@ -9,7 +9,8 @@ import { nowIso } from './clock.js';
 export const SWITCH_AT = 0.8;
 const MINUTE = 60_000;
 
-export const estimateTokens = (text) => Math.ceil(String(text || '').length / 3.5);
+// Margine del 15%: italiano, JSON e codice pesano più di 3,5 caratteri per token, e sforare il TPM costa un 429.
+export const estimateTokens = (text) => Math.ceil(String(text || '').length / 3.5 * 1.15);
 export function messagesTokens(messages) {
   let n = 0;
   for (const m of messages) {
@@ -95,7 +96,10 @@ export async function readPdfWithGemini(env, fetchFn, pdfBase64, promptText) {
  * Ordina i candidati per una richiesta.
  * Ritorna [{ model, key, status: 'ok' | 'near' , load }] dal migliore al peggiore; esclude i bloccati.
  */
-export function rank(db, env, { tier, needsVision = false, promptTokens = 0, preferKey = '', ms }) {
+/** Modelli piccoli o "lite": veloci per chiacchierare, ma deboli nel JSON delle azioni (promettono e non fanno). */
+export const isLiteModel = (m) => /(lite|instant|[-/]8b\b|[-/]20b\b|(?<![a-z])mini\b|nano|small)/i.test(m.model);
+
+export function rank(db, env, { tier, needsVision = false, promptTokens = 0, preferKey = '', needsActions = false, ms }) {
   const out = [];
   for (const m of loadModels(db)) {
     const p = PROVIDERS[m.provider];
@@ -111,7 +115,13 @@ export function rank(db, env, { tier, needsVision = false, promptTokens = 0, pre
     const near = load >= SWITCH_AT || st.low_until > ms;
     out.push({ model: m, key, status: near ? 'near' : 'ok', load });
   }
-  const score = (c) => (c.status === 'near' ? 1000 : 0) + (c.model.free ? 0 : 500) + (c.key === preferKey ? -1.5 : 0) + (tier === 'smart' && isHeavyModel(c.model) ? -1.2 : 0) + c.model.prio / 10;
+  // La "coerenza" col modello della sessione non vale per i modelli lite: altrimenti, dopo un solo timeout
+  // del modello buono, la chat resta incollata per sempre al modello più debole.
+  const score = (c) => (c.status === 'near' ? 1000 : 0) + (c.model.free ? 0 : 500)
+    + (c.key === preferKey && !isLiteModel(c.model) ? -1.5 : 0)
+    + (tier === 'smart' && isHeavyModel(c.model) ? -1.2 : 0)
+    + ((needsActions || tier === 'smart') && isLiteModel(c.model) ? 4 : 0)
+    + c.model.prio / 10;
   // Tra i modelli sani preferisce quello già in uso nella sessione (coerenza) e i modelli ad alta capacità su smart.
   return out.sort((a, b) => score(a) - score(b));
 }
@@ -192,21 +202,23 @@ function blockFor(status, error, fails, headers) {
   if (status === 402) return 12 * 3600_000;                                  // crediti esauriti
   if (status === 404 || status === 410 || (status === 400 && /model/i.test(error))) return 24 * 3600_000; // modello ritirato o non più gratuito
   if (status === 400 || status === 413) return 0;                            // richiesta non adatta a questo modello: prova il prossimo, senza bloccarlo
-  return 30_000;                                                             // 5xx, timeout, rete
+  // 5xx, timeout, risposta vuota: interruttore con attesa che raddoppia (30 s, 1, 2, 4… fino a 30 min),
+  // così un modello che continua a non rispondere non fa perdere 14 secondi a ogni messaggio.
+  return Math.min(30_000 * 2 ** Math.min(fails, 6), 30 * MINUTE);
 }
 
 /**
  * Esegue una richiesta provando i modelli in ordine.
  * build(model) → messages: il contesto viene ricostruito per la finestra di ogni modello provato.
  */
-export async function chat(db, env, { tier = 'fast', needsVision = false, preferKey = '', build, maxTokens = 1200, fetchFn = fetch, now = Date.now, tz }) {
+export async function chat(db, env, { tier = 'fast', needsVision = false, preferKey = '', needsActions = false, build, maxTokens = 1200, fetchFn = fetch, now = Date.now, tz }) {
   const tried = [];
   const attempted = new Set();
   for (let round = 0; round < 8; round++) {
     const ms = now();
-    let candidates = rank(db, env, { tier, needsVision, preferKey, ms }).filter(c => !attempted.has(c.key));
+    let candidates = rank(db, env, { tier, needsVision, preferKey, needsActions, ms }).filter(c => !attempted.has(c.key));
     if (!candidates.length && tier === 'smart' && !needsVision) {
-      candidates = rank(db, env, { tier: 'fast', needsVision, preferKey, ms }).filter(c => !attempted.has(c.key));
+      candidates = rank(db, env, { tier: 'fast', needsVision, preferKey, needsActions, ms }).filter(c => !attempted.has(c.key));
     }
     if (!candidates.length) break;
     const c = candidates[0];

@@ -85,8 +85,8 @@ test('correzioni: senza regola dal modello si impara lo scambio, ma un "no" a un
   await handleChat(db, ENV, d, { text: 'ho mangiato un panino' });
   await handleChat(db, ENV, deps(fakeFetch(() => reply({ reply: 'Va bene.' }))), { text: 'no lascia stare per ora grazie' });
   assert.equal(lessons.list(db).length, 0);
-  await handleChat(db, ENV, deps(fakeFetch(() => reply({ reply: 'Apro Maps.' }))), { text: 'portami a casa' });
-  await handleChat(db, ENV, deps(fakeFetch(() => reply({ reply: 'Scusa, apro Waze.' }))), { text: 'non intendevo Maps, uso sempre Waze' });
+  await handleChat(db, ENV, deps(fakeFetch(() => reply({ reply: 'Apro Maps.', actions: [{ type: 'open_app', name: 'Maps' }] }))), { text: 'portami a casa' });
+  await handleChat(db, ENV, deps(fakeFetch(() => reply({ reply: 'Scusa, apro Waze.', actions: [{ type: 'open_app', name: 'Waze' }] }))), { text: 'non intendevo Maps, uso sempre Waze' });
   assert.match(lessons.list(db)[0].rule, /non andava bene "Apro Maps\."[\s\S]*uso sempre Waze/);
 });
 

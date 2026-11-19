@@ -414,6 +414,26 @@ export function listSkills(db) {
   return kvGet(db, SKILLS_KEY, []);
 }
 
+/**
+ * Un automatismo vale solo se è un "modello" riusabile: nessuna ricerca già scritta dentro l'indirizzo
+ * (es. ?q=El+uva+boss) e nessuna frase intera al posto del nome di un'app (es. "uva boss su prime video").
+ * Quelli sbagliati imparati prima restano salvati ma non vengono più eseguiti.
+ */
+export function isSaneSkill(s) {
+  if (!s || !Array.isArray(s.steps) || !s.steps.length) return false;
+  return s.steps.every(st => {
+    const t = String(st.target || '');
+    if (st.kind === 'open_url') return !/[?&](q|query|phrase|search_query|k)=/i.test(t) && !/\/search\b/i.test(t);
+    if (st.kind === 'open_app') return t.split(/\s+/).filter(Boolean).length <= 3 && !/\b(su|sul|in|per|e)\b/i.test(t);
+    return true;
+  });
+}
+
+/** Toglie la ricerca dall'indirizzo: dell'automatismo resta solo il sito (la ricerca la mette il parametro media). */
+function baseUrl(u) {
+  try { const x = new URL(u); return `${x.origin}/`; } catch { return u; }
+}
+
 export function canonicalService(raw) {
   const s = norm(raw);
   if (/\bprime\b/.test(s)) return 'prime';
@@ -435,8 +455,9 @@ export function canonicalService(raw) {
 export function proposeSkill(db, sessionId = 'main', draft = {}, nowMs = Date.now()) {
   const service = canonicalService(draft.service || '');
   const device = String(draft.device || 'pc').toLowerCase();
-  const steps = Array.isArray(draft.steps) ? draft.steps.filter(s => s && s.kind) : [];
-  if (!service || !steps.length) return false;
+  const steps = (Array.isArray(draft.steps) ? draft.steps.filter(s => s && s.kind) : [])
+    .map(st => st.kind === 'open_url' && st.target ? { ...st, target: baseUrl(st.target) } : st);
+  if (!service || !steps.length || !isSaneSkill({ steps })) return false;
 
   const id = slug(`skill-${device}-${service}`);
   const existing = listSkills(db).find(s => s.id === id);
@@ -449,6 +470,7 @@ export function proposeSkill(db, sessionId = 'main', draft = {}, nowMs = Date.no
     device,
     defaults: draft.defaults && typeof draft.defaults === 'object' ? draft.defaults : {},
     steps,
+    lastText: String(draft.userText || '').slice(0, 300),
     createdAt: nowMs,
   });
   return true;
@@ -486,7 +508,7 @@ export function confirmPendingSkill(db, sessionId = 'main', userText = '', nowMs
 }
 
 /** Lamentele che dicono che l'ultimo comando NON è andato come doveva. */
-export const COMPLAINT_RE = /\b(non\s+(?:ha\s+|hai\s+|è\s+|sta\s+|si\s+)?(?:funzion\w*|partit\w*|apert\w*|aperto|va\b|vedo|fatto|riuscit\w*)|sbagliat\w*|account\s+sbagliato|errore|di\s+nuovo|riprova|rifallo|non\s+è\s+quello|perch[eé]\s+(?:youtube|hai|non)|inutile|ancora\s+niente)\b/i;
+export const COMPLAINT_RE = /\b(non\s+(?:ha\s+|hai\s+|è\s+|sta\s+|si\s+|lo\s+|la\s+|mi\s+)?(?:funzion\w*|partit\w*|apert\w*|aperto|apre|va\b|vedo|fatto|riuscit\w*|sembra|c'entra|succede|successo)|sbagliat\w*|account\s+sbagliato|errore|di\s+nuovo|riprova|rifallo|non\s+è\s+quello|perch[eé]\s+(?:youtube|hai|non)|inutile|ancora\s+niente|niente|nulla)\b/i;
 
 /**
  * Apprendimento silenzioso degli automatismi: invece di chiedere "Ha funzionato?" a ogni comando,
@@ -502,6 +524,10 @@ export function implicitSkillFeedback(db, sessionId = 'main', userText = '', now
   const clean = String(userText || '').trim();
   if (!clean || CONFIRM_YES_RE.test(clean) || CONFIRM_NO_RE.test(clean)) return null;
   if (COMPLAINT_RE.test(clean)) { kvSet(db, key, null); return { discarded: true }; }
+  // Una domanda ("cosa c'è aperto?", "lo hai fatto?") o la stessa richiesta ripetuta non sono una conferma:
+  // la proposta resta in attesa del prossimo messaggio vero.
+  if (/\?\s*$/.test(clean) || /^(?:cosa|che|come|hai|lo\s+hai|l'hai|ma\s+)/i.test(clean)) return null;
+  if (pending.lastText && norm(pending.lastText) === norm(clean)) { kvSet(db, key, null); return { discarded: true }; }
   const list = listSkills(db).filter(s => s.id !== pending.id);
   const saved = { ...pending, verified: true, implicit: true, uses: 1, updatedAt: nowMs };
   kvSet(db, SKILLS_KEY, [saved, ...list].slice(0, MAX_FLOWS));
@@ -519,7 +545,9 @@ export function findMatchingSkill(db, userText = '', activeDevice = null) {
   const askPc = /\b(pc|computer|desktop|windows|gh?ideon)\b/i.test(userText);
   const preferredDevice = askPhone ? 'telefono' : (askPc ? 'pc' : (activeDevice || 'pc'));
 
-  const skills = listSkills(db).filter(s => s.verified);
+  // Serve un verbo di comando: "collegati alla mia agenda Google" non deve far partire "google su PC".
+  if (!/\b(apri|aprimi|avvia|metti|mettimi|cerca|cercami|guarda|riproduci|vai\s+su|fai\s+partire|fammi\s+partire|accendi|lancia)\b/i.test(userText)) return null;
+  const skills = listSkills(db).filter(s => s.verified && isSaneSkill(s));
   let best = null;
   let bestScore = 0;
   for (const s of skills) {
@@ -544,7 +572,7 @@ export function planSkillExecution(skill, userText = '') {
 
   // Override account/profilo ("con l'account Ale", "profilo Alessio", "su Persona 1")
   const accMatch = /\b(?:con\s+(?:l'|il\s+)?(?:account|profilo)|profilo|account|su\s+profilo)\s+([a-z0-9._\s-]{2,40}?)(?=\s+(?:e\s+|sul|su|nel|al|per|con|metti|cerca|guarda|fai\s+partire)|$)/i.exec(text);
-  if (accMatch && accMatch[1]) {
+  if (accMatch && accMatch[1] && !/\b(outlook|google|gmail|microsoft|e-?mail|mail|agenda|calendario|instagram|whatsapp)\b/i.test(accMatch[1])) {
     overrides.account = accMatch[1].trim();
   }
 
@@ -555,7 +583,12 @@ export function planSkillExecution(skill, userText = '') {
       .replace(/\s+/g, ' ')
       .trim()
   );
-  const media = mediaMatch && mediaMatch[1] ? mediaMatch[1].replace(/[.!?]+$/, '').trim() : '';
+  // "apri helluva boss su prime video": il titolo sta tra il verbo e il servizio.
+  const openOn = /\b(?:apri|aprimi|metti|guarda)\s+(?:il\s+film\s+|la\s+serie\s+|il\s+video\s+)?(.{2,80}?)\s+(?:su|sul|in|da)\s+(?:prime(?:\s+video)?|youtube|netflix|spotify)\b/i.exec(text);
+  let media = mediaMatch && mediaMatch[1] ? mediaMatch[1].replace(/[.!?]+$/, '').trim() : '';
+  if (!media && openOn && !/^(?:il\s+|la\s+)?(?:sito|app|pagina|home)$/i.test(openOn[1].trim())) media = openOn[1].trim();
+  // "... e apri il video più rilevante", "... e fallo partire": istruzioni, non parte del titolo.
+  media = media.replace(/\s+e\s+(?:apri|aprimi|fai\s+partire|fallo\s+partire|metti|guarda|avvia)\b.*$/i, '').replace(/\s+(?:dal|sul|su)\s+(?:pc|computer|telefono)\b.*$/i, '').trim();
   if (media && !/^(?:home|pagina\s+iniziale|sito)$/i.test(media)) {
     overrides.media = media;
   }
