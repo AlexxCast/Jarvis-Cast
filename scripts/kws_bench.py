@@ -99,5 +99,5 @@ if __name__ == "__main__":
     print(f"{len(data)} frasi sintetizzate", flush=True)
     results = {}
     for label, d, kw in json.load(open(f"{W}/models.json")):
-        results[label] = bench(label, d, kw, data)
+        results[label] = bench(label, os.path.join(W, d), os.path.join(W, kw), data)
     json.dump(results, open(f"{W}/risultati.json", "w"), indent=1)
