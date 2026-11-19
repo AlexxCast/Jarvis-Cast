@@ -99,9 +99,83 @@ object VoiceText {
     /** Parole che, subito prima del nome, indicano che se ne sta parlando in terza persona ("chiedi a Kestra"). */
     private val aboutBefore = setOf("di", "su", "con", "a", "il", "la", "un", "una", "questo", "questa", "quel", "quella", "tipo", "come", "della", "sulla", "alla", "dalla")
 
+    // ---- storpiature lontane: valgono SOLO quando il nome è detto per chiamare
+    /**
+     * Il riconoscimento italiano non conosce "Kestra" e spesso scrive una parola vicina ("kesta", "che stra",
+     * "questa", "cesta"). Queste storpiature contano solo in posizione di chiamata (all'inizio della frase,
+     * dopo al massimo un saluto), mai in mezzo al discorso: così Kestra risponde al primo colpo senza
+     * attivarsi a ogni parola simile.
+     */
+    private fun phonetic(w: String): String = w
+        .replace("ch", "k").replace("qu", "k").replace("kh", "k").replace("x", "ks")
+        .replace("c", "k").replace("h", "")
+        .replace("à", "a").replace("è", "e").replace("é", "e")
+        .replace(Regex("(.)\\1+"), "$1")
+
+    private fun distance(a: String, b: String): Int {
+        val d = IntArray(b.length + 1) { it }
+        for (i in 1..a.length) {
+            var prev = d[0]; d[0] = i
+            for (j in 1..b.length) {
+                val cur = d[j]
+                d[j] = minOf(d[j] + 1, d[j - 1] + 1, prev + if (a[i - 1] == b[j - 1]) 0 else 1)
+                prev = cur
+            }
+        }
+        return d[b.length]
+    }
+
+    private val nearExtra = setOf("kester", "kestar", "kestrel", "kestral", "kestera", "kesterà")
+    private fun isNear(token: String): Boolean {
+        if (token.length < 4) return false
+        val k = phonetic(token)
+        return distance(k, "kestra") <= 1 || token in nearExtra || k in nearExtra
+    }
+
+    /** Parole italiane vere vicine a "Kestra": contano solo dopo un saluto ("ehi questa") o, con sensibilità alta, dette da sole. */
+    private val commonNear = setOf("questa", "cesta")
+    /** Parole vicine ma troppo comuni (navigatore, TV): non chiamano mai. */
+    private val neverNear = setOf("destra", "extra", "estra", "sestra", "castra", "vestra", "testra")
+    private val greetings = setOf("ehi", "hey", "ei", "hei", "ehy", "ciao")
+
+    /**
+     * Dove sta il nome storpiato detto per chiamare (indici dei token), o null.
+     * Sensibilità media: serve un saluto prima ("ehi kesta"). Alta: basta che sia all'inizio ("kesta che ore sono").
+     */
+    private fun nearCall(tokens: List<String>, sensitivity: Float, allowCommon: Boolean): IntRange? {
+        if (sensitivity < 0.35f) return null
+        val high = sensitivity > 0.7f
+        for (i in 0..minOf(3, tokens.size - 1)) {
+            if (tokens.subList(0, i).any { it !in callWords }) break
+            val t = tokens[i]
+            val greeted = i > 0 && tokens[i - 1] in greetings
+            // Nome spezzato in due: "che stra", "kes tra", "k estra".
+            if (i + 1 < tokens.size && phonetic(t + tokens[i + 1]) == "kestra" && (high || greeted)) return i..i + 1
+            if (t in neverNear) continue
+            if (t in commonNear) {
+                if (allowCommon && (greeted || (high && tokens.size == 1))) return i..i
+                continue
+            }
+            if (isNear(t) && (high || greeted)) return i..i
+        }
+        return null
+    }
+
+    private fun tokens(norm: String) = norm.split(" ").filter { it.isNotBlank() }
+
     /** Vero se nella frase (anche parziale) compare la parola di attivazione. */
-    fun containsWake(text: String, sensitivity: Float = 0.5f): Boolean =
-        (if (sensitivity > 0.7f) wakeTokenLoose else wakeToken).containsMatchIn(normalize(text))
+    fun containsWake(text: String, sensitivity: Float = 0.5f): Boolean {
+        val norm = normalize(text)
+        if ((if (sensitivity > 0.7f) wakeTokenLoose else wakeToken).containsMatchIn(norm)) return true
+        // Nei parziali le parole italiane vere ("questa") non contano: "questa sera..." non è una chiamata.
+        return nearCall(tokens(norm), sensitivity, allowCommon = false) != null
+    }
+
+    /** Tra le alternative del riconoscimento, quella che chiama Kestra (diretta prima di dubbia), altrimenti la prima. */
+    fun pickHeard(alternatives: List<String>, sensitivity: Float = 0.5f): String =
+        alternatives.firstOrNull { wake(it, sensitivity) is Wake.Direct }
+            ?: alternatives.firstOrNull { wake(it, sensitivity) !is Wake.None }
+            ?: alternatives.firstOrNull().orEmpty()
 
     /**
      * La frase finale ha perso il nome che i risultati parziali avevano sentito ("Kestra accendi" →
@@ -109,7 +183,10 @@ object VoiceText {
      */
     fun commandAfterLostWake(finalText: String): String = normalize(finalText).let { t ->
         val m = wakeTokenLoose.find(t)
-        if (m != null) t.substring(m.range.last + 1).trim() else t
+        if (m != null) return@let t.substring(m.range.last + 1).trim()
+        val tk = tokens(t)
+        val r = nearCall(tk, 1f, allowCommon = true)
+        if (r != null) tk.drop(r.last + 1).joinToString(" ") else t
     }
 
     /**
@@ -119,7 +196,13 @@ object VoiceText {
      */
     fun wake(raw: String, sensitivity: Float = 0.5f): Wake {
         val norm = normalize(raw)
-        val m = (if (sensitivity > 0.7f) wakeTokenLoose else wakeToken).find(norm) ?: return Wake.None
+        val m = (if (sensitivity > 0.7f) wakeTokenLoose else wakeToken).find(norm)
+        if (m == null) {
+            val tk = tokens(norm)
+            val r = nearCall(tk, sensitivity, allowCommon = true) ?: return Wake.None
+            val after = tk.drop(r.last + 1).joinToString(" ")
+            return if (aboutCues.containsMatchIn(norm) && after.isNotBlank()) Wake.Ambiguous(raw.trim(), true) else Wake.Direct(after)
+        }
         val before = norm.substring(0, m.range.first).trim()
         val after = norm.substring(m.range.last + 1).trim()
         val beforeWords = before.split(" ").filter { it.isNotBlank() }

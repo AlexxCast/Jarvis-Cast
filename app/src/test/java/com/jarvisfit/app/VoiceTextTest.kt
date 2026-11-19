@@ -124,8 +124,9 @@ class VoiceTextTest {
     fun sensitivityChangesHowEasilyKestraAnswers() {
         assertTrue(VoiceText.wake("che ore sono kestra", 0.2f) is VoiceText.Wake.None)
         assertTrue(VoiceText.wake("kestra che ore sono", 0.2f) is VoiceText.Wake.Direct)
-        assertTrue(VoiceText.wake("ehi kiestra accendi la luce", 0.5f) is VoiceText.Wake.None)
-        assertTrue(VoiceText.wake("ehi kiestra accendi la luce", 0.9f) is VoiceText.Wake.Direct)
+        assertTrue(VoiceText.wake("kiestra accendi la luce", 0.5f) is VoiceText.Wake.None)
+        assertTrue(VoiceText.wake("kiestra accendi la luce", 0.9f) is VoiceText.Wake.Direct)
+        assertTrue(VoiceText.wake("ehi kiestra accendi la luce", 0.5f) is VoiceText.Wake.Direct) // con un saluto basta la media
         assertTrue(VoiceText.wake("allora kestra mi dici il meteo di oggi", 0.9f) is VoiceText.Wake.Direct)
         assertTrue(VoiceText.wake("ieri ho visto la serie dove c'è Kestra", 0.9f) is VoiceText.Wake.Ambiguous)
     }
@@ -159,6 +160,33 @@ class VoiceTextTest {
             assertFalse("'$heard' non deve chiamare Kestra", VoiceText.containsWake(heard, 0.9f))
             assertTrue("'$heard' non deve chiamare Kestra", VoiceText.wake(heard, 0.9f) is VoiceText.Wake.None)
         }
+    }
+
+    @Test
+    fun `storpiature lontane valgono solo quando il nome e detto per chiamare`() {
+        // Il riconoscimento italiano scrive "Kestra" come una parola vicina: al primo colpo deve rispondere.
+        assertEquals("che ore sono", (VoiceText.wake("kesta che ore sono", 0.88f) as? VoiceText.Wake.Direct)?.command)
+        assertEquals("accendi la luce", (VoiceText.wake("che stra accendi la luce", 0.88f) as? VoiceText.Wake.Direct)?.command)
+        assertEquals("", (VoiceText.wake("ehi questa", 0.5f) as? VoiceText.Wake.Direct)?.command)
+        assertEquals("metti la musica", (VoiceText.wake("ciao cesta metti la musica", 0.88f) as? VoiceText.Wake.Direct)?.command)
+        assertEquals("", (VoiceText.wake("questa", 0.88f) as? VoiceText.Wake.Direct)?.command)
+        assertEquals("che tempo fa", (VoiceText.wake("ok kester che tempo fa", 0.88f) as? VoiceText.Wake.Direct)?.command)
+        assertTrue(VoiceText.containsWake("kesta", 0.88f))
+        // ...ma non a ogni parola simile.
+        for (heard in listOf("questa sera vado al cinema", "allora questa la prendo", "gira a destra", "ehi destra",
+                "metti la cesta in cucina", "la testa mi fa male", "domani c'è la festa", "che sta facendo", "un extra di patatine",
+                "secondo me kesta", "ho detto che kesta non va")) {
+            assertTrue("'$heard' non deve chiamare Kestra", VoiceText.wake(heard, 0.88f) is VoiceText.Wake.None)
+            assertFalse("'$heard' non deve chiamare Kestra (parziale)", VoiceText.containsWake(heard, 0.88f))
+        }
+        // Un parziale "questa" non basta: potrebbe essere l'inizio di "questa sera...".
+        assertFalse(VoiceText.containsWake("questa", 0.88f))
+        // Sensibilità bassa: solo il nome vero.
+        assertTrue(VoiceText.wake("kesta che ore sono", 0.2f) is VoiceText.Wake.None)
+        assertTrue(VoiceText.wake("questa", 0.5f) is VoiceText.Wake.None)
+        // Tra le alternative si sceglie quella che chiama Kestra.
+        assertEquals("kesta apri whatsapp", VoiceText.pickHeard(listOf("questa pri whatsapp", "kesta apri whatsapp"), 0.88f))
+        assertEquals("apri whatsapp", VoiceText.commandAfterLostWake("che stra apri whatsapp"))
     }
 
     @Test
