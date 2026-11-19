@@ -1432,14 +1432,14 @@ function viewModelli() {
   const m = store.models;
   const reload = async () => { store.models = await api('GET', '/models'); render(); };
   const editor = h('textarea', { rows: 8, 'aria-label': 'Elenco modelli in JSON', spellcheck: 'false', style: 'font-family:ui-monospace,monospace;font-size:.8rem' });
-  editor.value = JSON.stringify(m.models.map(x => ({ provider: x.provider, model: x.model, tiers: x.tiers, ctx: x.ctx, ...x.limits, free: x.free, prio: x.prio })), null, 1);
+  editor.value = JSON.stringify(m.models.map(x => ({ provider: x.provider, model: x.model, tiers: x.tiers, ctx: x.ctx, ...x.limits, free: x.free, prio: x.prio, ...(x.q ? { q: x.q } : {}) })), null, 1);
   return [
     h('div', { class: 'card' }, h('h2', {}, 'Provider'),
       h('p', { class: 'muted' }, 'Le chiavi si impostano come segreti su Cloudflare. Kestra usa solo i provider con la chiave e cambia modello all\'80% del limite.'),
       h('div', { class: 'row wrap' }, m.providers.map(p => h('span', { class: 'tag ' + (p.configured ? 'ok' : '') , title: p.env }, (p.configured ? '● ' : '○ ') + p.name)))),
     h('div', { class: 'card' }, h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'Modelli'), h('button', { class: 'btn', onclick: guard(async () => { await api('POST', '/models/unblock'); await reload(); toast('Pause azzerate.'); }) }, 'Riattiva tutti')),
       h('div', { class: 'list' }, m.models.filter(x => x.configured).map(x => h('div', { class: 'item' },
-        h('div', { class: 'grow' }, h('div', { class: 'clip' }, x.model), h('div', { class: 'muted small' }, `${x.provider} · ${x.tiers.join(', ')} · oggi ${x.requestsToday} richieste${x.lastError ? ' · ' + x.lastError.slice(0, 60) : ''}`)),
+        h('div', { class: 'grow' }, h('div', { class: 'clip' }, x.model), h('div', { class: 'muted small' }, `${x.provider} · ${x.tiers.map(t => t === 'deep' ? 'deep (solo compiti)' : t).join(', ')}${x.q ? ' · qualità ' + x.q : ''} · oggi ${x.requestsToday} richieste${x.lastError ? ' · ' + x.lastError.slice(0, 60) : ''}`)),
         x.blockedForSec ? h('span', { class: 'tag bad' }, 'in pausa ' + (x.blockedForSec > 3600 ? Math.round(x.blockedForSec / 3600) + ' h' : Math.ceil(x.blockedForSec / 60) + ' min'))
           : h('span', { class: 'tag ' + (x.load >= 80 ? 'warn' : 'ok') }, x.load + '%'))),
         m.models.some(x => x.configured) ? null : h('p', { class: 'empty' }, 'Nessuna chiave API configurata sul server.'))),

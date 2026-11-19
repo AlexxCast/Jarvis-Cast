@@ -18,6 +18,10 @@ class_name = "JarvisDO"
 tag = "v1"
 new_sqlite_classes = ["JarvisDO"]
 
+# Workers AI: modelli che girano dentro Cloudflare, senza chiavi (riserva gratuita per i compiti difficili).
+[ai]
+binding = "AI"
+
 [vars]
 TZ_NAME = "Europe/Rome"
 

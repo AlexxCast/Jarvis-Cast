@@ -22,7 +22,12 @@ export function messagesTokens(messages) {
 
 export function loadModels(db) {
   const custom = sanitizeModels(kvGet(db, 'models', null));
-  return custom.length ? custom : DEFAULT_MODELS;
+  if (!custom.length) return DEFAULT_MODELS;
+  // Un elenco personalizzato salvato prima non deve far perdere i modelli aggiunti dopo nel catalogo
+  // (quelli con "added"): si aggiungono in coda, a meno che il Capo li abbia tolti di proposito.
+  const have = new Set(custom.map(modelKey));
+  const removed = new Set(kvGet(db, 'modelsRemoved', []));
+  return [...custom, ...DEFAULT_MODELS.filter(m => m.added && !have.has(modelKey(m)) && !removed.has(modelKey(m)))];
 }
 
 const minuteBucket = (ms) => 'm:' + new Date(ms).toISOString().slice(0, 16);
@@ -99,12 +104,21 @@ export async function readPdfWithGemini(env, fetchFn, pdfBase64, promptText) {
 /** Modelli piccoli o "lite": veloci per chiacchierare, ma deboli nel JSON delle azioni (promettono e non fanno). */
 export const isLiteModel = (m) => /(lite|instant|[-/]8b\b|[-/]20b\b|(?<![a-z])mini\b|nano|small)/i.test(m.model);
 
-export function rank(db, env, { tier, needsVision = false, promptTokens = 0, preferKey = '', needsActions = false, ms }) {
+/**
+ * best: compito in background, il tempo conta poco e la qualità tutto. Si ordina per qualità (q) e
+ *   si ammettono anche i modelli "deep" (lenti ma fortissimi), che la chat dal vivo non usa mai.
+ * avoid: modelli da provare per ultimi (es. quello che ha appena sbagliato un passo: serve un secondo parere).
+ */
+export function rank(db, env, { tier, needsVision = false, promptTokens = 0, preferKey = '', needsActions = false, best = false, avoid = [], ms }) {
   const out = [];
+  const avoidSet = new Set(avoid || []);
   for (const m of loadModels(db)) {
     const p = PROVIDERS[m.provider];
     if (!p || !env[p.env]) continue;
-    if (needsVision ? !m.tiers.includes('vision') : !m.tiers.includes(tier)) continue;
+    const tierOk = needsVision ? m.tiers.includes('vision')
+      : best && tier !== 'fast' ? (m.tiers.includes('deep') || m.tiers.includes('smart'))
+      : m.tiers.includes(tier);
+    if (!tierOk) continue;
     if (promptTokens > m.ctx * 0.9) continue; // il contesto non entra in questo modello
     if (m.tpm && promptTokens > m.tpm * 0.65) continue; // evita di bruciare il TPM al primo colpo con prompt troppo grandi
     const key = modelKey(m);
@@ -118,7 +132,10 @@ export function rank(db, env, { tier, needsVision = false, promptTokens = 0, pre
   // La "coerenza" col modello della sessione non vale per i modelli lite: altrimenti, dopo un solo timeout
   // del modello buono, la chat resta incollata per sempre al modello più debole.
   const score = (c) => (c.status === 'near' ? 1000 : 0) + (c.model.free ? 0 : 500)
-    + (c.key === preferKey && !isLiteModel(c.model) ? -1.5 : 0)
+    + (avoidSet.has(c.key) ? 100 : 0)
+    + (best ? (10 - (c.model.q || 5)) * 2 + (isLiteModel(c.model) ? 6 : 0) + c.model.prio / 100 : 0)
+    + (best ? 0 : scoreLive(c));
+  const scoreLive = (c) => (c.key === preferKey && !isLiteModel(c.model) ? -1.5 : 0)
     + (tier === 'smart' && isHeavyModel(c.model) ? -1.2 : 0)
     + ((needsActions || tier === 'smart') && isLiteModel(c.model) ? 4 : 0)
     + c.model.prio / 10;
@@ -142,10 +159,34 @@ function toAnthropic(model, messages, maxTokens) {
 export const thinks = (m) => /(gpt-oss|deepseek-reasoner|deepseek-r1|thinking|qwq|gemini-(?!.*lite))/i.test(m.model);
 const TIMEOUT_MS = { fast: 14_000, smart: 30_000, vision: 35_000 };
 
-async function callProvider(fetchFn, env, m, messages, maxTokens, tier = 'smart', plain = false) {
+/** Workers AI tramite il binding env.AI: niente chiavi, niente fetch. Accetta sia risposte {response} sia stile OpenAI. */
+async function callWorkersAI(env, m, messages, maxTokens, timeoutMs, plain = false) {
+  const text = (part) => (typeof part === 'string' ? part : (part || []).filter(x => x.type === 'text').map(x => x.text).join('\n'));
+  const input = { messages: messages.map(x => ({ role: x.role, content: text(x.content) })), max_tokens: maxTokens + 1500, temperature: 0.4 };
+  if (!plain) input.reasoning_effort = 'low'; // il default di alcuni modelli è "xhigh": lentissimo e consuma neuroni
+  let timer;
+  try {
+    const data = await Promise.race([
+      env.AI.run(m.model, input),
+      new Promise((_, rej) => { timer = setTimeout(() => rej(Object.assign(new Error('timeout'), { name: 'AbortError' })), timeoutMs); }),
+    ]);
+    const msg = data?.choices?.[0]?.message;
+    const out = typeof data?.response === 'string' ? data.response : (typeof msg?.content === 'string' ? msg.content : '');
+    if (!out.trim()) return { ok: false, status: 502, error: 'risposta vuota', headers: null };
+    return { ok: true, text: out, tokens: data?.usage?.total_tokens || 0, headers: null };
+  } catch (e) {
+    const err = String(e?.message || e);
+    if (!plain && /reasoning|unknown|invalid|schema/i.test(err)) return callWorkersAI(env, m, messages, maxTokens, timeoutMs, true);
+    const status = e?.name === 'AbortError' ? 0 : /429|limit|neuron|quota|exceed/i.test(err) ? 429 : /not found|no such model|5007|unknown model/i.test(err) ? 404 : 500;
+    return { ok: false, status, error: status === 0 ? 'timeout' : err.slice(0, 300), headers: null };
+  } finally { clearTimeout(timer); }
+}
+
+async function callProvider(fetchFn, env, m, messages, maxTokens, tier = 'smart', plain = false, timeoutMs = 0) {
   const p = PROVIDERS[m.provider];
+  if (p.kind === 'cfai') return callWorkersAI(env, m, messages, maxTokens, timeoutMs || TIMEOUT_MS[tier] || 45_000);
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS[tier] || 45_000);
+  const timer = setTimeout(() => controller.abort(), timeoutMs || TIMEOUT_MS[tier] || 45_000);
   try {
     const anth = p.kind === 'anthropic';
     const reasoning = !anth && !plain && thinks(m);
@@ -164,7 +205,7 @@ async function callProvider(fetchFn, env, m, messages, maxTokens, tier = 'smart'
     try { data = JSON.parse(raw); } catch { /* corpo non JSON */ }
     if (!res.ok) {
       // Il provider non accetta "reasoning_effort": si riprova una volta senza, invece di perdere il modello.
-      if (reasoning && (res.status === 400 || res.status === 422)) { clearTimeout(timer); return callProvider(fetchFn, env, m, messages, maxTokens, tier, true); }
+      if (reasoning && (res.status === 400 || res.status === 422)) { clearTimeout(timer); return callProvider(fetchFn, env, m, messages, maxTokens, tier, true, timeoutMs); }
       return { ok: false, status: res.status, error: (data?.error?.message || data?.message || raw || '').toString().slice(0, 300), headers: res.headers };
     }
     const msg = data?.choices?.[0]?.message;
@@ -211,14 +252,14 @@ function blockFor(status, error, fails, headers) {
  * Esegue una richiesta provando i modelli in ordine.
  * build(model) → messages: il contesto viene ricostruito per la finestra di ogni modello provato.
  */
-export async function chat(db, env, { tier = 'fast', needsVision = false, preferKey = '', needsActions = false, build, maxTokens = 1200, fetchFn = fetch, now = Date.now, tz }) {
+export async function chat(db, env, { tier = 'fast', needsVision = false, preferKey = '', needsActions = false, best = false, avoid = [], timeoutMs = 0, build, maxTokens = 1200, fetchFn = fetch, now = Date.now, tz }) {
   const tried = [];
   const attempted = new Set();
   for (let round = 0; round < 8; round++) {
     const ms = now();
-    let candidates = rank(db, env, { tier, needsVision, preferKey, needsActions, ms }).filter(c => !attempted.has(c.key));
+    let candidates = rank(db, env, { tier, needsVision, preferKey, needsActions, best, avoid, ms }).filter(c => !attempted.has(c.key));
     if (!candidates.length && tier === 'smart' && !needsVision) {
-      candidates = rank(db, env, { tier: 'fast', needsVision, preferKey, needsActions, ms }).filter(c => !attempted.has(c.key));
+      candidates = rank(db, env, { tier: 'fast', needsVision, preferKey, needsActions, best, avoid, ms }).filter(c => !attempted.has(c.key));
     }
     if (!candidates.length) break;
     const c = candidates[0];
@@ -228,7 +269,9 @@ export async function chat(db, env, { tier = 'fast', needsVision = false, prefer
     if (promptTokens > c.model.ctx * 0.9) { tried.push(`${c.key}: contesto troppo grande`); continue; }
     if (loadFraction(c.model, usageOf(db, c.key, ms), promptTokens) > 1) { tried.push(`${c.key}: limite token`); continue; }
 
-    const res = await callProvider(fetchFn, env, c.model, messages, maxTokens, needsVision ? 'vision' : tier);
+    // Un modello "deep" pensa a lungo: in background gli si concede più tempo.
+    const slow = best && c.model.tiers.includes('deep') && !c.model.tiers.includes('fast');
+    const res = await callProvider(fetchFn, env, c.model, messages, maxTokens, needsVision ? 'vision' : tier, false, timeoutMs || (slow ? 120_000 : best ? 60_000 : 0));
     const st = stateOf(db, c.key);
     if (res.ok) {
       addUsage(db, c.key, ms, res.tokens || promptTokens + estimateTokens(res.text));
@@ -261,7 +304,7 @@ export function status(db, env, ms) {
     const st = stateOf(db, key);
     const u = usageOf(db, key, ms);
     return {
-      key, provider: m.provider, model: m.model, tiers: m.tiers, free: m.free, prio: m.prio, ctx: m.ctx,
+      key, provider: m.provider, model: m.model, tiers: m.tiers, free: m.free, prio: m.prio, q: m.q || 0, ctx: m.ctx,
       configured: !!env[PROVIDERS[m.provider].env], envName: PROVIDERS[m.provider].env,
       load: Math.round(loadFraction(m, u) * 100), requestsToday: u.day.requests, tokensToday: u.day.tokens,
       limits: { rpm: m.rpm, rpd: m.rpd, tpm: m.tpm, tpd: m.tpd },
