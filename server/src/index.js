@@ -10,6 +10,7 @@ import * as jarvisCore from './jarvis_core.js';
 import { PROVIDERS } from './models.js';
 import { forwardToBrain } from './forward.js';
 import * as semantic from './semantic.js';
+import * as coder from './coder.js';
 
 function sameToken(a, b) {
   const x = new TextEncoder().encode(String(a)), y = new TextEncoder().encode(String(b));
@@ -68,10 +69,13 @@ export class JarvisDO extends DurableObject {
     const pulse = jarvisCore.selfInterrogate(this.db, this.env, Date.now(), deps.tz);
     const nextDue = agenda.fireDue(this.db, Date.now(), deps.tz);
     const delay = await jobs.advance(this.db, this.env, deps);
+    // Modifiche al server in prova: si guarda l'esito dei test su GitHub ogni minuto finché non è chiaro.
+    let codeWait = false;
+    try { codeWait = await coder.checkTests(this.db, this.env, deps); } catch { /* riprova al prossimo battito */ }
     // Impronte di significato dei ricordi che non ce l'hanno ancora (40 per battito, una scrittura ciascuno).
     try { await semantic.backfill(this.db, this.env, deps.fetchFn, 40); } catch { /* riprova al prossimo battito */ }
     // Battito: anche senza promemoria o compiti, Kestra si risveglia ogni 15 minuti per il motore di iniziativa.
-    const candidates = [nextDue, pulse?.nextTimed, delay != null ? Date.now() + delay : null, Date.now() + 15 * 60_000].filter(x => x != null);
+    const candidates = [nextDue, pulse?.nextTimed, delay != null ? Date.now() + delay : null, codeWait ? Date.now() + 60_000 : null, Date.now() + 15 * 60_000].filter(x => x != null);
     if (candidates.length) await this.ctx.storage.setAlarm(Math.max(Math.min(...candidates), Date.now() + 100));
     // I conti delle scritture si salvano al massimo ogni 15 minuti (2 righe), così sopravvivono ai riavvii.
     if (Date.now() - (this.statsSavedAt || 0) > 14 * 60_000) {

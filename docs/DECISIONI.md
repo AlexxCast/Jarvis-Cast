@@ -605,3 +605,18 @@ modello solo per "Kestra".
 - **Compiti affidabili** (`jobs.js`): il pianificatore fa almeno un passo per ogni richiesta e scrive un criterio "fatto bene se". Ogni passo smart (o con azioni, o di codice) passa da un revisore su un altro modello: se boccia, il passo si rifà con le critiche e con un modello diverso (massimo 3 tentativi). Le azioni vere del passo (blocco ```azioni: promemoria, ricordi, diario, dispensa, note, PC) partono solo dopo il via libera, così un tentativo scartato non lascia doppioni. Un passo può chiedere internet scrivendo `CERCA:` o `LEGGI:` (massimo 2 volte). Alla fine un revisore confronta il compito con quanto fatto e aggiunge, una volta sola, i passi dimenticati. L'avviso finale dice cosa è stato fatto e cosa no.
 - **Telefono**: un compito in background non usa il telefono da solo (servono conferme e lo schermo sbloccato). L'azione resta in kv `phonePending` per 15 minuti e arriva un avviso "mi serve il telefono"; il Capo risponde "fallo".
 - In chat, una frase con più richieste: quelle immediate tutte nelle actions, quelle lunghe in UN solo `start_job` con l'elenco numerato (regola in `context.js`).
+
+## Kestra modifica anche il server, solo con test verdi e approvazione (19/11/2026)
+- Richiesta del Capo: Kestra deve poter migliorare da sola anche come lavora, senza rischi.
+- `coder.js`: oltre a `web/` il modello può chiedere (`{"need": [...]}`, max 4) e modificare i file di `server/src/`. Usa il modello più forte (`best`).
+- **Regole che il codice fa rispettare** (`applyEdits`):
+  - **File protetti**: `coder.js` (così non si toglie i limiti da sola), `db.js` (i dati), `index.js` (il token), `api.js`, `forward.js` e `test/helpers.js`.
+  - **Pezzi di sicurezza**: nomi come `CLAIM_WORDS`, `guardMove`, `holdEmergencyCall`, `phonePending` e `sameToken` non possono comparire meno volte dopo la modifica.
+  - **Test**: ogni modifica al server deve creare un test nuovo `server/test/kestra-<nome>.test.js`. I test esistenti non si toccano.
+- **Ciclo dei test**: una modifica al server passa in stato `testing`. Il battito del Durable Object (`coder.checkTests`, ogni minuto finché serve) legge il controllo "Server e web (test)" del ramo su GitHub; "Workers Builds" si ignora perché sui rami fallisce sempre.
+  - Se i test passano, la modifica diventa `ready` e arriva l'avviso "dimmi approva".
+  - Se falliscono, Kestra legge il registro dei test (`actions/jobs/<id>/logs`), corregge sullo stesso ramo e riprova, al massimo 2 volte (`FIX_ROUNDS`). Poi la modifica diventa `failed` e non va mai online.
+  - Se dopo 40 minuti i test non sono ancora partiti, la modifica diventa `failed`.
+- **Approvazione**: una modifica in prova non si approva. Nell'app la scheda mostra i file cambiati e il bottone "Vedi le modifiche", che apre la PR su GitHub. Per le modifiche al server non c'è un'anteprima visiva.
+- **Annulla** (`code_revert`, `POST /api/code/<id>/revert`): rimette i file com'erano al commit di partenza (colonna `base`), cancella i file nuovi (`created_files`) e unisce subito, perché l'ha chiesto il Capo.
+- **Permessi del `GITHUB_TOKEN`**: oltre a Contents e Pull requests (lettura e scrittura) servono "Checks: Read" e, per leggere gli errori dei test, "Actions: Read". Senza "Checks" la modifica si ferma con un messaggio chiaro.

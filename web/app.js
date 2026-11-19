@@ -626,7 +626,7 @@ function codeBanner() {
   const items = store.state?.code || [];
   if (!items.length) return null;
   // Mentre Jarvis lavora, ricontrolla ogni 10 secondi finché l'anteprima è pronta.
-  if (items.some(c => c.status === 'working') && !store.codePoll) {
+  if (items.some(c => c.status === 'working' || c.status === 'testing') && !store.codePoll) {
     store.codePoll = setTimeout(async () => { store.codePoll = 0; try { await refresh(); render(); } catch { /* riprova al prossimo giro */ } }, 10000);
   }
   const op = (id, what) => guard(async () => {
@@ -634,11 +634,20 @@ function codeBanner() {
     render();
     toast(what === 'approve' ? 'Approvata: sarà online tra un paio di minuti.' : 'Modifica scartata.');
   });
+  // Modifiche al server: niente anteprima visiva, si vedono i file cambiati e l'esito dei test.
+  const server = (c) => c.area === 'server';
   return h('div', { class: 'codebar' }, items.map(c => c.status === 'working'
     ? h('div', { class: 'banner' }, h('b', {}, 'Sto preparando la modifica'), h('p', { class: 'muted small' }, c.request))
-    : h('div', { class: 'banner' }, h('b', {}, 'Modifica pronta'), h('p', { class: 'small' }, c.summary || c.request),
+    : c.status === 'testing'
+      ? h('div', { class: 'banner' }, h('b', {}, 'Sto provando la modifica con i test'), h('p', { class: 'small' }, c.summary || c.request),
+        h('p', { class: 'muted small' }, `Cambia: ${(c.files || []).join(', ')}${c.attempts ? ` · ${c.attempts} correzioni dopo i test` : ''}`),
+        h('div', { class: 'row wrap' }, h('button', { class: 'btn ghost danger', onclick: op(c.id, 'discard') }, 'Scarta')))
+    : h('div', { class: 'banner' }, h('b', {}, server(c) ? 'Modifica pronta: test superati' : 'Modifica pronta'), h('p', { class: 'small' }, c.summary || c.request),
+      server(c) ? h('p', { class: 'muted small' }, `Cambia come lavora Kestra: ${(c.files || []).join(', ')}`) : null,
       h('div', { class: 'row wrap' },
-        h('button', { class: 'btn primary', onclick: () => { location.href = `/preview/${c.id}/`; } }, 'Anteprima'),
+        server(c)
+          ? h('button', { class: 'btn', onclick: () => window.open(`https://github.com/${store.state?.repo || 'AlexxCast/Jarvis-Cast'}/pull/${c.pr}/files`, '_blank') }, 'Vedi le modifiche')
+          : h('button', { class: 'btn primary', onclick: () => { location.href = `/preview/${c.id}/`; } }, 'Anteprima'),
         h('button', { class: 'btn', onclick: op(c.id, 'approve') }, 'Approva'),
         h('button', { class: 'btn ghost danger', onclick: op(c.id, 'discard') }, 'Scarta')))));
 }
