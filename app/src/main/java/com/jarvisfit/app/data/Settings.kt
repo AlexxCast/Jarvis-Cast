@@ -55,6 +55,11 @@ object Settings {
         get() = prefs.getBoolean("cloud_prompt_seen", false)
         set(v) = prefs.edit().putBoolean("cloud_prompt_seen", v).apply()
 
+    /** Riconoscimento forte della parola "Kestra" (modello offline che cerca solo quel suono). */
+    var strongWake: Boolean
+        get() = prefs.getBoolean("strong_wake", true)
+        set(v) = prefs.edit().putBoolean("strong_wake", v).apply()
+
     /** Se attivo, Jarvis lascia il microfono quando un'altra app registra (Gemini, vocali, chiamate). */
     var micGuard: Boolean
         get() = prefs.getBoolean("mic_guard", true)

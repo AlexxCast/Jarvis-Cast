@@ -8,7 +8,7 @@ Garmin, Amazfit, Huawei e simili durano più giorni ma non possono caricare un'a
 ## Installazione (una volta sola)
 L'APK è qui: https://github.com/AlexxCast/Jarvis-Cast/releases/download/apk-latest/Kestra-orologio.apk
 
-1. Aggiorna l'app del telefono (`Jarvis.apk`, versione 2.35 o successiva), installandola **sopra** quella vecchia come sempre.
+1. Aggiorna l'app del telefono (`Jarvis.apk`, versione 2.36 o successiva), installandola **sopra** quella vecchia come sempre.
 2. Sull'orologio: Impostazioni › Sistema › Info › tocca 7 volte "Numero build" per attivare le Opzioni sviluppatore. Poi in Opzioni sviluppatore attiva "Debug ADB" e "Debug wireless".
 3. Installa l'APK sull'orologio, in uno di questi due modi:
    - **dal PC:** in "Debug wireless" tocca "Associa nuovo dispositivo" e sul PC esegui `adb pair IP:PORTA` con il codice mostrato, poi `adb connect IP:PORTA` e `adb install Kestra-orologio.apk`;

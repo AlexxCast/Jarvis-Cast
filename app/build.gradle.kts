@@ -13,8 +13,8 @@ android {
         applicationId = "com.jarvisfit.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 37
-        versionName = "2.35"
+        versionCode = 38
+        versionName = "2.36"
     }
 
     // In GitHub Actions la chiave del PC arriva dal segreto DEBUG_KEYSTORE_B64 (vedi build-apk.yml):
@@ -44,6 +44,8 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
+    // Modello della parola "Kestra" (scaricato da scripts/fetch_kws.sh): letto direttamente dagli asset.
+    androidResources { noCompress += listOf("onnx") }
 }
 
 dependencies {

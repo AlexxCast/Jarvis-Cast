@@ -323,7 +323,36 @@ class JarvisService : LifecycleService(), SensorEventListener {
     private fun stopSession(cancel: Boolean) {
         sessionActive = false
         guard?.sessionStopped()
+        if (KestraKws.running) KestraKws.stop()
         runCatching { if (cancel) recognizer?.cancel() else recognizer?.stopListening() }
+    }
+
+    /**
+     * Ascolto "forte" della parola Kestra (modello offline che cerca solo quel suono). Non prende il fuoco audio,
+     * quindi ascolta anche con la musica accesa. Ritorna false se non è disponibile: si usa il riconoscitore di Android.
+     */
+    private fun startStrongWake(): Boolean {
+        if (!Settings.strongWake) return false
+        commandSession = false
+        sessionActive = true
+        lastRecognizerActivityMs = System.currentTimeMillis()
+        guard?.sessionStarted()
+        val ok = KestraKws.start(this, Settings.sensitivity,
+            onWake = { main.post { onStrongWake() } },
+            onError = { main.post { if (sessionActive && !busy) { sessionActive = false; guard?.sessionStopped(); restartWakeWordDelayed(800) } } },
+        )
+        if (!ok) { sessionActive = false; guard?.sessionStopped() }
+        return ok
+    }
+
+    private fun onStrongWake() {
+        if (busy || yielded) return
+        sessionActive = false
+        guard?.sessionStopped()
+        JarvisState.partial.value = "Kestra"
+        // Il microfono passa al riconoscimento della richiesta: niente saluto lungo, chi dice
+        // "Kestra, che ore sono" tutto d'un fiato non deve aspettare.
+        onWakeWordDetected("", quick = true)
     }
 
     /**
@@ -346,7 +375,8 @@ class JarvisService : LifecycleService(), SensorEventListener {
                         runCatching { recognizer?.destroy() }
                         recognizer = null
                         startWakeWord()
-                    } else if (!busy && !yielded && now - lastRecognizerActivityMs > 15_000L) {
+                    } else if (!busy && !yielded && now - (if (KestraKws.running) KestraKws.lastAliveMs else lastRecognizerActivityMs) > 15_000L) {
+                        KestraKws.stop()
                         sessionActive = false
                         guard?.sessionStopped()
                         runCatching { recognizer?.destroy() }
@@ -387,6 +417,11 @@ class JarvisService : LifecycleService(), SensorEventListener {
             if (Speaker.isSpeaking()) {
                 restartWakeWordDelayed(500)
                 return@post
+            }
+            // Riconoscimento forte della parola: non disturba la musica e non dipende dal vocabolario.
+            if (!PhoneAgent.running && KestraKws.ready(this)) {
+                if (!micFreeOrYield { startWakeWord() }) return@post
+                if (startStrongWake()) return@post
             }
             // Mentre un'app musicale (es. Joytify) riproduce musica o PhoneAgent sta lavorando,
             // non avviare continuamente lo SpeechRecognizer altrimenti Android ruba l'audio focus e mette in pausa la musica!
@@ -618,8 +653,9 @@ class JarvisService : LifecycleService(), SensorEventListener {
         return wakeGreetings[idx]
     }
 
-    private fun onWakeWordDetected(remainingCommand: String, openApp: Boolean = true) {
+    private fun onWakeWordDetected(remainingCommand: String, openApp: Boolean = true, quick: Boolean = false) {
         if (busy) return
+        if (KestraKws.running) KestraKws.stop()
         // Ferma immediatamente qualsiasi discorso del TTS per non ascoltare se stesso
         Speaker.stop()
         busy = true
@@ -660,6 +696,9 @@ class JarvisService : LifecycleService(), SensorEventListener {
         if (remainingCommand.isNotBlank()) {
             tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 90)
             main.postDelayed({ process(remainingCommand) }, 250)
+        } else if (quick) {
+            tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 90)
+            main.postDelayed({ listenForCommand() }, 200)
         } else if (Settings.speakReplies) {
             val greet = nextWakeGreeting()
             lastSpokenText = greet
