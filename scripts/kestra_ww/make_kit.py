@@ -35,7 +35,13 @@ HF = "https://huggingface.co/rhasspy/piper-voices/resolve/main"
 cat = json.load(open(get(f"{HF}/voices.json", f"{OUT}/voices.json")))
 want_lang = ("it", "es", "pt", "ro", "ca")
 picked = [k for k, v in cat.items() if v["language"]["family"] in want_lang and v["quality"] in ("medium", "low", "x_low")]
-picked = sorted(picked, key=lambda k: (cat[k]["language"]["family"] != "it", k))[:12] + ["en_US-libritts_r-medium"]
+# tutte le italiane, poi una per lingua a turno (spagnolo, portoghese, catalano, rumeno...), più l'inglese a 900 voci
+it = sorted(k for k in picked if cat[k]["language"]["family"] == "it")
+rest = sorted((k for k in picked if cat[k]["language"]["family"] != "it"), key=lambda k: (cat[k]["language"]["code"], k))
+by = {}
+for k in rest: by.setdefault(cat[k]["language"]["family"], []).append(k)
+mix = [k for grp in zip(*[v + [None] * 20 for v in by.values()]) for k in grp if k]
+picked = (it + mix)[:16] + ["en_US-libritts_r-medium"]
 print("voci:", picked, flush=True)
 
 from piper import PiperVoice  # noqa: E402
@@ -92,32 +98,33 @@ SENT = ["questa sera vado al cinema con gli amici", "gira a destra al prossimo i
         "the weather is nice today", "turn left at the next street", "this is an extra large pizza", "what time is it"]
 
 
-def far_and_noisy(x):
-    """Voce vicina o lontana, con rumore, e guadagno automatico come nell'app (fino a x5, limitatore morbido)."""
-    gain = 10 ** (rng.uniform(-38, 0) / 20)
-    y = x * gain
-    noise = rng.normal(0, 1, len(y)).astype(np.float32)
+def agc(y):
+    """Guadagno automatico come nell'app: porta il pezzo da 100 ms più forte a 0,08 (al massimo x5), limitatore morbido."""
+    peak = max(np.sqrt(np.mean(y[i:i + 1600] ** 2)) for i in range(0, len(y) - 1599, 1600))
+    return np.tanh(y * min(5.0, max(1.0, 0.08 / (peak + 1e-9))))
+
+
+def noise(n):
+    z = rng.normal(0, 1, n).astype(np.float32)
     if rng.random() < 0.5:  # rumore rosa (più simile a stanza, ventola, TV lontana)
-        f = np.fft.rfft(noise); f /= np.sqrt(np.arange(1, len(f) + 1)); noise = np.fft.irfft(f, len(noise)).astype(np.float32)
-    noise /= np.sqrt(np.mean(noise ** 2)) + 1e-9
-    snr = rng.uniform(5, 40)
-    rms = np.sqrt(np.mean(y ** 2)) + 1e-9
-    y = y + noise * rms / 10 ** (snr / 20)
-    g = min(5.0, max(1.0, 0.08 / (np.sqrt(np.mean(y ** 2)) + 1e-9)))
-    return np.tanh(y * g)
+        f = np.fft.rfft(z); f /= np.sqrt(np.arange(1, len(f) + 1)); z = np.fft.irfft(f, n).astype(np.float32)
+    return z / (np.sqrt(np.mean(z ** 2)) + 1e-9)
 
 
-def place(x, end_gap):
-    """Mette la clip in 2 s di audio in modo che finisca [end_gap] campioni prima della fine."""
+def realistic(x, end_gap, after=None):
+    """Mette la voce in 2,08 s di stanza: finisce [end_gap] campioni prima della fine, con rumore su TUTTA la finestra
+    (mai silenzio digitale, che il telefono non sente mai), voce vicina o lontana e guadagno automatico.
+    [after]: parlato che segue subito (\"Kestra, accendi la luce\"), nei campioni dopo la parola."""
+    gain = 10 ** (rng.uniform(-38, 0) / 20)
+    sp = x * gain; rms = np.sqrt(np.mean(sp ** 2)) + 1e-9
     out = np.zeros(CLIP, np.float32)
-    x = x[-(CLIP - end_gap):]
-    out[CLIP - end_gap - len(x):CLIP - end_gap] = x
-    return out
-
-
-def feats(x):
-    f = FE.clip_features((np.clip(x, -1, 1) * 32767).astype(np.int16))
-    return None if f is None else f.astype(np.float16)
+    sp = sp[-(CLIP - end_gap):]
+    out[CLIP - end_gap - len(sp):CLIP - end_gap] = sp
+    if after is not None and end_gap > 0:
+        a = after[: end_gap] * gain
+        out[CLIP - end_gap:CLIP - end_gap + len(a)] += a
+    out += noise(CLIP) * rms / 10 ** (rng.uniform(5, 40) / 20)
+    return agc(out)
 
 
 pos, neg, posmeta = [], [], []
@@ -127,33 +134,41 @@ for key in picked:
     fam = cat[key]["language"]["family"]
     spks = list(range(nspk)) if nspk <= 4 else random.sample(range(nspk), 160)
     npos = 700 if fam == "it" else (1400 if nspk > 4 else 220)
+    rnd = lambda: (rng.uniform(0.75, 1.35), rng.uniform(0.4, 0.9), rng.uniform(0.5, 1.0))
+    # qualche frase di questa voce, per il parlato che segue il nome ("Kestra, che ore sono")
+    tails = [say(voice, random.choice(SENT), random.choice(spks), *rnd()) for _ in range(12)]
     for i in range(npos):
         t = random.choice(POS_TXT.get(fam, ["Kestra"]))
-        x = say(voice, t, random.choice(spks), rng.uniform(0.75, 1.35), rng.uniform(0.4, 0.9), rng.uniform(0.5, 1.0))
-        f = feats(place(far_and_noisy(x), int(rng.uniform(0, 0.25) * SR)))
+        x = say(voice, t, random.choice(spks), *rnd())
+        after = random.choice(tails)[800:] if random.random() < 0.4 else None
+        f = feats(realistic(x, int(rng.uniform(0, 0.25) * SR), after))
         if f is not None:
             pos.append(f); posmeta.append(key)
         # la stessa parola tagliata a metà ("Kes...") è un NEGATIVO: deve aspettare il nome intero
         if i % 4 == 0:
             cut = x[: int(len(x) * rng.uniform(0.35, 0.6))]
-            f = feats(place(far_and_noisy(cut), int(rng.uniform(0, 0.2) * SR)))
+            f = feats(realistic(cut, int(rng.uniform(0, 0.2) * SR)))
             if f is not None: neg.append(f)
-    nneg = 900 if fam == "it" else (1000 if nspk > 4 else 150)
+        # il nome detto e finito da più di mezzo secondo non deve far scattare di nuovo
+        if i % 6 == 0:
+            f = feats(realistic(x, int(rng.uniform(0.6, 1.0) * SR)))
+            if f is not None: neg.append(f)
+    nneg = 1500 if fam == "it" else (1200 if nspk > 4 else 200)
     for i in range(nneg):
-        t = random.choice(CONF) if (fam == "it" and random.random() < 0.5) else random.choice(SENT + CONF)
-        x = say(voice, t, random.choice(spks), rng.uniform(0.75, 1.35), rng.uniform(0.4, 0.9), rng.uniform(0.5, 1.0))
-        x = far_and_noisy(x)
-        # finestra di 2 s in un punto qualunque della frase
+        t = random.choice(CONF) if (fam == "it" and random.random() < 0.4) else random.choice(SENT + CONF)
+        if random.random() < 0.3: t = t + " " + random.choice(SENT)
+        x = say(voice, t, random.choice(spks), *rnd())
+        # finestra in un punto qualunque della frase
         if len(x) > CLIP:
-            s = rng.integers(0, len(x) - CLIP); x = x[s:s + CLIP]
-        f = feats(place(x, int(rng.uniform(0, 0.6) * SR)))
+            s0 = rng.integers(0, len(x) - CLIP // 2); x = x[s0:s0 + CLIP]
+        f = feats(realistic(x, int(rng.uniform(0, 0.6) * SR)))
         if f is not None: neg.append(f)
     print(f"{key}: positivi {len(pos)} negativi {len(neg)} ({time.time() - t0:.0f}s)", flush=True)
     del voice
 
 # solo rumore e silenzio
 for i in range(1500):
-    x = far_and_noisy(rng.normal(0, rng.uniform(0.0005, 0.05), CLIP).astype(np.float32))
+    x = agc(noise(CLIP) * rng.uniform(0.0005, 0.05))
     f = feats(x)
     if f is not None: neg.append(f)
 
