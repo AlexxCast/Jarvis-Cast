@@ -144,7 +144,8 @@ class JarvisBridge(
         }
         if (k.detections > 0) {
             val at = java.text.SimpleDateFormat("HH:mm", java.util.Locale.ITALY).format(java.util.Date(k.lastWakeAtMs))
-            parts += "Ha sentito \"Kestra\" ${k.detections} ${if (k.detections == 1) "volta" else "volte"}, l'ultima alle $at."
+            parts += "Ha sentito \"Kestra\" ${k.detections} ${if (k.detections == 1) "volta" else "volte"}, l'ultima alle $at" +
+                (if (k.emptyWakes > 0) " (${k.emptyWakes} senza nessuna richiesta dopo)." else ".")
         } else if (Settings.strongWake) parts += "Non ha ancora sentito \"Kestra\" da quando il telefono è acceso."
         if (k.lastError.isNotBlank()) parts += "Ultimo problema: ${k.lastError}."
         return parts.joinToString(" ")

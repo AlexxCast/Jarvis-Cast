@@ -686,6 +686,9 @@ class JarvisService : LifecycleService(), SensorEventListener {
         followupTurn = false
         ignoredFollowups = 0
         lastConversationActivityTime = System.currentTimeMillis()
+        // Finché non arriva la prima richiesta la "conversazione" non è aperta davvero: se dopo il nome c'è
+        // silenzio si torna subito ad aspettare (prima restava 45 s a riaprire il microfono, con un bip ogni volta).
+        firstCommandPending = remainingCommand.isBlank()
 
         // 0. Ricorda se il telefono era a schermo spento o bloccato PRIMA di risvegliare lo schermo:
         // così Jarvis chiede la password solo a telefono spento/bloccato, e mai a telefono già acceso e sbloccato.
@@ -862,6 +865,13 @@ class JarvisService : LifecycleService(), SensorEventListener {
 
     private fun handleSilence() {
         if (yielded) return
+        if (firstCommandPending) {
+            // Nome sentito ma nessuna richiesta: probabile falso allarme (TV, parola simile). Niente conversazione.
+            firstCommandPending = false
+            KestraKws.emptyWakes++
+            backToWaiting()
+            return
+        }
         if (inConversationMode) {
             val elapsed = System.currentTimeMillis() - lastConversationActivityTime
             if (elapsed > CONVERSATION_TIMEOUT_MS) {
@@ -884,6 +894,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
     }
 
     private var awaitingPassphrase = false
+    private var firstCommandPending = false
     private var pendingDeviceActions: List<Pair<String, String>> = emptyList()
     private var pendingReplyText: String = ""
 
@@ -918,6 +929,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
     // ---------------------------------------------------------------- brain
 
     private fun process(text: String) {
+        firstCommandPending = false
         if (VoiceText.isCancelPhrase(text.trim())) {
             inConversationMode = false
             awaitingPassphrase = false

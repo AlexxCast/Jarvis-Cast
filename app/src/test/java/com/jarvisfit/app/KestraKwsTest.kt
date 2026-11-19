@@ -16,6 +16,18 @@ class KestraKwsTest {
         // Sempre un punteggio vero (0..1) e mai così basso da scattare con ogni parola simile.
         assertTrue(KestraKws.threshold(0f) < 1f && KestraKws.threshold(1f) >= 0.3f)
         assertEquals(KestraKws.threshold(1f), KestraKws.threshold(5f), 0f)
+        // Anche ad Alta (0,88, quella predefinita) non sotto 0,75: a 0,69 scattava con orchestra, finestra e la TV.
+        assertTrue(KestraKws.threshold(0.88f) >= 0.75f)
+    }
+
+    @Test
+    fun `un picco isolato non basta, servono punteggi alti di fila`() {
+        var run = 0
+        for (s in floatArrayOf(0.95f, 0.2f, 0.96f, 0.1f)) run = KestraKws.streak(run, s, 0.8f)
+        assertEquals(0, run)
+        run = 0
+        for (s in floatArrayOf(0.3f, 0.9f, 0.97f)) run = KestraKws.streak(run, s, 0.8f)
+        assertTrue(run >= KestraKws.CONSECUTIVE)
     }
 
     @Test
