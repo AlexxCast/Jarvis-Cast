@@ -1,0 +1,35 @@
+name: Kit di addestramento "Kestra"
+
+# Sintetizza migliaia di esempi di "Kestra" e di frasi che non lo sono e ne estrae i vettori di suoni.
+# Il risultato (kit.npz + estrattore) va nella release "kestra-kit": l'addestramento con la voce di Alessio
+# avviene fuori dal repository, così le sue registrazioni non ci finiscono mai.
+on:
+  workflow_dispatch:
+  push:
+    branches: ['claude/**']
+    paths: ['scripts/kestra_ww/make_kit.py', 'scripts/kestra_ww/features.py', '.github/workflows/kestra-kit.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  kit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -q numpy onnxruntime "piper-tts>=1.3"
+      - run: cd scripts/kestra_ww && python make_kit.py "$RUNNER_TEMP/kit"
+      - name: Pubblica il kit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd "$RUNNER_TEMP/kit"
+          ls -la
+          gh release view kestra-kit -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create kestra-kit -R "$GITHUB_REPOSITORY" --prerelease --title "Kit addestramento Kestra" \
+              --notes "Vettori di suoni sintetici per addestrare il riconoscimento di Kestra (nessuna registrazione reale)."
+          gh release upload kestra-kit -R "$GITHUB_REPOSITORY" --clobber kit.npz melspectrogram.onnx embedding_model.onnx
