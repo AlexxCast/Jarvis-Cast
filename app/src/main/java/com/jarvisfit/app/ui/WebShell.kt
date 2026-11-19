@@ -411,6 +411,7 @@ fun WebShell(onDisconnect: () -> Unit) {
 @Composable
 fun CloudSetupDialog(onDismiss: () -> Unit, onConnected: () -> Unit) {
     val scope = rememberCoroutineScope()
+    val context = LocalContext.current
     var url by remember { mutableStateOf(Settings.serverUrl) }
     var token by remember { mutableStateOf(Settings.serverToken) }
     var message by remember { mutableStateOf("") }
@@ -453,6 +454,7 @@ fun CloudSetupDialog(onDismiss: () -> Unit, onConnected: () -> Unit) {
                         if (error == null) {
                             Settings.serverUrl = clean
                             Settings.serverToken = token
+                            com.jarvisfit.app.device.WatchLink.publishConfig(context)
                             onConnected()
                         } else {
                             message = "Collegamento non riuscito: $error"

@@ -492,3 +492,13 @@ Anche con la 2.34 il Capo doveva chiamarla molte volte. Il riconoscimento di And
   opposta (punte esterne strette); la punta centrale parte dalle ginocchia. Aggiornati insieme: `web/logo.png` e
   `app/.../drawable/logo.png` (icona dell'app), `ic_launcher.xml`, il simbolo nel popup (`overlay.js`) e
   nell'HUD del PC (`jarvis_desktop.py`).
+
+### Kestra sull'orologio Wear OS (modulo `wear/`, app telefono 2.40, 2026-11-19)
+Richiesta del Capo: con il telefono sul comodino e lui alla scrivania doveva gridare. Vuole un'app sull'orologio che si apre con un tocco o un tasto e poi resta in background. Non serve cambiare il sistema dell'orologio.
+- **Perché Wear OS:** è l'unico sistema da polso dove un'app può ascoltare, usare internet e parlare. Garmin, Amazfit e simili durano di più ma non caricano app così. Serve Wear OS 3 o successivo (Galaxy Watch 4+, Pixel Watch, TicWatch...).
+- **Come funziona:** aprire l'app fa partire subito l'ascolto (vibrazione breve). La frase va a `/api/chat` dello stesso server, con la sessione `main`, così la conversazione continua quella del telefono. La risposta si sente dall'altoparlante dell'orologio; senza altoparlante si legge e vibra. Poi resta in ascolto per il seguito (`followup`, come sul telefono). Se non parli più, si chiude da sola per non consumare batteria. Abbassare il polso non la ferma: è un servizio in primo piano col microfono.
+- **Niente parola d'attivazione sull'orologio:** ascoltare sempre scaricherebbe la batteria in poche ore. Si apre col tocco o col tasto dell'orologio.
+- **Indirizzo e token arrivano dal telefono** (Wear Data Layer, `WatchLink.publishConfig`). Per questo l'app dell'orologio ha lo stesso `applicationId` `com.jarvisfit.app` e la stessa firma: Google lascia parlare solo app identiche su dispositivi associati. Il workflow "Build APK" pubblica `Kestra-orologio.apk` solo se anche la sua firma è quella giusta.
+- **Azioni sul telefono dall'orologio** (apri app, link, usa il telefono, chiama): l'orologio le manda al telefono (`/kestra/device`), che le fa con le stesse regole della voce. Se serve la parola d'ordine, l'orologio la chiede e il telefono la controlla. Le conferme del controllo del telefono restano. Se il telefono non risponde, l'orologio dice che non l'ha fatto (mai una promessa a vuoto). I comandi per il PC passano già dal server e funzionano anche dall'orologio.
+- **Riconoscimento vocale:** quello di sistema in background (`SpeechRecognizer`). Sugli orologi che non lo hanno si usa la finestra vocale del sistema e la conversazione non continua da sola.
+- Guida all'installazione: `docs/OROLOGIO.md`.

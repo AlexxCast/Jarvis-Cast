@@ -14,3 +14,4 @@ dependencyResolutionManagement {
 }
 rootProject.name = "JarvisFit"
 include(":app")
+include(":wear")
