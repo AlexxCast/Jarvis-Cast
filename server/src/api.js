@@ -61,7 +61,7 @@ function statePayload(db, ms, tz, env = {}) {
     legacyImported: kvGet(db, 'legacyImported', null),
     layout: ui.loadLayout(db),
     mood: mood.current(db, ms),
-    code: coder.enabled(env) ? coder.listProposals(db).filter(x => ['working', 'ready'].includes(x.status)) : null,
+    code: coder.enabled(env) ? coder.listProposals(db).filter(x => ['working', 'ready', 'testing'].includes(x.status)) : null,
   };
 }
 
@@ -218,9 +218,9 @@ export async function handleApi(db, env, deps, request) {
       deps.defer ? deps.defer(coder.work(db, env, deps, id)) : await coder.work(db, env, deps, id);
       return json({ id, state: statePayload(db, ms, tz, env) });
     }
-    const codeOp = /^\/api\/code\/([a-z0-9]+)\/(approve|discard)$/.exec(path);
+    const codeOp = /^\/api\/code\/([a-z0-9]+)\/(approve|discard|revert)$/.exec(path);
     if (codeOp && method === 'POST') {
-      await (codeOp[2] === 'approve' ? coder.approve : coder.discard)(db, env, deps, codeOp[1]);
+      await ({ approve: coder.approve, discard: coder.discard, revert: coder.revert })[codeOp[2]](db, env, deps, codeOp[1]);
       return json({ ok: true, state: statePayload(db, ms, tz, env) });
     }
     if (path === '/api/graph' && method === 'GET') {
