@@ -127,6 +127,11 @@ def realistic(x, end_gap, after=None):
     return agc(out)
 
 
+def feats(x):
+    f = FE.clip_features((np.clip(x, -1, 1) * 32767).astype(np.int16))
+    return None if f is None else f.astype(np.float16)
+
+
 pos, neg, posmeta = [], [], []
 t0 = time.time()
 for key in picked:
