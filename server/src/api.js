@@ -21,6 +21,7 @@ import * as coder from './coder.js';
 import * as mood from './mood.js';
 import * as jobs from './jobs.js';
 import * as router from './router.js';
+import * as accounts from './accounts.js';
 import { sanitizeModels, DEFAULT_MODELS, PROVIDERS } from './models.js';
 import { today as todayOf, nowIso as nowIsoOf } from './clock.js';
 
@@ -201,6 +202,38 @@ export async function handleApi(db, env, deps, request) {
       return json({ ok: true, meals: merged.meals.length, activities: merged.activities.length, weights: merged.weights.length, state: statePayload(db, ms, tz, env) });
     }
 
+    // Account collegati (Google, Microsoft, calendari .ics): mai i segreti verso l'app.
+    if (path === '/api/accounts' && method === 'GET') {
+      return json({ accounts: accounts.listAccounts(db), ready: { google: !!(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET), microsoft: !!(env.MS_CLIENT_ID && env.MS_CLIENT_SECRET), key: !!env.ACCOUNTS_KEY },
+        redirect: { google: accounts.redirectUri(url.origin, 'google'), microsoft: accounts.redirectUri(url.origin, 'microsoft') } });
+    }
+    if (path === '/api/accounts/connect' && method === 'POST') {
+      const b = await body(request);
+      try { return json({ url: accounts.startConnect(db, env, { provider: String(b.provider || ''), origin: url.origin, ms, hint: String(b.hint || '').slice(0, 120) }) }); }
+      catch (e) { return bad(e.message, 400); }
+    }
+    if (path === '/api/accounts/ics' && method === 'POST') {
+      const b = await body(request);
+      try { return json(await accounts.addIcs(db, env, { url: String(b.url || ''), label: String(b.label || ''), ms })); } catch (e) { return bad(e.message, 400); }
+    }
+    const accOne = /^\/api\/accounts\/(.+)$/.exec(path);
+    if (accOne && method === 'DELETE') { accounts.removeAccount(db, decodeURIComponent(accOne[1])); return json({ ok: true }); }
+    if (accOne && method === 'PATCH') { const b = await body(request); accounts.renameAccount(db, decodeURIComponent(accOne[1]), b.label); return json({ ok: true }); }
+    // Ritorno dal login di Google/Microsoft: arriva senza token di Kestra, lo protegge il codice "state" monouso.
+    const oauth = /^\/oauth\/(google|microsoft)\/callback$/.exec(path);
+    if (oauth && method === 'GET') {
+      const page = (title, text) => new Response(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>${title}</title><body style="font-family:system-ui;background:#0b0614;color:#e9e3f5;padding:32px;max-width:520px;margin:auto"><h2>${title}</h2><p>${text}</p><p>Puoi chiudere questa pagina e tornare in Kestra.</p></body>`, { headers: { 'content-type': 'text/html; charset=utf-8' } });
+      const esc = (t) => String(t).replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' })[c]);
+      if (url.searchParams.get('error')) {
+        const why = url.searchParams.get('error_description') || url.searchParams.get('error');
+        const admin = /admin|AADSTS65001|AADSTS90094|consent|approval/i.test(why);
+        return page('Collegamento non riuscito', esc(why).slice(0, 400) + (admin ? '<br><br>Questo account (di solito quello dell\'università) richiede l\'approvazione dell\'amministratore. In Kestra, Impostazioni › Account, puoi aggiungere il calendario con il link .ics.' : ''));
+      }
+      try {
+        const acc = await accounts.finishConnect(db, env, deps.fetchFn, { provider: oauth[1], code: String(url.searchParams.get('code') || ''), state: String(url.searchParams.get('state') || ''), origin: url.origin, ms });
+        return page('Account collegato', `${esc(acc.label)} (${esc(acc.email)}) è collegato a Kestra.`);
+      } catch (e) { return page('Collegamento non riuscito', esc(e.message)); }
+    }
     if (path.startsWith('/preview/')) return await coder.servePreview(db, env, deps, path + (url.pathname.endsWith('/') && !path.endsWith('/') ? '/' : ''));
     if (path === '/api/code' && method === 'GET') return json({ enabled: coder.enabled(env), items: coder.listProposals(db) });
     if (path === '/api/code' && method === 'POST') {

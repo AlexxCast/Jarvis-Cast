@@ -13,6 +13,7 @@ import * as semantic from './semantic.js';
 import * as continuity from './continuity.js';
 import { WEATHER_WORDS, weatherContext } from './weather.js';
 import * as web from './web.js';
+import * as accounts from './accounts.js';
 import * as router from './router.js';
 import { CORE_PROMPT, buildMessages, parseReply } from './context.js';
 import { loadDiary, saveDiary, applyDietAction, dietBrief, dietContext, DIET_ACTIONS, DIET_KEYWORDS, DIET_RULES } from './diet.js';
@@ -292,6 +293,15 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   }
   if (proj) sessionId = proj.chat.session;
 
+  // Mail o evento in attesa di conferma: "sì" lo esegue davvero (e si dice cosa è successo), "no" annulla.
+  if (!image && !fileList.length) {
+    const conf = await accounts.handleConfirmation(db, env, deps.fetchFn, userText, { ms, tz });
+    if (conf) return local(conf.reply, { actions: conf.applied, touched: [], layoutChanged: false });
+  }
+  // Posta, agende e documenti collegati: vanno al modello con i dati veri, mai agli automatismi del PC/telefono.
+  const accountTopic = (accounts.ACCOUNT_WORDS.test(userText) || accounts.DOC_WORDS.test(userText)) && accounts.hasAccounts(db);
+  const wantsConnect = /\b(collega\w*|connett\w*|accesso diretto|accedi)\b/i.test(userText) && accounts.ACCOUNT_WORDS.test(userText);
+
   // Se l'utente chiede di ridurre, sistemare o pulire il grafo (es. "il grafo della dieta è troppo grande, riducilo"),
   // l'agente locale GraphAgent lo compatta subito, così l'operazione avviene davvero anche se il modello non emette clean_graph.
   const cleanCmd = agents.GraphAgent.detectCleanCommand(userText);
@@ -301,7 +311,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   jarvisCore.selfInterrogate(db, env, ms, tz);
 
   // 1. JARVIS CORE (IA proprietaria interna): gestisce direttamente controllo multi-dispositivo (PC/Telefono), Antigravity, timer e diagnostica.
-  const coreHit = (!image && !fileList.length) ? jarvisCore.handleCoreIntent(db, userText, ms, env, sessionId, tz) : null;
+  const coreHit = (!image && !fileList.length && !accountTopic && !wantsConnect) ? jarvisCore.handleCoreIntent(db, userText, ms, env, sessionId, tz) : null;
   if (coreHit) {
     if (coreHit.scheduleAt) deps.schedule?.(coreHit.scheduleAt);
     if (coreHit.reply) {
@@ -322,7 +332,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   }
 
   // 2. Gatekeeper procedurale locale: attività già fatte sul telefono vanno in automatico, zero modelli esterni.
-  const localHit = flows.gatekeepChat(db, userText, { hasImage: !!image || fileList.length > 0, hasPendingPhone: !!phone.pendingContext(db, ms) });
+  const localHit = (accountTopic || wantsConnect) ? null : flows.gatekeepChat(db, userText, { hasImage: !!image || fileList.length > 0, hasPendingPhone: !!phone.pendingContext(db, ms) });
   if (localHit) {
     addMessage(db, sessionId, 'user', userText, nowIso, image ? { image: true } : null);
     addMessage(db, sessionId, 'assistant', localHit.reply, nowIso, { model: 'local-gatekeeper' });
@@ -369,7 +379,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   const parts = {
     core: CORE_PROMPT(diary.profile.name, nowHuman(ms, tz)) + '\n\n' + mood.MOOD_PROMPT(mood.current(db, ms)) + (projCtx ? '\n\n' + projCtx.header : ''),
     brief: projCtx && !dietOn ? '' : dietBrief(diary, today),
-    rules: [focusLine, dietOn ? DIET_RULES : '', UI_WORDS.test(userText) ? ui.uiPrompt(ui.loadLayout(db)) : '', UI_WORDS.test(userText) ? coder.codePrompt(env, db) : '', DEVICE_WORDS.test(userText) ? appsPrompt(db) : '', lessons.contextBlock(db, probe), initiative.NOTIF_WORDS.test(userText) ? initiative.notificationsContext(db) : '', (/\b(pc|computer|desktop|windows|dispositiv\w*)\b/i.test(userText) || activeFocus?.device === 'pc' || navActive) ? devices.devicesPrompt(db, ms) : '', phone.pendingContext(db, ms)].filter(Boolean).join('\n\n'),
+    rules: [focusLine, dietOn ? DIET_RULES : '', UI_WORDS.test(userText) ? ui.uiPrompt(ui.loadLayout(db)) : '', UI_WORDS.test(userText) ? coder.codePrompt(env, db) : '', DEVICE_WORDS.test(userText) ? appsPrompt(db) : '', lessons.contextBlock(db, probe), initiative.NOTIF_WORDS.test(userText) ? initiative.notificationsContext(db) : '', (/\b(pc|computer|desktop|windows|dispositiv\w*)\b/i.test(userText) || activeFocus?.device === 'pc' || navActive) ? devices.devicesPrompt(db, ms) : '', phone.pendingContext(db, ms), (accountTopic || wantsConnect || accounts.ACCOUNT_WORDS.test(userText)) ? accounts.accountsPrompt(db) : '', accounts.pendingContext(db, ms)].filter(Boolean).join('\n\n'),
     blocks: [...(dietOn ? dietContext(diary, today) : []), ...(projCtx ? projCtx.blocks : [])],
     memories: recalled.entries.slice(0, projCtx ? 8 : 24).map(m => `- [${m.id}] (${m.module}) ${m.text}`),
     moduleIndex: [mods.length ? 'MODULI DI MEMORIA ESISTENTI: ' + mods.map(m => `${m.name}${m.description ? ` (${m.description})` : ''} [${m.entries}]`).join('; ') : '',
@@ -378,6 +388,8 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
     weather: WEATHER_WORDS.test(userText) ? await weatherContext(db, deps.fetchFn, userText) : '',
     // Domande su fatti recenti: la ricerca parte subito, senza aspettare che il modello la chieda.
     web: web.WEB_WORDS.test(userText) && !WEATHER_WORDS.test(userText) ? web.webBlock(userText, await web.search(env, deps.fetchFn, userText, today)) : '',
+    // Posta e agende collegate: lette subito quando la domanda è chiaramente su quello (un giro di modello in meno).
+    accounts: accountTopic ? await accounts.prefetch(db, env, deps.fetchFn, userText, { ms, tz }) : '',
     summary: sess.summary,
     continuity: continuity.block(db, { ms, tz, sessionId, userText }),
     history,
@@ -408,8 +420,10 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
     // Oppure chiede un cassetto di memoria che non è entrato nel contesto: glielo diamo e rispondiamo di nuovo.
     const webAsk = parsed.actions.filter(a => a.type === 'web_search' || a.type === 'read_url').slice(0, 2);
     const memAsk = parsed.actions.filter(a => a.type === 'recall').slice(0, 3);
-    if (webAsk.length || memAsk.length) {
+    const accAsk = parsed.actions.filter(a => accounts.READ_TYPES.has(a?.type)).slice(0, 3);
+    if (webAsk.length || memAsk.length || accAsk.length) {
       const found = [];
+      if (accAsk.length) parts.accounts = [parts.accounts, ...await accounts.runReads(db, env, deps.fetchFn, accAsk, { ms, tz })].filter(Boolean).join('\n\n');
       for (const a of webAsk) {
         const q = a.type === 'read_url' ? String(a.url || '') : String(a.query || userText);
         found.push(web.webBlock(q, a.type === 'read_url' ? await web.readUrl(deps.fetchFn, q) : await web.search(env, deps.fetchFn, q, today)));
@@ -430,6 +444,14 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
         parsed = parseReply(res.text);
       } catch { parsed = { ...parsed, reply: 'Ho cercato, ma non riesco a elaborare i risultati in questo momento, signore.', actions: [] }; }
       parsed.actions = parsed.actions.filter(a => a.type !== 'web_search' && a.type !== 'read_url' && a.type !== 'recall');
+    }
+    // Mail da inviare o eventi da mettere: mai subito, prima la conferma del Capo con i dettagli esatti.
+    const writes = parsed.actions.filter(a => accounts.WRITE_TYPES.has(a?.type));
+    parsed.actions = parsed.actions.filter(a => !accounts.READ_TYPES.has(a?.type) && !accounts.WRITE_TYPES.has(a?.type));
+    if (writes.length) {
+      const q = accounts.hasAccounts(db) ? accounts.queueWrite(db, writes[0], { ms, tz }) : { say: 'Per farlo devi prima collegare l\'account in Impostazioni › Account.' };
+      parsed.reply = q.say;
+      parsed.expectReply = true;
     }
     if (!parsed.actions.some(a => a && a.type === 'remember')) {
       const explicitMem = agents.MemoryAgent.extractExplicit(userText);
