@@ -16,7 +16,12 @@ const WRITE_RE = /^\s*(INSERT|UPDATE|DELETE|REPLACE|CREATE|ALTER|DROP)\b/i;
 function blockableDb() {
   const raw = new DatabaseSync(':memory:');
   const flag = { blocked: false, msg: 'Exceeded allowed rows written in Durable Objects free tier.' };
-  const fake = { prepare: (q) => { if (flag.blocked && WRITE_RE.test(q)) throw new Error(flag.msg); return raw.prepare(q); } };
+  // poison: come su Cloudflare, dopo una scrittura rifiutata falliscono anche le letture successive.
+  const fake = { prepare: (q) => {
+    if (flag.poisoned) throw new Error(flag.msg);
+    if (flag.blocked && WRITE_RE.test(q)) { if (flag.poison) flag.poisoned = true; throw new Error(flag.msg); }
+    return raw.prepare(q);
+  } };
   const db = wrapNodeSqlite(fake);
   migrate(db);
   return { db, flag };
@@ -118,10 +123,12 @@ test('limite noto: anche un errore di scrittura con un altro messaggio non svuot
   const d = { ...deps(fakeFetch(() => reply({ reply: 'Ok.', actions: [{ type: 'remember', module: 'musica', text: 'ascolto Mannarino su Joytify' }] }))), schedule: () => {} };
   const call = callOf(db, d);
   await call('POST', '/api/chat', { text: 'ricorda che ascolto Mannarino' });
-  flag.blocked = true; flag.msg = 'SQLITE_ERROR: storage operation rejected';
+  flag.blocked = true; flag.msg = 'SQLITE_ERROR: storage operation rejected'; flag.poison = true;
   noteWriteLimit();
   const g = await call('GET', '/api/graph');
   assert.equal(g.status, 200, JSON.stringify(g.body));
   assert.ok(g.body.branches.some(b => b.id === 'musica'));
+  assert.ok(!flag.poisoned, 'con il limite noto le scritture non si provano nemmeno');
+  assert.equal((await call('GET', '/api/mind')).status, 200);
   resetWriteBlock();
 });

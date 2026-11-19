@@ -72,6 +72,9 @@ function tolerate(raw) {
   // `this` è la vista della richiesta (db.view): ogni richiesta ha il suo interruttore, anche se il Durable Object
   // ne intreccia più d'una mentre aspetta un modello.
   const guard = (fn, empty) => function (...a) {
+    // Limite già noto: la scrittura non si prova nemmeno. Su Cloudflare una scrittura rifiutata può far fallire
+    // anche le letture successive della stessa richiesta (la sfera arrivava vuota per questo).
+    if (this?.tolerant && writesBlocked() && WRITE_SQL_RE.test(String(a[0] || ''))) { this.swallowed++; return empty(); }
     try { return fn(...a); } catch (e) {
       // Con il limite già noto, qualsiasi errore di una scrittura (Cloudflare non usa sempre lo stesso messaggio) conta come limite.
       const limit = WRITE_LIMIT_RE.test(String(e?.message || e)) || (writesBlocked() && WRITE_SQL_RE.test(String(a[0] || '')));
