@@ -33,7 +33,9 @@ test('salvare la ricetta la mette anche nel ricettario della dieta e si può ria
   assert.equal(cooking.listSaved(db).length, 1);
   const rec = loadDiary(db).savedRecipes.find(x => x.title === RECIPE.title);
   assert.equal(rec.ingredients[0].grams, 250);
-  assert.equal(rec.totalKcal, 430);
+  // Il totale è la somma degli ingredienti (qui stimati dalla tabella), non il numero detto dal modello.
+  assert.equal(rec.totalKcal, cooking.session(db).kcal);
+  assert.ok(rec.ingredients.every(i => i.kcal > 0));
   cooking.apply(db, { type: 'recipe_close' });
   assert.equal(cooking.session(db), null);
   assert.ok(cooking.apply(db, { type: 'recipe_open', title: 'medaglioni di tacchino' }));
@@ -49,4 +51,54 @@ test('i pulsanti della sessione passano da /api/actions e lo stato la mostra', a
   assert.deepEqual(res.state.cooking.have, [1]);
   res = await (await call([{ type: 'recipe_save' }])).json();
   assert.equal(res.state.recipes[0].title, RECIPE.title);
+});
+
+test('ogni ingrediente ha grammi e calorie, e il totale li somma tutti (anche la piadina che il modello scorda)', () => {
+  const db = makeDb();
+  cooking.apply(db, {
+    type: 'recipe', title: 'Piadina kebab', kcal: 420, servings: 1,
+    ingredients: [
+      { name: 'kebab di pollo', qty: '150 g', grams: 150, kcal: 330, protein: 27, carbs: 4, fat: 23 },
+      { name: 'yogurt greco 0%', qty: '100 g', grams: 100, kcal: 57, protein: 10, carbs: 4, fat: 0.2 },
+      { name: 'piadina', qty: '1 piadina' },
+      { name: 'sale', qty: 'q.b.' },
+      { name: 'salsa segreta della nonna', qty: '1 cucchiaio' },
+    ],
+    steps: ['Scalda la piadina 1 minuto per lato.', 'Farcisci con kebab e yogurt.'],
+  });
+  const s = cooking.session(db);
+  const piadina = s.ingredients.find(i => i.name === 'piadina');
+  assert.equal(piadina.grams, 110);
+  assert.equal(piadina.kcal, 330);
+  assert.equal(piadina.est, true);
+  assert.equal(s.ingredients[0].kcal, 330);
+  assert.equal(s.ingredients[0].est, false);
+  assert.equal(s.kcal, 330 + 57 + 330 + 0);
+  assert.equal(s.protein, Math.round((27 + 10 + 8.8) * 10) / 10);
+  assert.deepEqual(s.missing, ['salsa segreta della nonna']);
+  assert.match(cooking.contextLine(db), /piadina 1 piadina = 330 kcal.*TOTALE 717 kcal.*Senza calorie: salsa segreta/s);
+});
+
+test('una correzione con lo stesso titolo tiene i passaggi e il punto in cui eri', () => {
+  const db = makeDb();
+  cooking.apply(db, RECIPE);
+  cooking.apply(db, { type: 'recipe_step', op: 'next' });
+  const before = cooking.session(db).kcal;
+  assert.ok(cooking.apply(db, { type: 'recipe', title: RECIPE.title, ingredients: [...RECIPE.ingredients, { name: 'piadina', qty: '1 piadina', grams: 110, kcal: 330 }] }));
+  const s = cooking.session(db);
+  assert.equal(s.steps.length, 3);
+  assert.equal(s.step, 1);
+  assert.equal(s.kcal, before + 330);
+});
+
+test('le dosi scritte diventano grammi', async () => {
+  const { gramsOf, findFood } = await import('../src/foods.js');
+  assert.equal(gramsOf('250 g'), 250);
+  assert.equal(gramsOf('0,2 kg'), 200);
+  assert.equal(gramsOf('2 cucchiai', findFood('olio extravergine')), 20);
+  assert.equal(gramsOf('due uova', findFood('uova')), 120);
+  assert.equal(gramsOf('q.b.', findFood('sale')), 0);
+  assert.equal(findFood('salsa allo yogurt').kcal, 110);
+  assert.equal(findFood('yogurt greco 0%').kcal, 57);
+  assert.equal(findFood('melanzane'), null);
 });
