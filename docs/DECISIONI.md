@@ -640,3 +640,8 @@ parole ripetute, errori del riconoscimento) e con modelli che rispondono male. I
     mai pagare o eliminare senza "sì", mai inviare o chiamare senza conferma se la voce non è riconosciuta, mai toccare un
     numero che non c'è sullo schermo. Prima il modello poteva fare tutte queste cose. Il "sì invialo" dopo "Procedo?"
     riprende il compito senza modello con "(l'utente ha confermato: procedi)" nell'obiettivo.
+- **Parola Kestra riaddestrata con TV e rumore: NON adottata.** `train.py` ora ha `--bg` (TV vera sotto gli esempi),
+  `--bg-prob`, `--noise-prob` (rumore costante forte) e `--seed`. Due prove, confrontate solo su registrazioni mai usate
+  per addestrare: con la TV sotto la voce il nuovo modello sente 11-12 nomi su 15 invece di 3-4, ma in silenzio ne perde
+  1-2, fa più falsi risvegli col rumore rosa/bianco e i falsi allarmi all'ora su audio vario salgono da 3,9 a 6,2-6,8
+  (soglia Media). Peggio nella vita normale, quindi resta il modello 2.41. Idea per dopo: usarlo solo quando la TV è accesa.
