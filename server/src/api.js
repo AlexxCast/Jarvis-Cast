@@ -6,6 +6,7 @@ import { loadDiary, saveDiary, mergeLegacy, patchProfile, DIET_ACTIONS } from '.
 import * as N from './nutrition.js';
 import * as memory from './memory.js';
 import * as phone from './phone.js';
+import * as cooking from './cooking.js';
 import * as flows from './flows.js';
 import * as devices from './devices.js';
 import * as jarvisCore from './jarvis_core.js';
@@ -51,6 +52,8 @@ function statePayload(db, ms, tz, env = {}) {
     balance: complete ? (({ dailyProgressList, ...rest }) => rest)(N.cumulativeBalance(d, today)) : null,
     diary: d, reminders: agenda.listReminders(db, tz), jobs: jobs.listJobs(db), places: places.listPlaces(db),
     liveCards: jarvisCore.listLiveCards(db, ms),
+    cooking: cooking.session(db),
+    recipes: cooking.listSaved(db).map(r => ({ id: r.id, title: r.title, kcal: r.kcal, minutes: r.minutes, savedAt: r.savedAt })),
     timedActions: kvGet(db, 'timedActions', []).filter(t => Number(t.dueMs) > ms),
     skills: flows.listSkills(db),
     activeWorkspace: workspace.getActiveWorkspace(db),
@@ -163,7 +166,7 @@ export async function handleApi(db, env, deps, request) {
     if (path === '/api/actions' && method === 'POST') {
       // Modifiche fatte a mano dall'interfaccia: stesse azioni che usa il modello.
       const b = await body(request);
-      const actions = (Array.isArray(b.actions) ? b.actions : []).filter(a => a && a.type !== 'show' && (DIET_ACTIONS.has(a.type) || ['remember', 'forget', 'add_reminder', 'done_reminder', 'live_card'].includes(a.type) || ui.UI_ACTIONS.has(a.type)));
+      const actions = (Array.isArray(b.actions) ? b.actions : []).filter(a => a && a.type !== 'show' && (DIET_ACTIONS.has(a.type) || cooking.COOKING_ACTIONS.has(a.type) || ['remember', 'forget', 'add_reminder', 'done_reminder', 'live_card'].includes(a.type) || ui.UI_ACTIONS.has(a.type)));
       const done = applyActions(db, actions, { today: todayOf(ms, tz), nowIso: nowIsoOf(ms, tz), ms, tz, hadPhoto: false });
       const nextDue = agenda.fireDue(db, ms, tz);
       if (nextDue) deps.schedule?.(nextDue);

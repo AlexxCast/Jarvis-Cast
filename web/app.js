@@ -522,6 +522,46 @@ if (!window.__jarvisLiveTick) {
   }, 1000);
 }
 
+/** Sessione di cucina: la ricetta resta a schermo con dosi e passaggi, uno alla volta, finché la chiudi. */
+function renderCooking() {
+  const c = store.state?.cooking;
+  if (!c) return null;
+  const have = new Set(c.have || []);
+  const steps = c.steps || [];
+  const info = [c.servings ? `${c.servings} ${c.servings === 1 ? 'porzione' : 'porzioni'}` : '', c.kcal ? `${c.kcal} kcal` : '', c.minutes ? `${c.minutes} min` : ''].filter(Boolean).join(' · ');
+  return h('div', { class: 'card cooking', role: 'region', 'aria-label': 'Sessione di cucina' },
+    h('div', {}, h('h2', { style: 'margin:0' }, '🍳 ' + c.title), info ? h('span', { class: 'muted small' }, info) : null),
+    h('div', { class: 'row', style: 'gap:8px;justify-content:flex-end' },
+      c.saved ? h('span', { class: 'tag ok' }, 'Salvata') : h('button', { class: 'btn primary', onclick: guard(() => act({ type: 'recipe_save' })) }, 'Salva ricetta'),
+      h('button', { class: 'btn ghost', 'aria-label': 'Chiudi la sessione di cucina', onclick: guard(() => act({ type: 'recipe_close' })) }, 'Chiudi')),
+    (c.ingredients || []).length ? h('div', { class: 'cook-ing' },
+      h('b', { class: 'small' }, 'Ingredienti'),
+      (c.ingredients || []).map((it, i) => h('label', { class: 'check small', style: 'cursor:pointer' },
+        h('input', { type: 'checkbox', checked: have.has(i), onchange: guard(() => act({ type: 'recipe_toggle', index: i })) }),
+        h('span', { style: have.has(i) ? 'text-decoration:line-through;color:var(--muted)' : '' }, it.qty ? h('b', { class: 'num' }, it.qty + ' ') : null, it.name)))) : null,
+    steps.length ? h('div', { class: 'cook-steps' },
+      h('b', { class: 'small' }, `Passaggi · ${c.step + 1} di ${steps.length}`),
+      h('ol', { style: 'margin:4px 0;padding-left:22px;display:flex;flex-direction:column;gap:6px' }, steps.map((st, i) => h('li', {
+        style: i === c.step ? 'font-weight:600;color:var(--text);background:rgba(57,255,20,.08);border-radius:6px;padding:4px 6px' : (i < c.step ? 'color:var(--muted);text-decoration:line-through;padding:0 6px' : 'color:var(--muted);padding:0 6px'),
+        onclick: guard(() => act({ type: 'recipe_step', op: 'goto', index: i })),
+      }, st))),
+      h('div', { class: 'row', style: 'gap:8px' },
+        h('button', { class: 'btn', disabled: c.step <= 0, onclick: guard(() => act({ type: 'recipe_step', op: 'prev' })) }, 'Indietro'),
+        h('button', { class: 'btn primary grow', disabled: c.step >= steps.length - 1, onclick: guard(() => act({ type: 'recipe_step', op: 'next' })) }, 'Passo successivo')),
+      h('span', { class: 'muted small' }, 'A voce: "avanti", "indietro", "ripeti".')) : null);
+}
+
+/** Ricette salvate: si riaprono come sessione di cucina. */
+function viewRecipesCard() {
+  const list = store.state?.recipes || [];
+  if (!list.length) return null;
+  return h('div', { class: 'card' }, h('h2', {}, 'Ricette salvate'),
+    h('div', { class: 'list' }, list.map(r => h('div', { class: 'item' },
+      h('div', { class: 'grow' }, h('div', {}, r.title), h('div', { class: 'muted small' }, [r.kcal ? `${r.kcal} kcal` : '', r.minutes ? `${r.minutes} min` : ''].filter(Boolean).join(' · '))),
+      h('button', { class: 'btn', onclick: guard(() => act({ type: 'recipe_open', id: r.id })) }, 'Cucina'),
+      h('button', { class: 'btn icon ghost danger', 'aria-label': 'Elimina ricetta ' + r.title, onclick: guard(() => act({ type: 'recipe_delete', id: r.id })) }, icon(ICONS.trash))))));
+}
+
 /** Renderer modulare per tutte le attività vive (timer, cronometri, contatori, barre, checklist, dispositivi). */
 function renderLiveCards(compact = false) {
   const cards = store.state?.liveCards || [];
@@ -678,7 +718,7 @@ function viewChat() {
   const wsPanel = ws ? renderAdaptiveWorkspace(ws) : null;
   return store.chatOpen
     ? [wsPanel, orb.el, list, attachBar, recBar, composer]
-    : [wsPanel, codeBanner(), upcomingBanner, projBanner, renderLiveCards(true), widgets('jarvis'), orb.el, caption, attachBar, recBar, composer];
+    : [wsPanel, codeBanner(), upcomingBanner, projBanner, renderCooking(), renderLiveCards(true), widgets('jarvis'), orb.el, caption, attachBar, recBar, composer];
 }
 
 // ------------------------------------------------------------------ Sintesi bilingue IT/EN & Registrazione bozza vocale manuale
@@ -861,7 +901,8 @@ function viewOggi() {
   const kcalOf = (m) => (m.items || []).reduce((x, i) => x + (Number(i.kcal) || 0), 0);
   return [
     widgets('oggi'),
-    d.activeRecipeSession ? h('div', { class: 'banner' }, h('h2', {}, '🍳 In cucina: ' + d.activeRecipeSession.title),
+    renderCooking(),
+    !store.state.cooking && d.activeRecipeSession ? h('div', { class: 'banner' }, h('h2', {}, '🍳 In cucina: ' + d.activeRecipeSession.title),
       h('p', { class: 'pre' }, d.activeRecipeSession.currentStep || d.activeRecipeSession.ingredientsNeeded),
       h('div', { class: 'row', style: 'margin-top:8px' }, h('button', { class: 'btn', onclick: guard(() => act({ type: 'clear_recipe_session' })) }, 'Ho finito'))) : null,
     h('div', { class: 'card' },
@@ -1034,6 +1075,8 @@ function viewAttivita() {
   return [
     viewUpcomingCard(s),
     viewManualAutomationCard(s),
+    renderCooking(),
+    viewRecipesCard(),
     (store.state?.liveCards || []).length ? h('div', { class: 'card' }, h('h2', {}, 'Attività vive in diretta'), renderLiveCards(false)) : null,
     h('div', { class: 'card' }, h('h2', {}, 'Promemoria'),
       h('div', { class: 'row wrap' }, text, due, h('button', { class: 'btn primary', onclick: guard(async () => {

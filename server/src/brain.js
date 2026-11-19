@@ -21,6 +21,7 @@ import * as places from './places.js';
 import * as agenda from './agenda.js';
 import * as ui from './ui.js';
 import * as coder from './coder.js';
+import * as cooking from './cooking.js';
 import * as mood from './mood.js';
 import { today as todayOf, nowIso as nowIsoOf, nowHuman } from './clock.js';
 import { logEvent, kvSet, kvGet } from './db.js';
@@ -161,6 +162,7 @@ export function applyActions(db, actions, ctx) {
       else if (coder.CODE_ACTIONS.has(a.type)) out.code.push({ type: a.type, id: String(a.id || ''), request: String(a.request || '').trim().slice(0, 2000) });
       else if (ui.UI_ACTIONS.has(a.type)) { if (!ui.applyUiAction(db, a, ctx.nowIso)) { out.failed.push(a.type); continue; } out.ui = true; }
       else if (a.type === 'start_job') { if (String(a.goal || '').trim()) out.jobs.push({ title: String(a.title || 'Compito').slice(0, 80), goal: String(a.goal).slice(0, 2000) }); }
+      else if (cooking.COOKING_ACTIONS.has(a.type)) { if (!cooking.apply(db, a, ctx.ms)) { out.failed.push(a.type); continue; } }
       else if (a.type === 'live_card') { if (!jarvisCore.applyLiveCard(db, a, ctx.ms)) { out.failed.push(a.type); continue; } }
       else if (a.type === 'pc_action') {
         const target = String(a.target || a.name || a.url || '').trim();
@@ -303,7 +305,11 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   jarvisCore.selfInterrogate(db, env, ms, tz);
 
   // 1. JARVIS CORE (IA proprietaria interna): gestisce direttamente controllo multi-dispositivo (PC/Telefono), Antigravity, timer e diagnostica.
-  const coreHit = (!image && !fileList.length) ? jarvisCore.handleCoreIntent(db, userText, ms, env, sessionId, tz) : null;
+  // In cucina con le mani occupate: "avanti", "indietro", "ripeti" scorrono i passaggi senza chiamare un modello.
+  const cookStep = (!image && !fileList.length) ? cooking.voiceStep(db, userText, ms) : null;
+  const coreHit = cookStep
+    ? { reply: cookStep, expectReply: true, actions: ['recipe_step'], device: [], touched: ['cucina'], touchedLeaves: [] }
+    : (!image && !fileList.length) ? jarvisCore.handleCoreIntent(db, userText, ms, env, sessionId, tz) : null;
   if (coreHit) {
     if (coreHit.scheduleAt) deps.schedule?.(coreHit.scheduleAt);
     if (coreHit.reply) {
@@ -371,7 +377,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   const parts = {
     core: CORE_PROMPT(diary.profile.name, nowHuman(ms, tz)) + '\n\n' + mood.MOOD_PROMPT(mood.current(db, ms)) + (projCtx ? '\n\n' + projCtx.header : ''),
     brief: projCtx && !dietOn ? '' : dietBrief(diary, today),
-    rules: [focusLine, dietOn ? DIET_RULES : '', UI_WORDS.test(userText) ? ui.uiPrompt(ui.loadLayout(db)) : '', UI_WORDS.test(userText) ? coder.codePrompt(env, db) : '', DEVICE_WORDS.test(userText) ? appsPrompt(db) : '', lessons.contextBlock(db, probe), initiative.NOTIF_WORDS.test(userText) ? initiative.notificationsContext(db) : '', (/\b(pc|computer|desktop|windows|dispositiv\w*)\b/i.test(userText) || activeFocus?.device === 'pc' || navActive) ? devices.devicesPrompt(db, ms) : '', phone.pendingContext(db, ms)].filter(Boolean).join('\n\n'),
+    rules: [focusLine, cooking.contextLine(db), dietOn ? DIET_RULES : '', UI_WORDS.test(userText) ? ui.uiPrompt(ui.loadLayout(db)) : '', UI_WORDS.test(userText) ? coder.codePrompt(env, db) : '', DEVICE_WORDS.test(userText) ? appsPrompt(db) : '', lessons.contextBlock(db, probe), initiative.NOTIF_WORDS.test(userText) ? initiative.notificationsContext(db) : '', (/\b(pc|computer|desktop|windows|dispositiv\w*)\b/i.test(userText) || activeFocus?.device === 'pc' || navActive) ? devices.devicesPrompt(db, ms) : '', phone.pendingContext(db, ms)].filter(Boolean).join('\n\n'),
     blocks: [...(dietOn ? dietContext(diary, today) : []), ...(projCtx ? projCtx.blocks : [])],
     memories: recalled.entries.slice(0, projCtx ? 8 : 24).map(m => `- [${m.id}] (${m.module}) ${m.text}`),
     moduleIndex: [mods.length ? 'MODULI DI MEMORIA ESISTENTI: ' + mods.map(m => `${m.name}${m.description ? ` (${m.description})` : ''} [${m.entries}]`).join('; ') : '',

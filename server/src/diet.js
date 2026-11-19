@@ -281,7 +281,7 @@ export const DIET_RULES = `REGOLE DIETA E ALLENAMENTO
 - Pasti dimenticati o sgarri di giorni passati: registrali sulla data giusta, rassicura (il bilancio è settimanale) e spiega come si adatta il target dei prossimi giorni, senza digiuni.
 - Se si parla di un pasto già registrato usa update_meal con il suo id (dal diario qui sopra). Se non vedi l'id, metti date, meal e gli alimenti: il pasto si ritrova da solo. Se manca il tipo di pasto, deducilo dall'ora.
 - Allenamenti: add_activity con kcal bruciate stimate in modo prudente. Passi detti a voce: set_steps. Peso: add_weight.
-- Ricette: quando proponi o si cucina una ricetta usa subito update_recipe_session e aggiorna il passaggio a ogni turno; a fine cottura clear_recipe_session; "salva la ricetta" → save_recipe.
+- Ricette: quando dai una ricetta o si cucina usa l'azione recipe (sessione di cucina a schermo con dosi e passaggi); "salva la ricetta" → recipe_save; a fine cottura recipe_close. update_recipe_session e save_recipe restano solo per le vecchie sessioni.
 - Adatta sempre le dosi di una ricetta al budget di oggi e a ciò che c'è in dispensa, spiegando le modifiche.
 - Dispensa: proponi pasti partendo da ciò che c'è; aggiungi con add_pantry_item ciò che l'utente compra o mostra in foto; rimuovi con remove_pantry_item ciò che finisce.
 - Mai diete estreme o compensazioni dannose.`;

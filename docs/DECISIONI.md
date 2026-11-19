@@ -522,3 +522,15 @@ dalle azioni), backoff esponenziale, margine sui token. Rimandati = JSON Schema 
 gratuiti lo supportano allo stesso modo; il parser tollerante più la riparazione bastano per ora), cifratura a
 riposo (il Durable Object è già cifrato da Cloudflare), fine-tuning di un modello personale (serve prima un archivio
 di tracce verificate, che adesso iniziamo a raccogliere con gli esiti dei comandi).
+
+## Sessione di cucina a schermo (19/11/2026)
+- Alessio vuole che una ricetta resti a schermo dentro Kestra come "sessione di cucina", con dosi e passaggi, e che si
+  possa salvare. Prima c'era solo `activeRecipeSession` nel diario (titolo + un passaggio di testo, visibile solo in Oggi),
+  e il modello a volte apriva l'app bookAmeal.
+- Nuovo `server/src/cooking.js`: azione `recipe {title, servings, kcal, minutes, ingredients:[{name, qty}], steps:[...]}`
+  (kv `cookingSession`), `recipe_step` (next/prev/goto), `recipe_toggle` (ingrediente preso), `recipe_save` (kv `recipes`
+  e anche nel ricettario della dieta `savedRecipes`, con i grammi), `recipe_open` (anche da vecchie ricette del
+  ricettario), `recipe_close`, `recipe_delete`.
+- Scheda in Kestra (sotto la sfera), Oggi e Attività (con "Ricette salvate" da riaprire). A voce "avanti", "indietro",
+  "ripeti" scorrono i passaggi senza chiamare un modello (`cooking.voiceStep`, prima di `handleCoreIntent`).
+- Anteprima: `/mnt/project-files/jarvis/anteprime-cucina/sessione-cucina.png`.
