@@ -6,6 +6,7 @@
 // 3. Controllo autonomo di Antigravity / VS Code su progetti del PC con cattura e invio dello schermo PC in sovraimpressione;
 // 4. Esecuzione procedurale istantanea e orchestrazione multi-dispositivo (PC Ghideon + Smartphone).
 
+import { cleanSpoken, unitLabel } from './parlato.js';
 import { kvGet, kvSet, pushInbox } from './db.js';
 import * as flows from './flows.js';
 import * as devices from './devices.js';
@@ -23,7 +24,10 @@ const SELF_HEAL_RE = /\b(auto[\s-]*(?:diagnos\w*|corregg\w*|ripar\w*|heal\w*)|si
 const LIVE_CALL_RE = /\b(video\s*chiamat\w*|video\s*call|modalit[aà]\s+live|live\s+vision|in\s+diretta|dal\s+vivo|ti\s+devo\s+far\s+vedere|devo\s+farti\s+vedere|guarda\s+con\s+la\s+(?:tele)?camera)\b/i;
 const ANTIGRAVITY_RE = /\b(?:antigravit\w*|anti\s+gravit\w*)\b/i;
 const TIMED_ACTION_RE = /^\W*(?:ehi\s+|ciao\s+|ok\s+)?(?:(?:kestra|chestra|questra|jarvis)\s+)?tra\s+(\d{1,3})\s*(second\w*|minut\w*|or[ae])\s+(.{2,240})$/i;
-const TIMER_RE = /^\W*(?:ehi\s+|ciao\s+|ok\s+)?(?:(?:kestra|chestra|questra|jarvis)\s+)?(?:metti|imposta|avvia|fai\s+partire|crea)\s+(?:un\s+)?(timer|conto\s+alla\s+rovescia|cronometro)\s*(?:di|da)?\s*(?:(\d{1,3})\s*(second\w*|minut\w*|or[ae]))?(?:\s+(?:per|di|chiamato)\s+(.{2,100}))?\W*$/i;
+// "metti un timer di 10 minuti per la pasta", "mettimi un timer 5 minuti", "fai partire il cronometro".
+// I numeri a parole ("dieci minuti") arrivano già in cifre da cleanSpoken: prima "dieci minuti" diventava l'etichetta
+// di un timer da 1 minuto.
+const TIMER_RE = /^\W*(?:ehi\s+|ciao\s+|ok\s+)?(?:(?:kestra|chestra|questra|jarvis)\s+)?(?:metti(?:mi)?|mi\s+metti|imposta(?:mi)?|avvia|fai\s+partire|crea|setta|parti\s+con)\s+(?:un\s+|il\s+|lo\s+)?(timer|conto\s+alla\s+rovescia|cronometro)\s*(?:di|da)?\s*(?:(\d{1,3})\s*(second\w*|minut\w*|or[ae]))?(?:\s+(?:per|di|chiamato)\s+(?!\d)(.{2,100}))?\W*$/i;
 const PASSPHRASE_RE = /^\W*(?:la\s+parola\s+d'ordine\s+[eè]\s+|parola\s+d'ordine\s+)?niente\s+pi[uù]\s+fili\W*$/i;
 const SELF_PROMPT_ECHO_RE = /^\W*(?:parola\s+d'ordine(?:\s+non\s+corretta.*)?|certamente\s+signore.*|subito\s+signore.*|ricevuto\s+signore.*|ottimo\s+lavoro\s+signore.*|ho\s+avviato\s+la\s+riproduzione.*|signore\s+ho\s+riscontrato.*)\W*$/i;
 
@@ -329,7 +333,7 @@ export function selfInterrogate(db, env = {}, nowMs = Date.now(), tz = 'Europe/R
     const alerted = kvGet(db, 'phonePendingAlerted', 0);
     if (Number(alerted) !== Number(pendingPhone.at)) {
       kvSet(db, 'phonePendingAlerted', pendingPhone.at);
-      pushInbox(db, atIso, 'admin', `Signore, ho ancora in sospeso l'attività "${pendingPhone.goal}". Vuole che proceda?`);
+      pushInbox(db, atIso, 'admin', `Capo, ho ancora in sospeso l'attività "${pendingPhone.goal}". Vuole che proceda?`);
       actionsTaken.push(`notificato compito in sospeso: ${pendingPhone.goal}`);
     }
   }
@@ -360,7 +364,7 @@ export function selfInterrogate(db, env = {}, nowMs = Date.now(), tz = 'Europe/R
       const lastAlert = Number(kvGet(db, `ramAlert:${d.id}`, 0));
       if (nowMs - lastAlert > 60 * 60_000) {
         kvSet(db, `ramAlert:${d.id}`, nowMs);
-        pushInbox(db, atIso, 'admin', `Signore, ho rilevato che su ${d.name} la RAM è al ${ram}%. Se vuole posso chiudere le applicazioni superflue.`);
+        pushInbox(db, atIso, 'admin', `Capo, ho rilevato che su ${d.name} la RAM è al ${ram}%. Se vuoi posso chiudere le applicazioni superflue.`);
         actionsTaken.push(`avviso RAM critica su ${d.name} (${ram}%)`);
       }
     }
@@ -438,7 +442,7 @@ export function buildDiagnosticReport(db, env = {}, nowMs = Date.now()) {
   const pcPart = pc
     ? `${pc.name} è ${pc.online ? `online con RAM al ${Math.round(Number(pc.metrics?.ram || 0))}%` : 'offline'}`
     : 'il PC Desktop non è connesso';
-  const reply = `Diagnostica completata, signore: ${pcPart}; ${healthyModels.length} modelli IA sono operativi con pieno risparmio crediti (${blockedModels.length} obsoleti isolati in automatico) e ${learnedFlows} automazioni sono pronte.`;
+  const reply = `Diagnostica completata, Capo: ${pcPart}; ${healthyModels.length} modelli IA sono operativi con pieno risparmio crediti (${blockedModels.length} obsoleti isolati in automatico) e ${learnedFlows} automazioni sono pronte.`;
 
   return {
     reply,
@@ -506,7 +510,7 @@ export function dispatchPcOpen(db, rawTarget, nowMs = Date.now()) {
   }
   memory.touchTopics(db, [{ area: 'tecnologia', topic: clean, parent: 'PC Desktop' }], new Date(nowMs).toISOString());
   return {
-    reply: `Apro ${clean} sul PC, signore.`,
+    reply: `Apro ${clean} sul PC, Capo.`,
     device: [], actions: ['pc_action'],
     touched: ['automazioni', 'tecnologia'],
     touchedLeaves: reg ? ['f:' + reg.id] : [],
@@ -547,7 +551,7 @@ export function dispatchPcPlayYoutube(db, rawQuery, nowMs = Date.now()) {
   devices.enqueueCommand(db, 'desktop', { kind: 'play_youtube', target: q }, nowMs);
   memory.touchTopics(db, [{ area: 'intrattenimento', topic: q, parent: 'YouTube' }], new Date(nowMs).toISOString());
   return {
-    reply: `Faccio partire "${q}" su YouTube sul PC, signore.`,
+    reply: `Faccio partire "${q}" su YouTube sul PC, Capo.`,
     device: [], actions: ['pc_action'],
     touched: ['automazioni', 'intrattenimento'],
     touchedLeaves: reg ? ['f:' + reg.id] : [],
@@ -578,7 +582,7 @@ export function dispatchAntigravityTask(db, userText, nowMs = Date.now()) {
     text: `Task avviato: "${taskPrompt.slice(0, 100)}"`,
   };
   return {
-    reply: `Avvio subito Antigravity sul progetto ${project} sul PC e le mostro lo schermo in sovraimpressione, signore.`,
+    reply: `Avvio subito Antigravity sul progetto ${project} sul PC e ti mostro lo schermo in sovraimpressione, Capo.`,
     visual,
     device: [{ type: 'visual', data: visual }],
     actions: ['pc_action', 'show'],
@@ -597,7 +601,7 @@ export function dispatchPcScreenView(db, nowMs = Date.now()) {
     seconds: 25,
   };
   return {
-    reply: 'Catturo e le mostro subito lo schermo del PC in sovraimpressione, signore.',
+    reply: 'Catturo e ti mostro subito lo schermo del PC in sovraimpressione, Capo.',
     visual,
     device: [{ type: 'visual', data: visual }],
     actions: ['pc_action', 'show'],
@@ -610,6 +614,22 @@ export function dispatchPcScreenView(db, nowMs = Date.now()) {
  * Riconosce comandi diretti al PC Desktop, Antigravity, diagnostica, cattura schermo o parola d'ordine
  * e li esegue localmente tramite il nucleo proprietario Jarvis Core (zero chiamate a modelli esterni).
  */
+/** Avvia un timer vero: scheda dal vivo e azione programmata che suona alla fine. */
+function startTimer(db, rawAmount, rawUnit, label, nowMs) {
+  const amount = Math.max(1, Math.min(999, Number(rawAmount) || 1));
+  const unit = unitLabel(amount, rawUnit);
+  const delayMs = unit.startsWith('second') ? amount * 1000 : unit.startsWith('or') ? amount * 3600_000 : amount * 60_000;
+  const dueMs = nowMs + delayMs;
+  const list = kvGet(db, 'timedActions', []);
+  const entry = { id: `ta-${nowMs}`, kind: 'timer', dueMs, command: label, createdAt: nowMs };
+  kvSet(db, 'timedActions', [...list.slice(-20), entry]);
+  applyLiveCard(db, { op: 'set', id: entry.id, kind: 'countdown', title: label, subtitle: `Durata: ${amount} ${unit}`, badge: 'Timer', targetMs: dueMs, expiresAt: dueMs + 30_000 }, nowMs);
+  return {
+    reply: `Timer da ${amount} ${unit}${label && label !== 'Timer' ? ` per ${label}` : ''} avviato, Capo. Lo vedi scorrere sullo schermo.`,
+    device: [], actions: ['live_card', 'timed_action'], touched: ['agenda'], touchedLeaves: [], scheduleAt: dueMs,
+  };
+}
+
 export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, sessionId = 'main', tz = 'Europe/Rome') {
   const raw = String(userText || '').trim();
   if (!raw) return null;
@@ -632,7 +652,7 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
     if (goal) {
       const reg = flows.registerAutoGoal(db, goal, nowMs);
       return {
-        reply: `Parola d'ordine confermata, signore. Eseguo subito.`,
+        reply: `Parola d'ordine confermata, Capo. Eseguo subito.`,
         device: [{ type: 'phone_task', goal }],
         actions: ['phone_task'],
         touched: ['automazioni'],
@@ -640,19 +660,20 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
       };
     }
     return {
-      reply: 'Parola d\'ordine confermata, signore.',
+      reply: 'Parola d\'ordine confermata, Capo.',
       device: [], actions: [], touched: ['automazioni'], touchedLeaves: [],
     };
   }
 
-  const clean = raw.replace(/^\W*(ehi|ciao|ok)?\W*(kestra|chestra|questra|cestra|jarvis)\W*/i, '').replace(/\bniente\s+pi[uù]\s+fili\b/gi, '').trim();
+  // Il parlato vero: niente nome all'inizio, niente "ehm", numeri in cifre ("dieci minuti" → "10 minuti").
+  const clean = cleanSpoken(raw.replace(/\bniente\s+pi[uù]\s+fili\b/gi, ''));
   if (!clean) return null;
 
   // 0b. Chiusura esplicita della navigazione continua ("a posto così", "basta così", "stop navigazione")
   if (/^(?:ok\s+)?(?:siamo\s+)?(?:a\s+posto\s+cos[iì]|apposto\s+cos[iì]|basta\s+cos[iì]|perfetto\s+cos[iì]|stop\s+navigazione|esci\s+dalla\s+navigazione|va\s+bene\s+cos[iì])\W*$/i.test(clean)) {
     setNavMode(db, sessionId, false);
     return {
-      reply: 'Perfetto, signore. Resto in attesa.',
+      reply: 'Perfetto, Capo. Resto in attesa.',
       expectReply: false,
       device: [], actions: [], touched: ['automazioni'], touchedLeaves: [],
     };
@@ -684,13 +705,46 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
       if (p.openUrl) devices.enqueueCommand(db, 'desktop', { kind: 'open_url', target: p.openUrl }, nowMs);
       setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target: p.service || 'chrome', profile: accReply.account, action: 'apri' }, nowMs);
       return {
-        reply: `Perfetto, uso l'account "${accReply.account}"${p.service && p.service !== 'chrome' ? ` e apro ${p.service}` : ' su Chrome'}, signore.`,
+        reply: `Perfetto, uso l'account "${accReply.account}"${p.service && p.service !== 'chrome' ? ` e apro ${p.service}` : ' su Chrome'}, Capo.`,
         device: [], actions: ['pc_action'], touched: ['automazioni', 'tecnologia'], touchedLeaves: [],
       };
     }
   }
 
   // 1b. Timer o Cronometro esplicito ("metti un timer di 5 minuti", "avvia un cronometro")
+  // Conferma di una telefonata a un numero di emergenza (entro 60 secondi dalla domanda).
+  const callConfirm = kvGet(db, 'callConfirm', null);
+  if (callConfirm && nowMs - callConfirm.at < 60_000) {
+    kvSet(db, 'callConfirm', null);
+    if (/^(?:s[iì]|si|conferm\w*|vai|procedi|certo|chiama(?:lo)?)(?:\W+(?:s[iì]|chiama(?:lo)?|subito|pure|vai))*\W*$/i.test(clean)) {
+      return { reply: `Chiamo il ${String(callConfirm.name).replace(/^il\s+/i, '')}.`, device: [{ type: 'call', name: callConfirm.name }], actions: ['call'], touched: [], touchedLeaves: [] };
+    }
+    if (/^(?:no|annulla|lascia\s+stare|non\s+chiamare|aspetta|stop)\b/i.test(clean)) {
+      return { reply: 'Ok, non chiamo.', device: [], actions: [], touched: [], touchedLeaves: [] };
+    }
+  }
+  // Conferma di spegnimento o riavvio del PC (entro 60 secondi dalla domanda).
+  const pcConfirm = kvGet(db, 'pcConfirm', null);
+  if (pcConfirm && nowMs - pcConfirm.at < 60_000) {
+    if (/^(?:s[iì]|si|conferm\w*|vai|procedi|fallo|ok|certo|spegni(?:lo)?|riavvia(?:lo)?)(?:\s+(?:s[iì]|pure|grazie|conferm\w*|vai|spegni(?:lo)?|riavvia(?:lo)?))*\W*$/i.test(clean)) {
+      kvSet(db, 'pcConfirm', null);
+      devices.enqueueCommand(db, 'desktop', { kind: 'system', target: pcConfirm.target }, nowMs);
+      return { reply: pcConfirm.target === 'restart' ? 'Riavvio il PC tra 10 secondi, Capo.' : 'Spengo il PC tra 10 secondi, Capo.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+    }
+    kvSet(db, 'pcConfirm', null);
+    if (/^(?:no|annulla|lascia\s+stare|non\s+farlo|aspetta|stop)\b/i.test(clean)) {
+      return { reply: 'Ok, il PC resta acceso.', device: [], actions: [], touched: ['automazioni'], touchedLeaves: [] };
+    }
+  }
+  // Risposta a "Di quanto lo metto?": "10 minuti", "di 5", "mezz'ora" (entro 2 minuti dalla domanda).
+  const timerAsk = kvGet(db, 'timerAsk', null);
+  if (timerAsk && nowMs - timerAsk.at < 120_000) {
+    const ans = /^(?:di\s+|da\s+|per\s+)?(\d{1,3})\s*(second\w*|minut\w*|or[ae])?\W*$/i.exec(clean);
+    if (ans) {
+      kvSet(db, 'timerAsk', null);
+      return startTimer(db, Number(ans[1]), ans[2] || 'minuti', timerAsk.label || 'Timer', nowMs);
+    }
+  }
   const timerMatch = TIMER_RE.exec(clean);
   if (timerMatch) {
     const isStopwatch = /cronometro/i.test(timerMatch[1]);
@@ -698,22 +752,16 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
     if (isStopwatch) {
       applyLiveCard(db, { op: 'set', id: `sw-${nowMs}`, kind: 'stopwatch', title: label, subtitle: 'In esecuzione', badge: 'Live', startMs: nowMs }, nowMs);
       return {
-        reply: `Ho avviato il cronometro "${label}", signore. Può vedere il tempo scorrere in diretta nella schermata principale.`,
+        reply: `Ho avviato il cronometro "${label}", Capo. Puoi vedere il tempo scorrere in diretta nella schermata principale.`,
         device: [], actions: ['live_card'], touched: ['agenda'], touchedLeaves: [],
       };
     }
-    const amount = Math.max(1, Number(timerMatch[2]) || 1);
-    const unit = (timerMatch[3] || 'minuti').toLowerCase();
-    const delayMs = unit.startsWith('second') ? amount * 1000 : unit.startsWith('or') ? amount * 3600_000 : amount * 60_000;
-    const dueMs = nowMs + delayMs;
-    const list = kvGet(db, 'timedActions', []);
-    const entry = { id: `ta-${nowMs}`, kind: 'timer', dueMs, command: label, createdAt: nowMs };
-    kvSet(db, 'timedActions', [...list.slice(-20), entry]);
-    applyLiveCard(db, { op: 'set', id: entry.id, kind: 'countdown', title: label, subtitle: `Durata: ${amount} ${unit}`, badge: 'Timer', targetMs: dueMs, expiresAt: dueMs + 30_000 }, nowMs);
-    return {
-      reply: `Timer da ${amount} ${unit} avviato, signore. Lo vede scorrere in diretta sullo schermo.`,
-      device: [], actions: ['live_card', 'timed_action'], touched: ['agenda'], touchedLeaves: [], scheduleAt: dueMs,
-    };
+    if (!timerMatch[2]) {
+      // Timer senza durata ("metti un timer"): chiedere, non inventare 1 minuto.
+      kvSet(db, 'timerAsk', { at: nowMs, label });
+      return { reply: 'Di quanto lo metto, Capo?', expectReply: true, device: [], actions: [], touched: ['agenda'], touchedLeaves: [] };
+    }
+    return startTimer(db, Number(timerMatch[2]), timerMatch[3] || 'minuti', label, nowMs);
   }
 
   // 1c. Attività temporizzate ("tra 2 minuti apri YouTube sul PC", "tra 5 minuti metti musica rilassante"):
@@ -730,7 +778,7 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
     applyLiveCard(db, { op: 'set', id: entry.id, kind: 'countdown', title: innerCmd, subtitle: 'Azione programmata', badge: 'Timer', targetMs: dueMs, expiresAt: dueMs + 30_000 }, nowMs);
     const reg = flows.registerAutoGoal(db, `Timer: ${innerCmd}`, nowMs);
     return {
-      reply: `Ricevuto, signore: tra ${amount} ${timedMatch[2]} eseguirò in automatico "${innerCmd}".`,
+      reply: `Ricevuto, Capo: tra ${amount} ${unitLabel(amount, unit)} eseguirò in automatico "${innerCmd}".`,
       device: [], actions: ['timed_action', 'live_card'],
       touched: ['automazioni', 'agenda'],
       touchedLeaves: reg ? ['f:' + reg.id] : [],
@@ -760,8 +808,8 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
       text: heal.actions.length ? heal.actions.join(' · ') : 'Sistema pulito: nessun doppione o coda stantia rilevata.',
     };
     const msg = heal.actions.length
-      ? `Auto-riparazione completata, signore: ${heal.actions.join('; ')}. Ho in memoria ${heal.learnedTotal} correzioni apprese.`
-      : `Auto-diagnosi completata, signore: flussi e code sono già puliti (${heal.learnedTotal} alias appresi, ${heal.openIssues} voci in fix latenti).`;
+      ? `Auto-riparazione completata, Capo: ${heal.actions.join('; ')}. Ho in memoria ${heal.learnedTotal} correzioni apprese.`
+      : `Auto-diagnosi completata, Capo: flussi e code sono già puliti (${heal.learnedTotal} alias appresi, ${heal.openIssues} voci in fix latenti).`;
     return { reply: msg, visual, device: [{ type: 'visual', data: visual }], actions: ['self_heal', 'show'], touched: ['automazioni'], touchedLeaves: [] };
   }
 
@@ -771,7 +819,7 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
     devices.enqueueCommand(db, 'desktop', { kind: learnedHit.kind, target: learnedHit.target }, nowMs);
     setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target: learnedHit.target, action: learnedHit.kind }, nowMs);
     return {
-      reply: `Eseguo (${learnedHit.kind}: ${learnedHit.target}) sul PC tramite regola appresa, signore.`,
+      reply: `Eseguo (${learnedHit.kind}: ${learnedHit.target}) sul PC tramite regola appresa, Capo.`,
       device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [],
     };
   }
@@ -784,7 +832,7 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
   // 3b. Modalità Video Call / Live Vision ("attiva videochiamata", "ti devo far vedere una cosa dal vivo")
   if (LIVE_CALL_RE.test(clean) && !isPcTarget(db, clean)) {
     return {
-      reply: 'Attivo subito la videochiamata live, signore. Mi inquadri pure cosa vuole mostrarmi.',
+      reply: 'Attivo subito la videochiamata live, Capo. Inquadra pure cosa vuoi mostrarmi.',
       device: [{ type: 'start_live_call' }],
       actions: ['live_call'],
       touched: ['automazioni'],
@@ -810,7 +858,7 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
       const webUrl = WEB_SERVICES[target.toLowerCase()];
       const devAct = webUrl ? { type: 'open_url', url: webUrl } : { type: 'open_app', name: target };
       return {
-        reply: `Passo al telefono e apro ${target} qui, signore.`,
+        reply: `Passo al telefono e apro ${target} qui, Capo.`,
         device: [devAct],
         actions: [devAct.type],
         touched: ['automazioni'],
@@ -841,7 +889,7 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
         }, nowMs);
         const listTxt = accounts.slice(0, 5).map((a, i) => `${i + 1}) ${a}`).join(', ');
         return {
-          reply: `Quale account vuole utilizzare per ${matchedSkill.service}? Salvati: ${listTxt}.`,
+          reply: `Quale account vuoi usare per ${matchedSkill.service}? Salvati: ${listTxt}.`,
           expectReply: true,
           device: [], actions: [], touched: ['automazioni'], touchedLeaves: [],
         };
@@ -866,7 +914,7 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
       const noteAcc = plan.accountChanged ? ` (profilo aggiornato a ${plan.overrides.account})` : '';
       const noteStop = !plan.media ? ' Mi fermo sulla schermata principale' : ` e avvio "${plan.media}"`;
       return {
-        reply: `Eseguo l'automatismo "${matchedSkill.name}"${noteAcc}:${noteStop}, signore.`,
+        reply: `Eseguo l'automatismo "${matchedSkill.name}"${noteAcc}:${noteStop}, Capo.`,
         device: devList,
         actions: matchedSkill.device === 'pc' ? ['pc_action'] : devList.map(d => d.type),
         touched: ['automazioni'],
@@ -894,7 +942,7 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
         if (/chiud/i.test(withoutPc)) {
           devices.enqueueCommand(db, 'desktop', { kind: 'close_app', target: tgt }, nowMs);
           setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target: tgt, action: 'chiudi' }, nowMs);
-          return { reply: `Chiudo ${tgt} sul PC, signore.`, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+          return { reply: `Chiudo ${tgt} sul PC, Capo.`, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
         }
         setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target: tgt, action: 'apri' }, nowMs);
         return dispatchPcOpen(db, tgt, nowMs);
@@ -936,8 +984,8 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
             persist: shouldPersist,
           }, nowMs);
           const msg = accCheck.suggestion
-            ? `Non ho trovato esattamente "${profName}": intendeva l'account "${accCheck.suggestion}"? Me lo conferma?`
-            : `Ho sentito il nuovo account "${profName}". Conferma che vuole salvarlo e usarlo su Chrome?`;
+            ? `Non ho trovato esattamente "${profName}": intendevi l'account "${accCheck.suggestion}"? Me lo confermi?`
+            : `Ho sentito il nuovo account "${profName}". Confermi che vuoi salvarlo e usarlo su Chrome?`;
           return { reply: msg, expectReply: true, device: [], actions: [], touched: ['automazioni'], touchedLeaves: [] };
         }
         flows.saveAccount(db, accCheck.exact);
@@ -948,7 +996,7 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
         }
         setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target: 'chrome', profile: accCheck.exact, action: 'profilo' }, nowMs);
         return {
-          reply: `Apro Chrome sul PC con l'account "${accCheck.exact}"${shouldPersist ? ' e lo salvo tra i suoi account predefiniti' : ''}, signore.`,
+          reply: `Apro Chrome sul PC con l'account "${accCheck.exact}"${shouldPersist ? ' e lo salvo tra i tuoi account predefiniti' : ''}, Capo.`,
           device: [], actions: ['pc_action'], touched: ['automazioni', 'tecnologia'], touchedLeaves: [],
         };
       }
@@ -957,35 +1005,36 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
     // Controlli completi di sistema, media e browser sul PC
     if (/\b(blocca|lock)\b/i.test(clean)) {
       const cmd = devices.enqueueCommand(db, 'desktop', { kind: 'system', target: 'lock', say: 'Blocco lo schermo del PC.' }, nowMs);
-      return { reply: 'Blocco subito lo schermo del PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: ['f:' + cmd.id] };
+      return { reply: 'Blocco subito lo schermo del PC, Capo.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: ['f:' + cmd.id] };
     }
     if (/\b(sospendi|metti\s+in\s+standby|sleep)\b/i.test(withoutPc)) {
       devices.enqueueCommand(db, 'desktop', { kind: 'system', target: 'sleep' }, nowMs);
-      return { reply: 'Metto il PC in sospensione, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+      return { reply: 'Metto il PC in sospensione, Capo.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
+    // Spegnere o riavviare fa perdere il lavoro aperto: prima si chiede (una TV o una frase a metà bastavano a farlo).
     if (/\b(riavvia|reboot)\b/i.test(withoutPc)) {
-      devices.enqueueCommand(db, 'desktop', { kind: 'system', target: 'restart' }, nowMs);
-      return { reply: 'Riavvio il PC tra 10 secondi, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+      kvSet(db, 'pcConfirm', { at: nowMs, target: 'restart', session: sessionId });
+      return { reply: 'Riavvio il PC? Il lavoro non salvato si perde. Dimmi "sì" per confermare.', expectReply: true, device: [], actions: [], touched: ['automazioni'], touchedLeaves: [] };
     }
     if (/\b(spegni\s+il|spegni|shutdown)\b/i.test(withoutPc) && !/\b(monitor|schermo|app|programma)\b/i.test(withoutPc)) {
-      devices.enqueueCommand(db, 'desktop', { kind: 'system', target: 'shutdown' }, nowMs);
-      return { reply: 'Spengo il PC tra 10 secondi, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+      kvSet(db, 'pcConfirm', { at: nowMs, target: 'shutdown', session: sessionId });
+      return { reply: 'Spengo il PC? Il lavoro non salvato si perde. Dimmi "sì" per confermare.', expectReply: true, device: [], actions: [], touched: ['automazioni'], touchedLeaves: [] };
     }
     if (/\b(muto|togli\s+l'audio|togli\s+audio|riattiva\s+audio|smuta)\b/i.test(withoutPc)) {
       devices.enqueueCommand(db, 'desktop', { kind: 'system', target: 'mute' }, nowMs);
-      return { reply: 'Attivo/disattivo il muto sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+      return { reply: 'Attivo/disattivo il muto sul PC, Capo.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
     if (/\b(prossim[ao]\s+(?:video|brano|canzone|traccia)|avanti\s+canzone|salta\s+canzone)\b/i.test(withoutPc)) {
       devices.enqueueCommand(db, 'desktop', { kind: 'system', target: 'next_track' }, nowMs);
-      return { reply: 'Passo alla traccia successiva sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+      return { reply: 'Passo alla traccia successiva sul PC, Capo.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
     if (/\b(precedente\s+(?:video|brano|canzone|traccia)|torna\s+alla\s+canzone\s+prima)\b/i.test(withoutPc)) {
       devices.enqueueCommand(db, 'desktop', { kind: 'system', target: 'prev_track' }, nowMs);
-      return { reply: 'Torno alla traccia precedente sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+      return { reply: 'Torno alla traccia precedente sul PC, Capo.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
     if (/\b(pausa|play|ferma\s+la\s+musica|riprendi\s+la\s+musica)\b/i.test(clean) && !/\b(video|film|youtube|canzone|chrome|prime|spotify|netflix|vscode|edge|google|whatsapp|discord|app|programma)\b/i.test(clean)) {
       const cmd = devices.enqueueCommand(db, 'desktop', { kind: 'system', target: 'play_pause', say: 'Play/Pausa sul PC.' }, nowMs);
-      return { reply: 'Invio il comando multimediale al PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: ['f:' + cmd.id] };
+      return { reply: 'Invio il comando multimediale al PC, Capo.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: ['f:' + cmd.id] };
     }
     if (/^(?:play|apri)\s+(google\s+chrome|chrome|prime\s+video|prime|youtube|spotify|netflix|vscode|google)\b/i.test(withoutPc)) {
       const mPlayApp = /^(?:play|apri)\s+(google\s+chrome|chrome|prime\s+video|prime|youtube|spotify|netflix|vscode|google)\b/i.exec(withoutPc);
@@ -995,68 +1044,68 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
     }
     if (/\b(alza\s+il\s+volume|volume\s+su)\b/i.test(clean)) {
       devices.enqueueCommand(db, 'desktop', { kind: 'system', target: 'vol_up' }, nowMs);
-      return { reply: 'Alzo il volume sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+      return { reply: 'Alzo il volume sul PC, Capo.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
     if (/\b(abbassa\s+il\s+volume|volume\s+gi[uù])\b/i.test(clean)) {
       devices.enqueueCommand(db, 'desktop', { kind: 'system', target: 'vol_down' }, nowMs);
-      return { reply: 'Abbasso il volume sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+      return { reply: 'Abbasso il volume sul PC, Capo.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
 
     // Scorciatoie browser e finestre sul PC
     if (/\b(nuova\s+scheda|apri\s+una\s+scheda)\b/i.test(withoutPc)) {
       devices.enqueueCommand(db, 'desktop', { kind: 'hotkey', target: 'ctrl+t' }, nowMs);
-      return { reply: 'Apro una nuova scheda sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+      return { reply: 'Apro una nuova scheda sul PC, Capo.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
     if (/\b(chiudi\s+(?:la\s+)?(?:scheda|pagina)|chiudi\s+tab)\b/i.test(withoutPc)) {
       devices.enqueueCommand(db, 'desktop', { kind: 'hotkey', target: 'ctrl+w' }, nowMs);
-      return { reply: 'Chiudo la scheda corrente sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+      return { reply: 'Chiudo la scheda corrente sul PC, Capo.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
     if (/\b(ricarica|aggiorna\s+(?:la\s+)?pagina)\b/i.test(withoutPc)) {
       devices.enqueueCommand(db, 'desktop', { kind: 'hotkey', target: 'f5' }, nowMs);
-      return { reply: 'Aggiorno la pagina sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+      return { reply: 'Aggiorno la pagina sul PC, Capo.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
     if (/\b(torna\s+indietro|pagina\s+indietro)\b/i.test(withoutPc)) {
       devices.enqueueCommand(db, 'desktop', { kind: 'hotkey', target: 'alt+left' }, nowMs);
-      return { reply: 'Torno alla pagina precedente sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+      return { reply: 'Torno alla pagina precedente sul PC, Capo.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
     if (/\b(schermo\s+intero|fullscreen)\b/i.test(withoutPc)) {
       devices.enqueueCommand(db, 'desktop', { kind: 'hotkey', target: 'f11' }, nowMs);
-      return { reply: 'Attivo/disattivo lo schermo intero sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+      return { reply: 'Attivo/disattivo lo schermo intero sul PC, Capo.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
     if (/\b(scorri(?:\s+la\s+pagina|\s+gi[uù]|\s+verso\s+il\s+basso)?|scendi)\b/i.test(withoutPc) && !/\bsu\b|\balto\b/i.test(withoutPc)) {
       devices.enqueueCommand(db, 'desktop', { kind: 'scroll', target: 'down' }, nowMs);
       setNavMode(db, sessionId, true, 'pc', nowMs);
-      return { reply: 'Scorro la pagina verso il basso sul PC, signore.', expectReply: true, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+      return { reply: 'Scorro la pagina verso il basso sul PC, Capo.', expectReply: true, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
     if (/\b(scorri\s+(?:in\s+)?su|scorri\s+verso\s+l'alto|sali)\b/i.test(withoutPc)) {
       devices.enqueueCommand(db, 'desktop', { kind: 'scroll', target: 'up' }, nowMs);
       setNavMode(db, sessionId, true, 'pc', nowMs);
-      return { reply: 'Scorro la pagina verso l\'alto sul PC, signore.', expectReply: true, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+      return { reply: 'Scorro la pagina verso l\'alto sul PC, Capo.', expectReply: true, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
     if (/\b(cambia\s+finestra|alt\s+tab)\b/i.test(withoutPc)) {
       devices.enqueueCommand(db, 'desktop', { kind: 'hotkey', target: 'alt+tab' }, nowMs);
-      return { reply: 'Cambio finestra attiva sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+      return { reply: 'Cambio finestra attiva sul PC, Capo.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
     if (/\b(mostra\s+(?:il\s+)?desktop|minimizza\s+tutto|riduci\s+tutto)\b/i.test(withoutPc)) {
       devices.enqueueCommand(db, 'desktop', { kind: 'hotkey', target: 'win+d' }, nowMs);
-      return { reply: 'Mostro il desktop sul PC, signore.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+      return { reply: 'Mostro il desktop sul PC, Capo.', device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
     if (/^(?:clicca|invio|conferma|apri\s+questo|seleziona\s+questo)\s*$/i.test(withoutPc)) {
       devices.enqueueCommand(db, 'desktop', { kind: 'hotkey', target: 'enter' }, nowMs);
       setNavMode(db, sessionId, true, 'pc', nowMs);
-      return { reply: 'Confermo sul PC, signore.', expectReply: true, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+      return { reply: 'Confermo sul PC, Capo.', expectReply: true, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
     if (/^(?:prossimo\s+elemento|avanti\s+tab|tab)\s*$/i.test(withoutPc)) {
       devices.enqueueCommand(db, 'desktop', { kind: 'hotkey', target: 'tab' }, nowMs);
       setNavMode(db, sessionId, true, 'pc', nowMs);
-      return { reply: 'Passo al prossimo elemento, signore.', expectReply: true, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+      return { reply: 'Passo al prossimo elemento, Capo.', expectReply: true, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
     const findPageMatch = /^(?:cerca\s+nella\s+pagina|clicca(?:\s+su)?|apri\s+(?:il\s+link|la\s+voce|il\s+risultato)|vai\s+sul\s+titolo|seleziona(?:\s+su)?|su\s+questa\s+pagina\s+(?:cerca|clicca|apri))\s+(.+)$/i.exec(withoutPc);
     if (findPageMatch) {
       const q = findPageMatch[1].replace(/[.!?]+$/, '').trim();
       devices.enqueueCommand(db, 'desktop', { kind: 'find_on_page', target: q, args: 'open' }, nowMs);
       setNavMode(db, sessionId, true, 'pc', nowMs);
-      return { reply: `Cerco e seleziono "${q}" nella pagina corrente, signore.`, expectReply: true, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+      return { reply: `Cerco e seleziono "${q}" nella pagina corrente, Capo.`, expectReply: true, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
 
     // Chiusura programmi / app / siti / finestre sul PC ("chiudi chrome sul pc", "no no chiudi chrome", "chiudi tutto")
@@ -1071,7 +1120,7 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
         : target;
       devices.enqueueCommand(db, 'desktop', { kind: 'close_app', target: norm }, nowMs);
       setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target, action: 'chiudi' }, nowMs);
-      return { reply: `Chiudo ${target} sul PC, signore.`, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+      return { reply: `Chiudo ${target} sul PC, Capo.`, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
 
     // Scrittura / incolla testo sul PC ("scrivi ciao a tutti sul pc")
@@ -1079,7 +1128,7 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
     if (typeMatch) {
       const txt = typeMatch[1].trim();
       devices.enqueueCommand(db, 'desktop', { kind: 'type_text', target: txt }, nowMs);
-      return { reply: `Scrivo sul PC: "${txt.slice(0, 60)}", signore.`, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+      return { reply: `Scrivo sul PC: "${txt.slice(0, 60)}", Capo.`, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
 
     // Ricerca file o cartelle locali sul PC ("cerca file preventivo sul pc")
@@ -1087,14 +1136,14 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
     if (fileMatch) {
       const q = fileMatch[1].replace(/[.!?]+$/, '').trim();
       devices.enqueueCommand(db, 'desktop', { kind: 'search_files', target: q }, nowMs);
-      return { reply: `Cerco "${q}" tra i file del PC, signore.`, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+      return { reply: `Cerco "${q}" tra i file del PC, Capo.`, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
 
     // Esecuzione comando shell esplicito sul PC ("esegui comando dir sul pc")
     const shellMatch = /^(?:esegui\s+comando|lancia\s+comando|terminale)\s+(.+)$/i.exec(withoutPc);
     if (shellMatch) {
       devices.enqueueCommand(db, 'desktop', { kind: 'shell', target: shellMatch[1].trim() }, nowMs);
-      return { reply: `Eseguo il comando sul PC, signore.`, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+      return { reply: `Eseguo il comando sul PC, Capo.`, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
 
     // Far partire un video, un film o una canzone su YouTube sul PC (solo se NON chiede esplicitamente "non su youtube", "prime video" o ricerca "su chrome/google/online")
@@ -1115,7 +1164,7 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
     if (urlMatch && /\b(apri|aprire|vai\s+su|visita|cerca|cercare)\b/i.test(withoutPc)) {
       const url = /^https?:\/\//i.test(urlMatch[1]) ? urlMatch[1] : 'https://' + urlMatch[1];
       devices.enqueueCommand(db, 'desktop', { kind: 'open_url', target: url }, nowMs);
-      return { reply: `Apro ${urlMatch[1]} sul PC, signore.`, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+      return { reply: `Apro ${urlMatch[1]} sul PC, Capo.`, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
 
     // Apertura programma/app/sito sul PC ("apri YouTube su Ghideon", "aprire YouTube sul computer", "avvia VS Code sul computer")
@@ -1134,7 +1183,7 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
         }, nowMs);
         const listTxt = accounts.slice(0, 5).map((a, i) => `${i + 1}) ${a}`).join(', ');
         return {
-          reply: `Quale account vuole utilizzare per ${targetName}? Salvati: ${listTxt}.`,
+          reply: `Quale account vuoi usare per ${targetName}? Salvati: ${listTxt}.`,
           expectReply: true,
           device: [], actions: [], touched: ['automazioni'], touchedLeaves: [],
         };
@@ -1176,7 +1225,7 @@ export function handleCoreIntent(db, userText, nowMs = Date.now(), env = {}, ses
       }
       devices.enqueueCommand(db, 'desktop', { kind: 'search_web', target: q }, nowMs);
       setFocus(db, sessionId, { domain: 'dispositivo', device: 'pc', target: q, action: 'cerca' }, nowMs);
-      return { reply: `Cerco "${q}" sul PC, signore.`, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
+      return { reply: `Cerco "${q}" sul PC, Capo.`, device: [], actions: ['pc_action'], touched: ['automazioni'], touchedLeaves: [] };
     }
   }
 

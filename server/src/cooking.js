@@ -1,5 +1,6 @@
 // Sessione di cucina: la ricetta resta a schermo dentro Kestra (ingredienti con le dosi, passaggi uno alla volta)
 // e si può salvare per rifarla. Un solo kv per la sessione aperta e uno per le ricette salvate.
+import { cleanSpoken } from './parlato.js';
 import { kvGet, kvSet } from './db.js';
 import { loadDiary, saveDiary } from './diet.js';
 import { findFood, gramsOf, estimate } from './foods.js';
@@ -150,15 +151,18 @@ export function apply(db, a = {}, ms = Date.now()) {
   }
 }
 
-const NEXT_RE = /^\W*(?:ok\W*|fatto\W*|e\s+)?(?:avanti|prossimo(?:\s+passo|\s+passaggio)?|passo\s+successivo|vai\s+avanti|poi|dopo|e\s+adesso|e\s+ora)\W*$/i;
-const PREV_RE = /^\W*(?:torna\s+indietro|indietro|passo\s+precedente|ripeti\s+il\s+passo\s+prima)\W*$/i;
-const REPEAT_RE = /^\W*(?:ripeti|ripetilo|cosa\s+devo\s+fare(?:\s+ora)?|a\s+che\s+punto\s+(?:sono|siamo))\W*$/i;
+// Con le mani in pasta si parla a pezzi: "ok fatto", "il prossimo", "kestra avanti", "puoi ripetere?", "come?".
+// La frase passa prima da cleanSpoken (via il nome, le esitazioni, le parole doppie come "avanti avanti").
+const NEXT_RE = /^\W*(?:(?:ok|fatto|ho\s+fatto|finito|ho\s+finito|e|s[iì]|bene|perfetto)\W*)*(?:avanti|(?:il\s+)?prossimo(?:\s+passo|\s+passaggio)?|passo\s+successivo|(?:il\s+)?successivo|vai(?:\s+avanti)?|andiamo(?:\s+avanti)?|continua|poi|e\s+poi|dopo|e\s+adesso|e\s+ora|fatto|ho\s+fatto|finito|ho\s+finito)\W*$/i;
+const PREV_RE = /^\W*(?:torna(?:\s+(?:indietro|al\s+passo\s+prima|a\s+prima))?|indietro|passo\s+precedente|(?:il\s+)?precedente|quello\s+prima|ripeti\s+il\s+passo\s+prima)\W*$/i;
+const REPEAT_RE = /^\W*(?:ripeti(?:lo|mi)?|puoi\s+ripetere|me\s+lo\s+ripeti|ridimmi|ridillo|come|cosa|eh|non\s+ho\s+capito|di\s+nuovo|(?:che|cosa)\s+devo\s+fare(?:\s+(?:ora|adesso))?|a\s+che\s+punto\s+(?:sono|siamo))\W*$/i;
 
 /** Comandi a voce durante la cucina, senza chiamare un modello ("avanti", "indietro", "ripeti"). */
 export function voiceStep(db, text, ms = Date.now()) {
   const cur = session(db);
   if (!cur || !cur.steps?.length) return null;
-  const t = String(text || '').trim();
+  const t = cleanSpoken(text).replace(/\s*\b(?:per\s+favore|grazie|pure)\W*$/i, '').trim();
+  if (!t) return null;
   let op = null;
   if (NEXT_RE.test(t)) op = 'next'; else if (PREV_RE.test(t)) op = 'prev'; else if (REPEAT_RE.test(t)) op = 'repeat';
   if (!op) return null;

@@ -594,3 +594,35 @@ modello solo per "Kestra".
 - Se il modello non dà le calorie di un ingrediente, `server/src/foods.js` le stima da una tabella piccola di cibi comuni (valori medi per 100 g, pezzi tipo "1 piadina" = 110 g, cucchiai); a schermo hanno "~". Se non si può stimare, l'ingrediente è segnato "? kcal" e compare in "Senza calorie" invece di sparire.
 - La scheda mostra "nome · dose · kcal · proteine" per riga e sotto il totale con proteine, carboidrati e grassi. Il ricettario della dieta riceve i valori veri.
 - Per le correzioni il modello vede nel contesto gli ingredienti con le calorie e rimanda `recipe` con lo stesso titolo: passaggi e punto in cui eri restano.
+
+## Crash test completo (19/11/2026)
+Prova di tutto il sistema con frasi dette come le dice davvero il Capo (sgrammaticate, "ehm", numeri a parole,
+parole ripetute, errori del riconoscimento) e con modelli che rispondono male. I casi sono in `server/test/crash.test.js`.
+- **Parlato** (`server/src/parlato.js`): prima delle regole locali la frase perde il nome all'inizio, le esitazioni e
+  le parole doppie, e i numeri a parole diventano cifre ("timer di dieci minuti" partiva da 1 minuto). Le parole
+  "di riempimento" (allora, tipo, senti) si tolgono solo all'inizio. Solo esitazione ("ehm", "kestra") → "Dimmi, Capo."
+  senza modello e senza scritture; in conversazione aperta viene ignorata.
+- **Timer**: senza durata si chiede "Di quanto lo metto?" e la risposta ("dieci minuti") lo avvia.
+- **PC**: la rete di sicurezza parte solo se è il Capo a chiedere un'azione sul PC (verbo all'inizio, non una domanda).
+  Prima bastava che la risposta del modello nominasse il PC per buttare via un messaggio WhatsApp. Spegnere e
+  riavviare chiedono conferma (kv `pcConfirm`, 60 s).
+- **Telefonate**: non si chiama "ehm", "un taxi", con parole di tempo ("domani chiama il dentista" è un promemoria) o
+  con "non chiamare". "chiama la mamma no aspetta il papà" chiama il papà. I numeri di emergenza partono subito solo
+  se la frase parla di un'emergenza ("aiuto", "incidente"...), altrimenti si chiede (kv `callConfirm`).
+- **Pasti**: i numeri scritti come testo ("320 kcal", "110g", "82,4", "8.000 passi") valgono; valori impossibili si
+  limitano; se mancano le calorie ma ci sono i grammi si stimano da `foods.js`. Pesi oltre 400 kg si scartano.
+- **Promemoria** (`agenda.parseDue`): la "Z" e gli offset contano (prima un'ora di sfasamento), ora a una cifra,
+  "20/11/2026 08:00", solo data (alle 9), solo ora (la prossima). Un orario del modello già passato da meno di un
+  giorno va al giorno dopo invece di suonare subito; dall'interfaccia resta com'è.
+- **Cucina**: "ok fatto", "il prossimo", "kestra avanti", "puoi ripetere", "come?" scorrono i passaggi senza modello.
+- **Conversazione aperta**: tre parole qualsiasi non bastano più (la TV); bastano risposte tipo "sì", "va bene", "grazie".
+- **Tono**: le risposte locali dicono "Capo" e danno del tu, al femminile ("non ci sono riuscita").
+- **Scritture di Cloudflare: trovata la perdita.** `memory.tidyTopics`, chiamata a ogni `GET /api/graph`, riscriveva
+  ogni argomento annidato anche se non cambiava nulla. La sfera si legge ogni 90 s, a ogni ascolto della finestra sopra
+  le app e tre volte dopo ogni messaggio: con 40 argomenti annidati, 100 letture = 4000 righe (ora 0). Regola: un
+  UPDATE solo se il valore cambia davvero.
+- **Parola Kestra** (prove con le registrazioni, a pezzi da 80 ms come il telefono, guadagno automatico): regge volume
+  ×0,05, eco, buchi di registrazione, banda telefonica e parlato più lento/veloce. Punti deboli: con la TV accesa
+  sotto la voce sente il nome 5 volte su 15; con un rumore forte e costante (ventola, cappa) scatta da sola
+  (9 volte nei test a 10 dB). Chiedere 3 punteggi di fila invece di 2 porta i falsi da 9 a 3 e perde 1 nome su 15:
+  non applicato, da decidere col Capo. Per la TV serve riaddestrare con nomi mescolati alla TV.
