@@ -856,8 +856,8 @@ class JarvisDesktopApp:
         c.create_oval(cx - 26, cy - 26, cx + 26, cy + 26, outline="#a855f7", fill="#040806", width=2)
         # Simbolo pulito di Kestra a 3 punte
         c.create_line(cx - 12, cy - 3, cx, cy - 17, cx + 12, cy - 3, fill="#c084fc", width=1.8)
-        c.create_line(cx - 12, cy - 3, cx - 12, cy + 16, cx + 12, cy - 3, fill="#c084fc", width=1.6)
-        c.create_line(cx + 12, cy - 3, cx + 12, cy + 16, cx - 12, cy - 3, fill="#c084fc", width=1.6)
+        c.create_line(cx - 12, cy - 3, cx - 8, cy + 16, cx + 12, cy - 3, fill="#c084fc", width=1.6)
+        c.create_line(cx + 12, cy - 3, cx + 8, cy + 16, cx - 12, cy - 3, fill="#c084fc", width=1.6)
         c.create_line(cx - 12, cy - 3, cx, cy + 16, cx + 12, cy - 3, fill="#c084fc", width=1.6)
         c.create_line(cx - 3, cy - 10, cx - 3, cy - 6, fill="#39ff14", width=2)
         c.create_line(cx + 3, cy - 10, cx + 3, cy - 6, fill="#39ff14", width=2)

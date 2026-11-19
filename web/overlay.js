@@ -159,11 +159,12 @@ function frame(now) {
   const sr = cr * 0.66;
   const syTop = C - sr * 0.95, syMid = C - sr * 0.18, syBot = C + sr * 0.92;
   const sxL = C - sr * 0.62, sxR = C + sr * 0.62;
+  const sbL = C - sr * 0.41, sbR = C + sr * 0.41; // punte strette (schizzo di Alessio)
   ctx.strokeStyle = '#c084fc'; ctx.lineWidth = 1.9; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
   ctx.beginPath();
   ctx.moveTo(sxL, syMid); ctx.lineTo(C, syTop); ctx.lineTo(sxR, syMid);
-  ctx.moveTo(sxL, syMid); ctx.lineTo(sxL, syBot); ctx.lineTo(sxR, syMid);
-  ctx.moveTo(sxR, syMid); ctx.lineTo(sxR, syBot); ctx.lineTo(sxL, syMid);
+  ctx.moveTo(sxL, syMid); ctx.lineTo(sbL, syBot); ctx.lineTo(sxR, syMid);
+  ctx.moveTo(sxR, syMid); ctx.lineTo(sbR, syBot); ctx.lineTo(sxL, syMid);
   ctx.moveTo(sxL, syMid); ctx.lineTo(C, syBot); ctx.lineTo(sxR, syMid);
   ctx.stroke();
   ctx.strokeStyle = '#39ff14'; ctx.lineWidth = 1.8;
