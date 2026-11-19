@@ -7,35 +7,30 @@ import android.media.AudioRecord
 import android.media.MediaRecorder
 import android.os.Build
 import android.util.Log
-import com.k2fsa.sherpa.onnx.FeatureConfig
-import com.k2fsa.sherpa.onnx.KeywordSpotter
-import com.k2fsa.sherpa.onnx.KeywordSpotterConfig
-import com.k2fsa.sherpa.onnx.OnlineModelConfig
-import com.k2fsa.sherpa.onnx.OnlineStream
-import com.k2fsa.sherpa.onnx.OnlineTransducerModelConfig
+import ai.onnxruntime.OrtEnvironment
 
 /**
  * Riconoscimento "forte" della parola Kestra, tutto sul telefono e senza internet.
  *
  * Il riconoscimento vocale di Android cerca parole italiane e scrive "Kestra" come "questa", "kesta"...
- * Qui invece un piccolo modello (sherpa-onnx, keyword spotting) ascolta il microfono e cerca SOLO la
- * sequenza di suoni di "Kestra": niente vocabolario, niente trascrizione. Quando la sente avvisa il servizio,
- * che passa al riconoscimento normale per capire la richiesta.
+ * Qui invece un modello addestrato apposta sulla parola "Kestra" (anche sulla voce di Alessio) ascolta il
+ * microfono e dà un punteggio ogni 80 ms ([KestraDetector]): niente vocabolario, niente trascrizione.
+ * Quando lo sente avvisa il servizio, che passa al riconoscimento normale per capire la richiesta.
  *
- * Modello e librerie vengono scaricati durante la build (scripts/fetch_kws.sh). Se mancano (o il telefono non è
- * arm64) [ready] è falso e il servizio usa il metodo di prima.
+ * Il primo tentativo (sherpa-onnx, modello inglese) non riconosceva mai il "Kestra" detto in italiano: vedi
+ * docs/DECISIONI.md. Modelli in assets/kestra/ (onnxruntime). Se mancano [ready] è falso e il servizio usa il
+ * metodo di Android.
  */
 object KestraKws {
     private const val TAG = "KestraKws"
     private const val SR = 16000
-    private const val DIR = "kws"
+    private const val DIR = "kestra"
 
     @Volatile var running = false; private set
     /** Ultima volta che il ciclo di ascolto ha letto audio (per il controllo anti-blocco del servizio). */
     @Volatile var lastAliveMs = 0L; private set
 
-    private var spotter: KeywordSpotter? = null
-    private var spotterKey = ""
+    private var models: KestraOnnx? = null
     private var thread: Thread? = null
     /** Ogni accensione ha il suo numero: un ciclo vecchio che non ha ancora chiuso il microfono si ferma da solo. */
     @Volatile private var gen = 0
@@ -50,6 +45,9 @@ object KestraKws {
     @Volatile var detections = 0; private set
     @Volatile var lastWakeAtMs = 0L; private set
     @Volatile var lastError = ""; private set
+    /** Ultimo punteggio del modello (0..1) e il più alto dall'avvio dell'app: aiutano a tarare la sensibilità. */
+    @Volatile var lastScore = 0f; private set
+    @Volatile var peakScore = 0f; private set
     /** Android dà al servizio un microfono muto (succede se l'ascolto è ripartito mentre l'app era chiusa). */
     @Volatile var silencedUntilMs = 0L; private set
 
@@ -65,24 +63,19 @@ object KestraKws {
         if (silenced()) return false
         available?.let { return it }
         val ok = runCatching {
-            Build.SUPPORTED_ABIS.contains("arm64-v8a") &&
-                ctx.assets.list(DIR).orEmpty().toSet().containsAll(listOf("encoder.onnx", "decoder.onnx", "joiner.onnx", "tokens.txt", "keywords.txt"))
-        }.getOrDefault(false) && runCatching { System.loadLibrary("sherpa-onnx-jni"); true }.getOrElse {
-            Log.w(TAG, "libreria non disponibile", it); false
+            ctx.assets.list(DIR).orEmpty().toSet().containsAll(FILES)
+        }.getOrDefault(false) && runCatching { OrtEnvironment.getEnvironment(); true }.getOrElse {
+            Log.w(TAG, "onnxruntime non disponibile", it); false
         }
         available = ok
         return ok
     }
 
     /**
-     * Sensibilità 0..1 dell'app → soglia di attivazione (più bassa = più facile) e spinta della parola.
-     * Il modello è inglese e "Kestra" detto da un italiano non è mai perfetto: soglie più basse delle predefinite
-     * (0.25 / 1.0). Bassa ≈ 0.22, Media ≈ 0.19, Alta ≈ 0.14.
+     * Sensibilità 0..1 dell'app → punteggio minimo (0..1) del modello per dire "ho sentito Kestra".
+     * Valori tarati sulle registrazioni di Alessio con scripts/kestra_ww/evaluate.py.
      */
-    internal fun tuning(sensitivity: Float): Pair<Float, Float> {
-        val s = sensitivity.coerceIn(0f, 1f)
-        return (0.25f - 0.13f * s) to (1.5f + 1.5f * s)
-    }
+    internal fun threshold(sensitivity: Float): Float = (T_LOW - (T_LOW - T_HIGH) * sensitivity.coerceIn(0f, 1f))
 
     /**
      * Controllo automatico del volume: il telefono sul comodino sente la voce dalla scrivania molto bassa.
@@ -106,28 +99,16 @@ object KestraKws {
     private const val TARGET_RMS = 0.08f
     private const val MAX_GAIN = 5f
     private const val SILENT_CHUNKS = 60 // 6 secondi di zeri esatti
+    private const val T_LOW = 0.95f // sensibilità 0 (Bassa 0,2 → 0,89)
+    private const val T_HIGH = 0.65f // sensibilità 1 (Media 0,5 → 0,8; Alta 0,88 → 0,69)
+    private val FILES = listOf("melspectrogram.onnx", "embedding_model.onnx", "kestra_ww.json")
 
-    private fun spotterFor(ctx: Context, sensitivity: Float): KeywordSpotter {
-        val (threshold, score) = tuning(sensitivity)
-        val key = "%.2f/%.2f".format(threshold, score)
-        spotter?.let { if (spotterKey == key) return it; runCatching { it.release() } }
-        val config = KeywordSpotterConfig(
-            featConfig = FeatureConfig(sampleRate = SR, featureDim = 80),
-            modelConfig = OnlineModelConfig(
-                transducer = OnlineTransducerModelConfig(
-                    encoder = "$DIR/encoder.onnx",
-                    decoder = "$DIR/decoder.onnx",
-                    joiner = "$DIR/joiner.onnx",
-                ),
-                tokens = "$DIR/tokens.txt",
-                modelType = "zipformer2",
-                numThreads = 1,
-            ),
-            keywordsFile = "$DIR/keywords.txt",
-            keywordsThreshold = threshold,
-            keywordsScore = score,
-        )
-        return KeywordSpotter(ctx.assets, config).also { spotter = it; spotterKey = key }
+
+    private fun modelsFor(ctx: Context): KestraOnnx {
+        models?.let { return it }
+        fun bytes(name: String) = ctx.assets.open("$DIR/$name").use { it.readBytes() }
+        return KestraOnnx(bytes("melspectrogram.onnx"), bytes("embedding_model.onnx"), String(bytes("kestra_ww.json")))
+            .also { models = it }
     }
 
     /**
@@ -139,7 +120,7 @@ object KestraKws {
     fun start(ctx: Context, sensitivity: Float, onWake: () -> Unit, onError: (Throwable) -> Unit, onSilent: () -> Unit = {}): Boolean {
         if (running) return true
         if (!ready(ctx)) return false
-        val kws = try { spotterFor(ctx.applicationContext, sensitivity) } catch (t: Throwable) {
+        val m = try { modelsFor(ctx.applicationContext) } catch (t: Throwable) {
             Log.w(TAG, "modello non caricato", t); lastError = "modello: ${t.message}"; failedAtMs = System.currentTimeMillis(); available = null; return false
         }
         val minBuf = AudioRecord.getMinBufferSize(SR, AudioFormat.CHANNEL_IN_MONO, AudioFormat.ENCODING_PCM_16BIT)
@@ -158,7 +139,8 @@ object KestraKws {
         running = true
         lastAliveMs = System.currentTimeMillis()
         val my = ++gen
-        thread = Thread({ loop(my, kws, record, onWake, onError, onSilent) }, "kestra-kws").also { it.start() }
+        val thr = threshold(sensitivity)
+        thread = Thread({ loop(my, m.detector(), thr, record, onWake, onError, onSilent) }, "kestra-kws").also { it.start() }
         return true
     }
 
@@ -169,11 +151,8 @@ object KestraKws {
         thread = null // il ciclo vede running=false, chiude il microfono ed esce entro 100 ms
     }
 
-    private fun loop(my: Int, kws: KeywordSpotter, record: AudioRecord, onWake: () -> Unit, onError: (Throwable) -> Unit, onSilent: () -> Unit) {
-        var stream: OnlineStream? = null
+    private fun loop(my: Int, det: KestraDetector, thr: Float, record: AudioRecord, onWake: () -> Unit, onError: (Throwable) -> Unit, onSilent: () -> Unit) {
         try {
-            val st = kws.createStream()
-            stream = st
             record.startRecording()
             val buf = ShortArray(SR / 10) // 100 ms
             val samples = FloatArray(buf.size)
@@ -184,6 +163,7 @@ object KestraKws {
             val recent = FloatArray(20)
             var g = gain.coerceIn(1f, MAX_GAIN)
             var lvl = 0f
+            val started = System.currentTimeMillis()
             while (running && gen == my) {
                 val n = record.read(buf, 0, buf.size)
                 if (n < 0) throw IllegalStateException("lettura microfono: $n")
@@ -210,11 +190,15 @@ object KestraKws {
                 level = lvl
                 g = nextGain(g, recent.maxOrNull() ?: 0f)
                 gain = g
-                if (g > 1.01f) for (i in 0 until n) samples[i] = kotlin.math.tanh(samples[i] * g) // limitatore morbido
-                st.acceptWaveform(if (n == buf.size) samples else samples.copyOf(n), SR)
-                while (kws.isReady(st)) kws.decode(st)
-                if (kws.getResult(st).keyword.isNotBlank()) {
-                    kws.reset(st)
+                // Il modello lavora in scala int16; il limitatore morbido evita la saturazione col guadagno alto.
+                if (g > 1.01f) for (i in 0 until n) samples[i] = kotlin.math.tanh(samples[i] * g) * 32767f
+                else for (i in 0 until n) samples[i] *= 32767f
+                val score = det.push(samples, n)
+                if (score < 0f) continue
+                lastScore = score
+                if (score > peakScore) peakScore = score
+                // Il primo secondo dopo l'accensione riempie solo la memoria del modello.
+                if (score >= thr && System.currentTimeMillis() - started > 1000L) {
                     val now = System.currentTimeMillis()
                     if (now - lastWake > 1500L && running && gen == my) {
                         lastWake = now
@@ -236,7 +220,6 @@ object KestraKws {
         } finally {
             runCatching { record.stop() }
             runCatching { record.release() }
-            runCatching { stream?.release() }
         }
     }
 }

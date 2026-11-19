@@ -138,6 +138,10 @@ class JarvisBridge(
             val pct = (kotlin.math.sqrt(k.level.toDouble()) * 300).toInt().coerceIn(0, 100)
             parts += "Volume del microfono: $pct%" + (if (k.gain > 1.2f) " (alzato ×${"%.1f".format(k.gain)})" else "") + "."
         }
+        if (k.peakScore > 0f) {
+            // Punteggio del modello di "Kestra" (0-100): serve a capire se la sensibilità va alzata o abbassata.
+            parts += "Somiglianza con \"Kestra\": adesso ${(k.lastScore * 100).toInt()}, la più alta finora ${(k.peakScore * 100).toInt()} (scatta da ${(k.threshold(Settings.sensitivity) * 100).toInt()})."
+        }
         if (k.detections > 0) {
             val at = java.text.SimpleDateFormat("HH:mm", java.util.Locale.ITALY).format(java.util.Date(k.lastWakeAtMs))
             parts += "Ha sentito \"Kestra\" ${k.detections} ${if (k.detections == 1) "volta" else "volte"}, l'ultima alle $at."

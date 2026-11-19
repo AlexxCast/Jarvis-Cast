@@ -8,16 +8,14 @@ import org.junit.Test
 
 class KestraKwsTest {
     @Test
-    fun `piu sensibilita vuol dire soglia piu bassa e spinta piu forte`() {
-        val (lowT, lowS) = KestraKws.tuning(0.2f)
-        val (midT, midS) = KestraKws.tuning(0.5f)
-        val (highT, highS) = KestraKws.tuning(0.88f)
-        assertTrue(lowT > midT && midT > highT)
-        assertTrue(lowS < midS && midS < highS)
-        // Mai sotto 0.1: sotto quella soglia scatterebbe con ogni parola simile.
-        assertTrue(KestraKws.tuning(1f).first >= 0.1f)
-        // Più facile delle soglie predefinite di sherpa-onnx (0.25 / 1.0) già a sensibilità media.
-        assertTrue(midT < 0.25f && midS > 1f)
+    fun `piu sensibilita vuol dire soglia piu bassa`() {
+        val low = KestraKws.threshold(0.2f)
+        val mid = KestraKws.threshold(0.5f)
+        val high = KestraKws.threshold(0.88f)
+        assertTrue(low > mid && mid > high)
+        // Sempre un punteggio vero (0..1) e mai così basso da scattare con ogni parola simile.
+        assertTrue(KestraKws.threshold(0f) < 1f && KestraKws.threshold(1f) >= 0.3f)
+        assertEquals(KestraKws.threshold(1f), KestraKws.threshold(5f), 0f)
     }
 
     @Test

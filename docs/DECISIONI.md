@@ -534,3 +534,35 @@ di tracce verificate, che adesso iniziamo a raccogliere con gli esiti dei comand
 - Scheda in Kestra (sotto la sfera), Oggi e Attività (con "Ricette salvate" da riaprire). A voce "avanti", "indietro",
   "ripeti" scorrono i passaggi senza chiamare un modello (`cooking.voiceStep`, prima di `handleCoreIntent`).
 - Anteprima: `/mnt/project-files/jarvis/anteprime-cucina/sessione-cucina.png`.
+## Modello dedicato alla parola "Kestra" (app 2.41, 19/11/2026)
+Con la 2.37 il riconoscimento forte era acceso e riceveva audio (diagnosi "Stato": microfono al 9%, alzato ×5),
+ma non aveva MAI sentito "Kestra". Prove sulla registrazione di Alessio e su voci italiane sintetiche: il modello
+inglese di sherpa-onnx capisce "CASE THERE ARE CASE" e non scatta a nessuna soglia; anche il modello a fonemi
+(zh-en 3M) arriva al massimo a 14 su 63 da vicino e quasi zero da lontano. Un confronto diretto con le
+registrazioni (MFCC + DTW) non distingue "Kestra" da finestra/maestra/orchestra. Scelta di Alessio: addestrare un
+modello solo per "Kestra".
+- **Come funziona** (stile openWakeWord, Apache 2.0): due modelli già addestrati e fissi trasformano l'audio in
+  "vettori di suoni" (melspettrogramma 32 bande ogni 10 ms → embedding di 96 numeri ogni 80 ms); una piccola rete
+  nostra (1536 → 64 → 64 → 1) guarda gli ultimi 16 vettori (~1,3 s) e dà un punteggio 0..1. In app:
+  `voice/KestraDetector.kt` (streaming + rete, senza Android, testato), `voice/KestraOnnx.kt` (onnxruntime-android
+  1.32), `voice/KestraKws.kt` (microfono, guadagno automatico, microfono muto, diagnosi). Modelli in
+  `app/src/main/assets/kestra/` (`melspectrogram.onnx`, `embedding_model.onnx`, `kestra_ww.json`). sherpa-onnx
+  è stato tolto (sorgenti, `fetch_kws.sh`, librerie). Solo arm64 (`abiFilters`) per non gonfiare l'APK.
+- **Stessi numeri del telefono**: i vettori per l'addestramento si calcolano ESATTAMENTE come nell'app (pezzi da
+  1280 campioni, spettro sugli ultimi 1760, righe iniziali a 1): calcolarli sul file intero dava valori diversi
+  del 10-15% e il modello scattava sul parlato normale. `features.py` e `KestraDetector.kt` vanno cambiati insieme.
+- **Addestramento** (`scripts/kestra_ww/`): `make_kit.py` in CI (`kestra-kit.yml`) sintetizza migliaia di
+  "Kestra" e di frasi/parole simili con voci Piper italiane, spagnole, portoghesi, catalane, rumene e 160 voci
+  inglesi, in una stanza rumorosa, vicino e lontano, col guadagno automatico dell'app; `fetch_negatives.py`
+  (`kestra-neg.yml`) aggiunge ore di parlato, musica e rumore già pronte di openWakeWord. Tutto finisce nella
+  release `kestra-kit` (solo vettori, nessuna registrazione reale). `train.py` addestra con in più i vocali di
+  Alessio, passati da fuori: **le sue registrazioni non vanno MAI nel repository** (promesso). `evaluate.py`
+  prova il modello come l'app, a pezzi da 80 ms, e conta chiamate e falsi allarmi.
+- **Sensibilità** → punteggio minimo: `KestraKws.threshold` (Bassa 0,89, Media 0,8, Alta 0,69). Impostazioni › Telefono ›
+  Stato mostra anche "Somiglianza con Kestra" (ultimo punteggio, il più alto, soglia): serve a tarare.
+- **Risultati (19/11/2026)** con `evaluate.py`, a pezzi da 80 ms come il telefono. Le 15 frasi di Alessio non
+  sono mai state usate per addestrare: il modello ha riconosciuto 7 nomi su circa 8 (6 a volume ×0,1). Nei suoi
+  ~6 minuti di parlato senza il nome è scattato 0 volte. Su 5,3 ore di parlato, musica e rumore mai visti scatta
+  2,6 volte l'ora a soglia 0,8 e 1,3 a 0,9. Prima prova "onesta", addestrata solo coi nomi detti vicino: dalla
+  scrivania ne ha sentiti 10 su 12. Se scatta troppo o troppo poco nella vita vera: guardare "Somiglianza" in
+  Stato, cambiare la soglia, oppure aggiungere vocali e riaddestrare (vedi `scripts/kestra_ww/README.md`).

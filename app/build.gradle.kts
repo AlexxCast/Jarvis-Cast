@@ -13,8 +13,10 @@ android {
         applicationId = "com.jarvisfit.app"
         minSdk = 26
         targetSdk = 35
-        versionCode = 41
-        versionName = "2.39"
+        versionCode = 43
+        versionName = "2.41"
+        // Solo telefoni a 64 bit (come quello di Alessio): la libreria del modello di "Kestra" pesa ~12 MB per tipo.
+        ndk { abiFilters += listOf("arm64-v8a") }
     }
 
     // In GitHub Actions la chiave del PC arriva dal segreto DEBUG_KEYSTORE_B64 (vedi build-apk.yml):
@@ -44,7 +46,7 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { compose = true }
-    // Modello della parola "Kestra" (scaricato da scripts/fetch_kws.sh): letto direttamente dagli asset.
+    // Modelli della parola "Kestra" (assets/kestra/, vedi scripts/kestra_ww): letti direttamente dagli asset.
     androidResources { noCompress += listOf("onnx") }
 }
 
@@ -63,6 +65,8 @@ dependencies {
     implementation("androidx.lifecycle:lifecycle-service:2.8.7")
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
     implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+    // Esegue i modelli del riconoscimento di "Kestra" (scripts/kestra_ww), stessa versione usata per provarli.
+    implementation("com.microsoft.onnxruntime:onnxruntime-android:1.32.0")
 
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
