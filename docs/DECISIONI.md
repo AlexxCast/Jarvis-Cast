@@ -492,3 +492,45 @@ Anche con la 2.34 il Capo doveva chiamarla molte volte. Il riconoscimento di And
   opposta (punte esterne strette); la punta centrale parte dalle ginocchia. Aggiornati insieme: `web/logo.png` e
   `app/.../drawable/logo.png` (icona dell'app), `ic_launcher.xml`, il simbolo nel popup (`overlay.js`) e
   nell'HUD del PC (`jarvis_desktop.py`).
+
+## Affidabilità: modello giusto, esito dei comandi PC, automatismi sani (19/11/2026)
+Diagnosi sugli scambi del 19/11 (Prime Video/Helluva Boss, Streaming Community, "collegati a Outlook", sessione di cucina):
+- **La chat restava incollata al modello più debole.** `gemini-3.8-flash` andava in timeout (14 s), il router passava a
+  `gemini-flash-lite-latest` e il bonus "stesso modello della sessione" (`preferKey`) lo teneva lì per tutto il giorno
+  (86 richieste su lite, quasi zero sugli altri). Il lite risponde "Ci penso io, apro…" senza mettere l'azione.
+  Ora: `isLiteModel` non riceve il bonus di coerenza e ha +4 di penalità quando la richiesta chiede di fare qualcosa
+  (`needsActions` in brain.js) o è di livello smart; timeout e 5xx bloccano con attesa che raddoppia
+  (30 s → 30 min) invece di 30 s fissi; stima token ×1,15.
+- **I comandi al PC non tornavano mai indietro**: restavano `queued` per sempre e Kestra non sapeva se erano riusciti.
+  Ora la consegna segna `consegnato`, `jarvis_desktop.py` (`run_and_report`) manda `POST /api/devices/result`
+  con esito e finestra attiva dopo il comando, e il prompt dei dispositivi mostra gli esiti degli ultimi 15 minuti
+  come fatti osservati. Il prompt dice anche cosa il PC **non** sa fare (cliccare dentro una finestra).
+- **Automatismi imparati male**: si salvavano con la ricerca già scritta (`google.com/search?q=El+uva+boss`) o con la
+  frase intera come nome dell'app ("uva boss su prime video"), e una domanda dopo il comando valeva come conferma.
+  Ora `isSaneSkill` li scarta (restano salvati ma non partono), la proposta salva solo il sito, una domanda o la
+  stessa frase ripetuta non conferma, "non mi sembra / niente / non lo apre" scartano, e per far partire un
+  automatismo serve un verbo di comando ("agenda Google" non apre più "google su PC"). "apri X su Prime Video"
+  cerca X; "account Outlook" non diventa un profilo Chrome.
+- Promesse al presente senza azione ("apro", "clicco", "ci penso io… apro") ora fanno scattare la riparazione.
+- Sessione/ricetta = `live_card` checklist dentro Kestra, mai un'altra app. Domande su modelli IA e link aggiornati
+  passano dalla ricerca web.
+
+Valutazione dei consigli di Gemini (19/11): già presenti = blocco dei modelli per errore (402/404/410/429), budget di
+contesto con `contextReport`, verifica `CLAIM_WORDS` + riparazione, conferma prima di inviare/chiamare, memoria
+separata in moduli/continuità/progetti. Fatti ora = esito a ciclo chiuso sul PC, requisito di capacità (lite fuori
+dalle azioni), backoff esponenziale, margine sui token. Rimandati = JSON Schema rigido (non tutti i provider
+gratuiti lo supportano allo stesso modo; il parser tollerante più la riparazione bastano per ora), cifratura a
+riposo (il Durable Object è già cifrato da Cloudflare), fine-tuning di un modello personale (serve prima un archivio
+di tracce verificate, che adesso iniziamo a raccogliere con gli esiti dei comandi).
+
+## Sessione di cucina a schermo (19/11/2026)
+- Alessio vuole che una ricetta resti a schermo dentro Kestra come "sessione di cucina", con dosi e passaggi, e che si
+  possa salvare. Prima c'era solo `activeRecipeSession` nel diario (titolo + un passaggio di testo, visibile solo in Oggi),
+  e il modello a volte apriva l'app bookAmeal.
+- Nuovo `server/src/cooking.js`: azione `recipe {title, servings, kcal, minutes, ingredients:[{name, qty}], steps:[...]}`
+  (kv `cookingSession`), `recipe_step` (next/prev/goto), `recipe_toggle` (ingrediente preso), `recipe_save` (kv `recipes`
+  e anche nel ricettario della dieta `savedRecipes`, con i grammi), `recipe_open` (anche da vecchie ricette del
+  ricettario), `recipe_close`, `recipe_delete`.
+- Scheda in Kestra (sotto la sfera), Oggi e Attività (con "Ricette salvate" da riaprire). A voce "avanti", "indietro",
+  "ripeti" scorrono i passaggi senza chiamare un modello (`cooking.voiceStep`, prima di `handleCoreIntent`).
+- Anteprima: `/mnt/project-files/jarvis/anteprime-cucina/sessione-cucina.png`.

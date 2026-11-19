@@ -4,7 +4,7 @@
 const WEB_TIMEOUT_MS = 15_000;
 
 /** Frasi che chiedono informazioni fresche o esplicitamente una ricerca online. */
-export const WEB_WORDS = /(cerca (su |in )?(internet|google|online|in rete|sul web)|su internet|online|in rete|notizi|ultime news|news|cosa (è|e') successo|che succede|attualit|ultim[oa] (versione|uscit|risultat|partit)|risultat[oi] (della|di|del)|chi ha vinto|classifica|quando esce|quando gioca|prezzo d|quanto costa|quotazion|borsa|bitcoin|cambio (euro|dollar)|orari[o]? d|aperto (oggi|adesso|ora)|recension|trailer|uscit[oa] (oggi|ieri)|elezion|governo|guerra|sciopero|traffico|voli|treni)/i;
+export const WEB_WORDS = /(cerca (su |in )?(internet|google|online|in rete|sul web)|su internet|online|in rete|notizi|ultime news|news|cosa (è|e') successo|che succede|attualit|ultim[oa] (versione|uscit|risultat|partit)|risultat[oi] (della|di|del)|chi ha vinto|classifica|quando esce|quando gioca|prezzo d|quanto costa|quotazion|borsa|bitcoin|cambio (euro|dollar)|orari[o]? d|aperto (oggi|adesso|ora)|recension|trailer|uscit[oa] (oggi|ieri)|elezion|governo|guerra|sciopero|traffico|voli|treni|(quali|che|nuovi|migliori) (altri )?modell[oi]|modell[oi] (gratis|gratuit|nuov|ai\b|ia\b)|nuovo link|link (ufficiale|aggiornat))/i;
 
 async function fetchJson(fetchFn, url, init) {
   const ctl = new AbortController();
