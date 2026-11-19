@@ -1,0 +1,25 @@
+name: Banco di prova Kestra (wake word)
+
+# Misura quanto bene i modelli di keyword spotting sentono "Kestra" detto all'italiana.
+on:
+  workflow_dispatch:
+  push:
+    branches: ['claude/**']
+    paths: ['scripts/kws_bench*', '.github/workflows/kws-bench.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update -q && sudo apt-get install -y -q espeak-ng
+      - run: pip install -q "sherpa-onnx==2.0.1" numpy piper-tts
+      - run: scripts/kws_bench_setup.sh "$RUNNER_TEMP/kws"
+      - run: python scripts/kws_bench.py "$RUNNER_TEMP/kws"
