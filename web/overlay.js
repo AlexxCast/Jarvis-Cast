@@ -159,12 +159,16 @@ function frame(now) {
   const sr = cr * 0.66;
   const syTop = C - sr * 0.95, syMid = C - sr * 0.18, syBot = C + sr * 0.92;
   const sxL = C - sr * 0.62, sxR = C + sr * 0.62;
+  // Gambe dallo schizzo di Alessio: scendono dagli angoli verso l'interno, poi dritte; punta centrale dalle ginocchia.
+  const kx = sr * 0.39, syKnee = syMid + sr * 0.38;
   ctx.strokeStyle = '#c084fc'; ctx.lineWidth = 1.9; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
   ctx.beginPath();
   ctx.moveTo(sxL, syMid); ctx.lineTo(C, syTop); ctx.lineTo(sxR, syMid);
-  ctx.moveTo(sxL, syMid); ctx.lineTo(sxL, syBot); ctx.lineTo(sxR, syMid);
-  ctx.moveTo(sxR, syMid); ctx.lineTo(sxR, syBot); ctx.lineTo(sxL, syMid);
-  ctx.moveTo(sxL, syMid); ctx.lineTo(C, syBot); ctx.lineTo(sxR, syMid);
+  ctx.moveTo(sxL, syMid); ctx.lineTo(C - kx, syKnee); ctx.lineTo(C - kx, syBot);
+  ctx.moveTo(sxR, syMid); ctx.lineTo(C + kx, syKnee); ctx.lineTo(C + kx, syBot);
+  ctx.moveTo(sxL, syMid); ctx.lineTo(C + kx, syBot);
+  ctx.moveTo(sxR, syMid); ctx.lineTo(C - kx, syBot);
+  ctx.moveTo(C - kx, syKnee); ctx.lineTo(C, syBot); ctx.lineTo(C + kx, syKnee);
   ctx.stroke();
   ctx.strokeStyle = '#39ff14'; ctx.lineWidth = 1.8;
   ctx.beginPath();

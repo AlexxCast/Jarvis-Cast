@@ -485,7 +485,15 @@ Anche con la 2.34 il Capo doveva chiamarla molte volte. Il riconoscimento di And
   - diagnosi in Impostazioni › Telefono: se è attivo, volume del microfono, quante volte ha sentito "Kestra" e
     l'ultimo problema. Serve a capire dal telefono vero cosa non va.
 
-### Kestra sull'orologio Wear OS (modulo `wear/`, app telefono 2.38, 2026-11-19)
+## Logo con le punte strette (app 2.39, 19/11/2026)
+- Schizzo di Alessio (ricalcato linea per linea dopo una prima versione sbagliata): testa a rombo col volto; da
+  ogni angolo della testa una gamba scende verso l'interno fino al "ginocchio" (a circa 2/3 della larghezza) e poi
+  dritta in giù; due diagonali partono dagli angoli, si incrociano sotto la testa e finiscono in fondo alla gamba
+  opposta (punte esterne strette); la punta centrale parte dalle ginocchia. Aggiornati insieme: `web/logo.png` e
+  `app/.../drawable/logo.png` (icona dell'app), `ic_launcher.xml`, il simbolo nel popup (`overlay.js`) e
+  nell'HUD del PC (`jarvis_desktop.py`).
+
+### Kestra sull'orologio Wear OS (modulo `wear/`, app telefono 2.40, 2026-11-19)
 Richiesta del Capo: con il telefono sul comodino e lui alla scrivania doveva gridare. Vuole un'app sull'orologio che si apre con un tocco o un tasto e poi resta in background. Non serve cambiare il sistema dell'orologio.
 - **Perché Wear OS:** è l'unico sistema da polso dove un'app può ascoltare, usare internet e parlare. Garmin, Amazfit e simili durano di più ma non caricano app così. Serve Wear OS 3 o successivo (Galaxy Watch 4+, Pixel Watch, TicWatch...).
 - **Come funziona:** aprire l'app fa partire subito l'ascolto (vibrazione breve). La frase va a `/api/chat` dello stesso server, con la sessione `main`, così la conversazione continua quella del telefono. La risposta si sente dall'altoparlante dell'orologio; senza altoparlante si legge e vibra. Poi resta in ascolto per il seguito (`followup`, come sul telefono). Se non parli più, si chiude da sola per non consumare batteria. Abbassare il polso non la ferma: è un servizio in primo piano col microfono.
