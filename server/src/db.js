@@ -48,23 +48,64 @@ export function writeReport(limit = 8) {
   return { day: writeStats.day, total: writeStats.total, limit: 100_000, sources: top(writeStats.bySource), tables: top(writeStats.byTable) };
 }
 
+// Scritture finite (limite gratuito di Cloudflare): da quando e fino a quando (mezzanotte UTC).
+export const writeBlock = { since: 0, until: 0 };
+export function noteWriteLimit(now = Date.now()) {
+  const d = new Date(now);
+  writeBlock.until = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1);
+  if (!writeBlock.since) writeBlock.since = now;
+}
+export function writesBlocked(now = Date.now()) {
+  if (writeBlock.until && now >= writeBlock.until) { writeBlock.until = 0; writeBlock.since = 0; }
+  return writeBlock.until > now;
+}
+export function resetWriteBlock() { writeBlock.until = 0; writeBlock.since = 0; }
+
+/**
+ * Database "che non si ferma": con db.tolerant = true una scrittura rifiutata per il limite giornaliero
+ * si salta (e si conta in db.swallowed) invece di far fallire tutta la richiesta. Si usa per le letture
+ * (che scrivono solo cose di contorno: ordine dei rami, livelli, contatori) e per la chat, che poi avvisa
+ * il Capo e rimanda al telefono le modifiche da salvare più tardi. Le altre richieste restano rigide.
+ */
+function tolerate(raw) {
+  const self = { tolerant: false, swallowed: 0, pendingReplay: null };
+  // `this` è la vista della richiesta (db.view): ogni richiesta ha il suo interruttore, anche se il Durable Object
+  // ne intreccia più d'una mentre aspetta un modello.
+  const guard = (fn, empty) => function (...a) {
+    try { return fn(...a); } catch (e) {
+      if (!WRITE_LIMIT_RE.test(String(e?.message || e))) throw e;
+      noteWriteLimit();
+      if (!this?.tolerant) throw e;
+      this.swallowed++;
+      return empty();
+    }
+  };
+  self.all = guard(raw.all, () => []);
+  self.get = guard(raw.get, () => null);
+  self.run = guard(raw.run, () => undefined);
+  self.root = self;
+  /** Vista per una sola richiesta: stesso database, interruttore e contatori propri. */
+  self.view = (props = {}) => Object.assign(Object.create(self), { tolerant: false, swallowed: 0, pendingReplay: null }, props);
+  return self;
+}
+
 /** Adatta ctx.storage.sql (Durable Object) all'interfaccia { all, get, run }. */
 export function wrapDurableSql(sql) {
   const exec = (q, p) => { const c = sql.exec(q, ...p); return c; };
-  return {
+  return tolerate({
     all: (q, ...p) => { const c = exec(q, p); const rows = c.toArray(); tallyWrites(q, c.rowsWritten); return rows; },
     get: (q, ...p) => { const c = exec(q, p); const rows = c.toArray(); tallyWrites(q, c.rowsWritten); return rows[0] ?? null; },
     run: (q, ...p) => { const c = exec(q, p); c.toArray(); tallyWrites(q, c.rowsWritten); },
-  };
+  });
 }
 
 /** Adatta node:sqlite (DatabaseSync) alla stessa interfaccia: usato solo nei test. */
 export function wrapNodeSqlite(database) {
-  return {
+  return tolerate({
     all: (q, ...p) => database.prepare(q).all(...p).map(row => ({ ...row })),
     get: (q, ...p) => { const row = database.prepare(q).get(...p); return row ? { ...row } : null; },
     run: (q, ...p) => { const r = database.prepare(q).run(...p); tallyWrites(q, Number(r?.changes || 0)); },
-  };
+  });
 }
 
 // Colonne aggiunte dopo la prima versione: ALTER fallisce se esistono già, ed è giusto così.

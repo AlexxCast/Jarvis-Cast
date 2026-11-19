@@ -15,17 +15,17 @@ const ONLINE_TTL_MS = 45_000; // il PC fermo chiede ogni 8 secondi, la finestra 
 // L'ultimo stato vive in memoria e si salva solo quando cambia qualcosa di importante o ogni 5 minuti.
 const PERSIST_MS = 5 * 60_000;
 const live = new WeakMap(); // db → Map(id → record più recente)
-const liveOf = (db) => { let m = live.get(db); if (!m) { m = new Map(); live.set(db, m); } return m; };
+const liveOf = (db) => { const k = db.root || db; let m = live.get(k); if (!m) { m = new Map(); live.set(k, m); } return m; };
 
 // Ritmo delle domande del PC ("hai comandi per me?"): ogni 2 secondi quando il Capo sta usando Kestra,
 // ogni 8 quando è tutto fermo. Anche le richieste hanno un limite gratuito (100.000 al giorno).
 const ACTIVE_MS = 10 * 60_000;
 const FAST_POLL_MS = 2000, IDLE_POLL_MS = 8000, GUI_POLL_MS = 30_000;
 const activeUntil = new WeakMap();
-export function markActive(db, nowMs = Date.now()) { activeUntil.set(db, nowMs + ACTIVE_MS); }
+export function markActive(db, nowMs = Date.now()) { activeUntil.set(db.root || db, nowMs + ACTIVE_MS); }
 export function pollDelay(db, nowMs, { poll = true, delivered = 0 } = {}) {
   if (!poll) return GUI_POLL_MS;
-  return delivered || nowMs < (activeUntil.get(db) || 0) ? FAST_POLL_MS : IDLE_POLL_MS;
+  return delivered || nowMs < (activeUntil.get(db.root || db) || 0) ? FAST_POLL_MS : IDLE_POLL_MS;
 }
 
 function storedDevices(db) {

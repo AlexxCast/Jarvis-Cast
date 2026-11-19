@@ -1,7 +1,7 @@
 // API HTTP di Jarvis (gira dentro il Durable Object, una richiesta alla volta).
 
-import { kvGet, kvSet, logEvent, WRITE_LIMIT_RE, friendlyError, setWriteSource, writeReport } from './db.js';
-import { handleChat, isAddressed, applyActions, addMessage } from './brain.js';
+import { kvGet, kvSet, logEvent, WRITE_LIMIT_RE, friendlyError, setWriteSource, writeReport, writesBlocked, writeBlock } from './db.js';
+import { handleChat, isAddressed, applyActions, addMessage, isReplayable } from './brain.js';
 import { loadDiary, saveDiary, mergeLegacy, patchProfile, DIET_ACTIONS } from './diet.js';
 import * as N from './nutrition.js';
 import * as memory from './memory.js';
@@ -62,8 +62,17 @@ function statePayload(db, ms, tz, env = {}) {
     layout: ui.loadLayout(db),
     mood: mood.current(db, ms),
     code: coder.enabled(env) ? coder.listProposals(db).filter(x => ['working', 'ready', 'testing'].includes(x.status)) : null,
+    server: serverStatus(),
   };
 }
+
+/** Stato del server per l'app: con le scritture finite si legge tutto, le modifiche le tiene il telefono. */
+function serverStatus() {
+  return { writesBlocked: writesBlocked(), until: writeBlock.until || null };
+}
+
+const OFFLINE_NOTE_SAVED = ' (Oggi Cloudflare non mi lascia salvare: lo tengo sul telefono e lo salvo da sola appena il limite si azzera.)';
+const OFFLINE_NOTE_CHAT = ' (Oggi non posso salvare la chat sul server: la tiene il telefono e la porto qui appena il limite si azzera.)';
 
 /**
  * deps: { now, tz, fetchFn, defer(promise), schedule(atMs) }
@@ -73,6 +82,9 @@ export async function handleApi(db, env, deps, request) {
   const path = url.pathname.replace(/\/+$/, '');
   const method = request.method;
   const ms = deps.now(), tz = deps.tz;
+  // Letture e chat non si bloccano se finiscono le scritture: si salta quello che non si può salvare.
+  // Le altre richieste restano rigide (rispondono 503 e il telefono mette la modifica in coda).
+  if (db.view) db = db.view({ tolerant: method === 'GET' || path === '/api/chat', pendingReplay: [] });
   const startJob = (j) => { jobs.createJob(db, j, deps.now(), tz); deps.schedule?.(deps.now() + 500); };
   setWriteSource(`${method} ${path.replace(/\/[0-9a-z_-]*\d[0-9a-z_-]*(?=\/|$)/gi, '/:id')}`);
   const chatDeps = { ...deps, startJob };
@@ -90,7 +102,52 @@ export async function handleApi(db, env, deps, request) {
       const out = await handleChat(db, env, chatDeps, { text: b.text, image, files, sessionId: String(b.session || 'main').slice(0, 40), source: b.source === 'voice' ? 'voice' : 'app', followup: b.followup === true });
       const nextDue = agenda.fireDue(db, deps.now(), tz);
       if (nextDue) deps.schedule?.(nextDue);
+      if (db.swallowed) {
+        const pending = db.pendingReplay || [];
+        out.unsaved = true; out.writesBlocked = true; out.pendingActions = pending;
+        if (out.reply) out.reply += pending.length ? OFFLINE_NOTE_SAVED : OFFLINE_NOTE_CHAT;
+      }
       return json(out);
+    }
+    if (path === '/api/sync' && method === 'POST') {
+      // Il telefono ripete qui quello che non si è potuto salvare (server irraggiungibile o scritture finite).
+      // Ogni operazione ha un id: se una risposta si perde e il telefono la rimanda, non si applica due volte.
+      const b = await body(request);
+      const ops = (Array.isArray(b.ops) ? b.ops : []).slice(0, 30);
+      const seen = kvGet(db, 'syncedOps', []);
+      const done = [], replies = [];
+      let chats = 0;
+      for (const op of ops) {
+        const id = String(op?.id || '').slice(0, 60);
+        if (!id) continue;
+        if (seen.includes(id)) { done.push(id); continue; }
+        // L'ora vera dell'operazione: un pasto delle 22 rimandato dopo mezzanotte resta nel suo giorno.
+        const at = Math.min(ms, Math.max(ms - 7 * 86_400_000, Number(op.at) || ms));
+        if (op.kind === 'actions') {
+          const actions = (Array.isArray(op.actions) ? op.actions : []).filter(a => a && isReplayable(a.type));
+          applyActions(db, actions, { today: todayOf(at, tz), nowIso: nowIsoOf(at, tz), ms: at, tz, hadPhoto: false });
+        } else if (op.kind === 'history') {
+          const session = String(op.session || projects.activeSession(db)).slice(0, 80);
+          for (const m of (Array.isArray(op.messages) ? op.messages : []).slice(0, 20)) {
+            if (!m || !['user', 'assistant'].includes(m.role) || !String(m.text || '').trim()) continue;
+            const mAt = Math.min(ms, Math.max(ms - 7 * 86_400_000, Number(m.at) || at));
+            addMessage(db, session, m.role, String(m.text).slice(0, 8000), nowIsoOf(mAt, tz), { offline: true });
+          }
+        } else if (op.kind === 'chat') {
+          if (chats++ >= 3) break; // un modello per volta: il resto al prossimo giro
+          const text = String(op.text || '').trim().slice(0, 4000);
+          if (text) {
+            const when = new Intl.DateTimeFormat('it-IT', { timeZone: tz, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }).format(at);
+            const out = await handleChat(db, env, chatDeps, { text: `(Messaggio del Capo del ${when}, scritto mentre il server non rispondeva: registralo con quel giorno e quell'ora, senza azioni sul telefono o sul PC.) ${text}`, sessionId: 'main', source: 'app' });
+            replies.push({ id, text, reply: out.reply });
+          }
+        } else continue;
+        seen.push(id); done.push(id);
+        kvSet(db, 'syncedOps', seen.slice(-300));
+      }
+      const nextDue = agenda.fireDue(db, deps.now(), tz);
+      if (nextDue) deps.schedule?.(nextDue);
+      return json({ done, replies, state: statePayload(db, ms, tz, env) });
     }
     if (path === '/api/apps' && method === 'POST') {
       // Etichette delle app installate, mandate dal telefono quando cambiano.
@@ -518,7 +575,7 @@ export async function handleApi(db, env, deps, request) {
     return bad('non trovato', 404);
   } catch (e) {
     try { logEvent(db, nowIsoOf(deps.now(), tz), 'error', `${method} ${path}: ${e.message}`); } catch { /* database in sola lettura */ }
-    if (WRITE_LIMIT_RE.test(e.message || '')) return bad(friendlyError(e), 503);
+    if (WRITE_LIMIT_RE.test(e.message || '')) return json({ error: friendlyError(e), writesBlocked: true, until: writeBlock.until || null }, 503);
     return bad(e.message || 'errore interno', /JSON|grande/.test(e.message || '') ? 400 : 500);
   }
 }
