@@ -86,6 +86,10 @@ object Cloud {
                 if (afterWake) put("afterWake", true)
                 if (afterWake && media) put("media", true)
             })
+            // Lingua e pause per la prossima frase: in inglese con pause lunghe durante la lezione di inglese.
+            (o["listen"] as? JsonObject)?.let { l ->
+                com.jarvisfit.app.voice.ListenMode.update(str(l, "lang"), str(l, "alt"), (l["silenceMs"] as? JsonPrimitive)?.content?.toLongOrNull() ?: 0L)
+            }
             if ((o["ignored"] as? JsonPrimitive)?.booleanOrNull == true) return@withContext Brain.Reply("", false, null, null, ignored = true)
             Brain.Reply(
                 text = str(o, "reply").ifBlank { "Fatto." },

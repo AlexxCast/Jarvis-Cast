@@ -390,6 +390,20 @@ Cosa fa ora:
 - "Esci dalla progetto" (a voce) ora esce.
 - Limiti rispetto a Claude: i modelli gratuiti restano sotto Claude nelle correzioni sottili; file oltre ~7.000 token entrano a pezzi; la voce trascritta può storpiare l'inglese; nessuna valutazione della pronuncia.
 
+### Lezione di inglese che funziona davvero (20/11/2026, app 2.47)
+Analisi della prima lezione vera (backup del 20/11). Problemi di struttura:
+- il riconoscimento vocale era sempre in italiano e chiudeva dopo 1,4 s di silenzio: l'inglese parlato diventava parole senza senso e i vocali lunghi si tagliavano;
+- dentro la lezione Kestra restava l'assistente di tutto: una frase inglese con "breakfast… yogurt… kebab" è finita nel diario come pasto, più un promemoria e una nota;
+- `project_log` falliva (campi diversi da quelli attesi) e Kestra lo diceva a metà lezione;
+- correzioni troppo morbide (frasi con errori accettate).
+
+Cosa fa ora:
+- `/api/chat` risponde con `listen` (`projects.listenMode`): in un progetto di inglese `{lang en-US, alt it-IT, silenceMs 3500}`, altrimenti italiano. Il telefono (`voice/ListenMode.kt`) lo usa per la prossima richiesta: inglese, pause lunghe (anche lo stop manuale dopo l'ultimo parziale), e su Android 14+ passaggio automatico all'italiano per i comandi. Il nome "Kestra" si ascolta sempre in italiano.
+- `projects.looksEnglish`: in un progetto di studio una frase più inglese che italiana salta i comandi locali (cucina, core, automatismi), non accende la dieta e perde le azioni sulla vita (pasti, promemoria, ricordi generali, telefono, PC).
+- `project_log` accetta note/result/summary, `score` "7/10" o "70%", `mistakes`; un suo errore non si dice più al Capo.
+- Metodo di studio più severo: ogni errore va segnalato (scritto → giusto → perché), niente "bene" su frasi sbagliate, niente "avvio in background" per esercizi brevi, parole trascritte male → chiedere conferma.
+- Il backup (`/api/export`) contiene progetti, file, chat, registro e ultimo resoconto del contesto.
+
 ## Autonomia: iniziativa, notifiche, correzioni e grafica (fase 3, app v2.32, 18/11/2026)
 - **Motore di iniziativa** (`server/src/initiative.js`). Gira nel battito del Durable Object (allarme ogni 15 minuti, sempre attivo) e non usa modelli. Controlla:
   - errori uguali ripetuti (almeno 3 in 2 ore);
