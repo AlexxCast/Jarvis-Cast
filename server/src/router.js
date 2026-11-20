@@ -70,8 +70,12 @@ export const isHeavyModel = (m) => /(ultra|550b|glm-5|pro-preview|2\.5-pro|minim
 
 /** Legge un PDF nativamente tramite Gemini generateContent (supporta sia PDF testuali sia scansioni). */
 export async function readPdfWithGemini(env, fetchFn, pdfBase64, promptText) {
-  if (!env.GEMINI_API_KEY || !pdfBase64) return null;
-  const models = ['gemini-flash-latest', 'gemini-3.8-flash', 'gemini-2.5-flash'];
+  readPdfWithGemini.lastError = '';
+  if (!pdfBase64) { readPdfWithGemini.lastError = 'file vuoto'; return null; }
+  if (!env.GEMINI_API_KEY) { readPdfWithGemini.lastError = 'manca la chiave Gemini'; return null; }
+  // Anche i "lite": se la quota dei flash è finita, leggere un PDF lo sanno fare comunque.
+  const models = ['gemini-flash-latest', 'gemini-3.8-flash', 'gemini-2.5-flash', 'gemini-flash-lite-latest', 'gemini-3.5-flash-lite'];
+  const errors = [];
   for (const model of models) {
     try {
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(env.GEMINI_API_KEY)}`;
@@ -88,12 +92,18 @@ export async function readPdfWithGemini(env, fetchFn, pdfBase64, promptText) {
           }],
         }),
       });
-      if (!res.ok) continue;
+      if (!res.ok) {
+        const body = await res.text().catch(() => '');
+        errors.push(`${model}: ${res.status} ${(/"message"\s*:\s*"([^"]{0,140})/.exec(body) || [])[1] || ''}`.trim());
+        continue;
+      }
       const data = await res.json();
       const text = (data?.candidates?.[0]?.content?.parts || []).map(p => p.text || '').join('\n').trim();
       if (text) return text;
-    } catch { /* prova il modello Gemini successivo */ }
+      errors.push(`${model}: risposta vuota${data?.promptFeedback?.blockReason ? ' (' + data.promptFeedback.blockReason + ')' : ''}`);
+    } catch (e) { errors.push(`${model}: ${e.message}`); }
   }
+  readPdfWithGemini.lastError = errors.slice(-3).join(' · ').slice(0, 400);
   return null;
 }
 
