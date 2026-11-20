@@ -138,4 +138,27 @@ class ClaudeChatTest {
         assertNull(ClaudeChat.startProject("modalità Claude"))
         assertTrue(ClaudeChat.isStartPhrase("modalità Claude nel progetto Monomitos"))
     }
+
+    @Test
+    fun studyRequests() {
+        assertEquals(ClaudeChat.Study("monomitos", false, false), ClaudeChat.studyRequest("Kestra, informati sul progetto Monomitos su Claude"))
+        assertEquals(ClaudeChat.Study(null, true, false), ClaudeChat.studyRequest("cerca su Claude e informati sul progetto"))
+        assertEquals(ClaudeChat.Study(null, false, true), ClaudeChat.studyRequest("guarda su Claude che progetti ho"))
+        assertEquals("inglese b2", ClaudeChat.studyRequest("leggi su claude il progetto inglese b2 e dimmi a che punto sono")?.project)
+        assertNull(ClaudeChat.studyRequest("informati sul meteo di domani"))
+        assertNull(ClaudeChat.studyRequest("modalità Claude"))
+    }
+
+    @Test
+    fun askRequests() {
+        val a = ClaudeChat.askRequest("Chiedi a Claude nel progetto Monomitos se il post di oggi va bene")
+        assertEquals("monomitos", a?.project)
+        assertEquals("il post di oggi va bene", a?.question)
+        val b = ClaudeChat.askRequest("chiedi a claude nel progetto inglese b2 qual è il prossimo argomento")
+        assertEquals("inglese b2", b?.project)
+        assertEquals("qual è il prossimo argomento", b?.question)
+        assertNull(ClaudeChat.askRequest("chiedi a Marco se viene")?.project)
+        assertEquals(null, ClaudeChat.askRequest("chiedi a claude")?.question)
+        assertEquals("come si dice gatto in inglese", ClaudeChat.askRequest("Kestra chiedi a Claude come si dice gatto in inglese")?.question)
+    }
 }

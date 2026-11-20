@@ -160,6 +160,64 @@ object ClaudeChat {
         return stopRegex.matches(c)
     }
 
+    // ---------------------------------------------------------------- Kestra che usa Claude da sola
+
+    /** Cosa leggere: un progetto per nome, quello già aperto ([current]) o la lista dei progetti ([list]). */
+    data class Study(val project: String?, val current: Boolean, val list: Boolean)
+
+    private val studyVerb = Regex(
+        "\\b(?:informati|informarti|informa|studia|studiati|leggi|leggiti|guarda|guardati|scopri|controlla|occhiata|" +
+            "riassumi|riassumimi|aggiornati|cerca|vedi|ripassa|ripassati|dimmi cosa c e|dimmi cosa ce|dimmi cosa c è|cosa c e|cosa ce)\\b"
+    )
+    private val projectStop = setOf("su", "sul", "di", "del", "della", "nell", "nella", "nel", "in", "dentro", "e", "che", "per",
+        "claude", "cloud", "app", "a", "da", "dal", "con", "cosa", "come", "poi", "quindi")
+
+    private fun projectName(c: String): String? {
+        val m = Regex("\\bprogetto ([a-z0-9àèéìòóù ]+)").find(c) ?: return null
+        val words = m.groupValues[1].split(" ").takeWhile { it !in projectStop }
+        return words.take(4).joinToString(" ").ifBlank { null }
+    }
+
+    /**
+     * "Kestra, informati sul progetto Monomitos su Claude", "guarda su Claude cosa c'è nei progetti":
+     * Kestra apre l'app di Claude da sola, legge e ti riassume (non è la modalità a voce). Null se non è questo.
+     */
+    fun studyRequest(text: String): Study? {
+        val c = cmd(text)
+        if (!Regex("\\b(?:claude|cloud)\\b").containsMatchIn(c) || !studyVerb.containsMatchIn(c)) return null
+        if (isStartPhrase(text) || askRequest(text) != null) return null
+        val name = projectName(c)
+        val plural = Regex("\\bprogetti\\b").containsMatchIn(c)
+        val singular = Regex("\\bprogetto\\b").containsMatchIn(c)
+        return when {
+            name != null -> Study(name, current = false, list = false)
+            singular -> Study(null, current = true, list = false)
+            plural -> Study(null, current = false, list = true)
+            else -> Study(null, current = true, list = false)
+        }
+    }
+
+    data class Ask(val project: String?, val question: String)
+
+    private val askRegex = Regex(
+        "^(?:(?:ehi |ok )?(?:kestra|chestra) )?(?:chiedi|domanda|fai una domanda|scrivi|manda un messaggio) a (?:claude|cloud)" +
+            "(?: (?:nel|sul|del|dal|nella|per il) progetto ([a-z0-9àèéìòóù]+)(?: ([a-z]?[0-9][a-z0-9]?))?)?" +
+            "(?: (?:se|che|di|questo|questa|questo messaggio))? (.{3,})$"
+    )
+
+    /** "Chiedi a Claude nel progetto Monomitos se il post di oggi va bene": una domanda singola, la risposta te la legge. */
+    fun askRequest(text: String): Ask? {
+        val m = askRegex.matchEntire(cmd(text)) ?: return null
+        val project = listOf(m.groupValues[1], m.groupValues[2]).filter { it.isNotBlank() }.joinToString(" ").ifBlank { null }
+        // La domanda si prende dal testo originale (maiuscole e punteggiatura), togliendo l'inizio del comando.
+        val q = m.groupValues[3].trim()
+        val orig = text.trim()
+        val from = (orig.length - q.length - 6).coerceAtLeast(0)
+        val idx = orig.lowercase().indexOf(q.split(" ").first(), from)
+        val question = if (idx >= 0) orig.substring(idx).trim() else q
+        return Ask(project, question)
+    }
+
     private val navRegex = Regex(
         "^(?:(?:kestra|chestra) )?(?:apri|aprimi|vai|torna|entra|passa|cerca|mostrami)(?: (?:a|al|alla|allo|nel|nella|nei|sul|sulla|in|il|la|lo|i|le|un|una))* " +
             "(?:progett[oi]|chat|conversazion[ei]|cronologia|lista|elenco|home)\\b.*|^(?:(?:kestra|chestra) )?(?:nuova chat|nuova conversazione)\\b.*"

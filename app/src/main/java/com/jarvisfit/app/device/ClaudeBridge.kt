@@ -75,8 +75,12 @@ object ClaudeBridge {
 
     // ---------------------------------------------------------------- accensione
 
+    /** Domanda singola ("chiedi a Claude …"): letta la risposta, la modalità si spegne da sola invece di ascoltare. */
+    private var oneShot = false
+
     /** Accende il ponte. Ritorna la frase da dire. */
-    fun start(ctx: Context): String {
+    fun start(ctx: Context, single: Boolean = false): String {
+        oneShot = single
         val app = ctx.applicationContext
         appCtx = app
         if (JarvisAccessibility.instance == null) {
@@ -96,7 +100,7 @@ object ClaudeBridge {
         notify(app)
         main.removeCallbacks(poll)
         main.postDelayed(poll, 1_200L)
-        return "Modalità Claude attiva. Leggo le nuove risposte; quando ho finito, detta pure in inglese. Per uscire dimmi basta."
+        return "Modalità Claude attiva. Leggo le nuove risposte; quando ho finito, parla pure, in italiano o in inglese. Per uscire dimmi basta."
     }
 
     fun stop(ctx: Context? = appCtx) {
@@ -324,7 +328,9 @@ object ClaudeBridge {
         if (next == null) {
             speaking = false
             // Risposta finita e letta tutta: si ascolta subito Alessio, senza dover dire "Kestra".
-            if (active && turnDone) JarvisService.claudeTurn(ctx)
+            if (active && turnDone) {
+                if (oneShot) stop(ctx) else JarvisService.claudeTurn(ctx)
+            }
             return
         }
         speaking = true
@@ -381,6 +387,60 @@ object ClaudeBridge {
     }
 
     private fun ctx(): Context = appCtx!!
+
+    // ---------------------------------------------------------------- Kestra che usa Claude da sola
+
+    /**
+     * "Chiedi a Claude …": scrive la domanda nella chat aperta, legge la risposta e si spegne.
+     * [done] riceve il problema da dire, o null se la domanda è partita.
+     */
+    fun askOnce(ctx: Context, question: String, done: (String?) -> Unit) {
+        val msg = start(ctx, single = true)
+        if (!active) return done(msg)
+        // Prima lo schermo deve essere "già visto" (primo giro del ciclo), poi si scrive.
+        main.postDelayed({ send(question, done) }, 2_200L)
+    }
+
+    /**
+     * Legge tutto il testo dello schermo di Claude (pagina del progetto, lista dei progetti, chat), scorrendo
+     * fino in fondo. Serve a Kestra per informarsi da sola. Stringa vuota se l'app di Claude non è davanti.
+     */
+    suspend fun harvest(maxPages: Int = 8, maxChars: Int = 14_000): String {
+        val out = LinkedHashSet<String>()
+        var total = 0
+        for (page in 0 until maxPages) {
+            val root = foregroundRoot() ?: break
+            var added = 0
+            fun walk(n: AccessibilityNodeInfo?, depth: Int) {
+                if (n == null || depth > 40 || total > maxChars) return
+                val t = (n.text ?: n.contentDescription)?.toString()?.trim().orEmpty()
+                if (t.isNotEmpty() && !n.isEditable && out.add(t)) { added++; total += t.length }
+                for (i in 0 until n.childCount) walk(n.getChild(i), depth + 1)
+            }
+            walk(root, 0)
+            if (total > maxChars || (page > 0 && added == 0)) break
+            // Pagina dopo: si scorre la lista più grande.
+            var list: AccessibilityNodeInfo? = null
+            var best = -1
+            fun find(n: AccessibilityNodeInfo?, depth: Int) {
+                if (n == null || depth > 40) return
+                if (n.isScrollable) { val r = Rect(); n.getBoundsInScreen(r); val a = r.width() * r.height(); if (a > best) { best = a; list = n } }
+                for (i in 0 until n.childCount) find(n.getChild(i), depth + 1)
+            }
+            find(root, 0)
+            if (list?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD) != true) break
+            kotlinx.coroutines.delay(900)
+        }
+        return out.joinToString("\n").take(maxChars)
+    }
+
+    /** Apre l'app di Claude (se non è già davanti) e aspetta che compaia. */
+    suspend fun bringClaude(ctx: Context): Boolean {
+        if (foregroundRoot() != null) return true
+        openClaude(ctx.applicationContext)
+        repeat(8) { kotlinx.coroutines.delay(500); if (foregroundRoot() != null) return true }
+        return false
+    }
 
     // ---------------------------------------------------------------- notifica
 
