@@ -25,6 +25,8 @@
     <uses-feature android:name="android.hardware.location" android:required="false" />
 
     <queries>
+        <!-- Modalità Claude: aprire l'app ufficiale di Claude. -->
+        <package android:name="com.anthropic.claude" />
         <intent>
             <action android:name="android.speech.RecognitionService" />
         </intent>
@@ -100,6 +102,10 @@
 
         <receiver
             android:name=".device.PhoneStopReceiver"
+            android:exported="false" />
+
+        <receiver
+            android:name=".device.ClaudeStopReceiver"
             android:exported="false" />
 
         <receiver

@@ -1321,8 +1321,35 @@ async function enterProject(id, body = {}) {
   go('chat');
 }
 
+/**
+ * Scheda "Claude": i progetti sono quelli dell'app di Claude (Inglese B2, Monomitos, ...). Kestra fa da voce:
+ * legge le risposte e scrive ciò che detti (modalità Claude, nell'APK dalla 2.48). I vecchi progetti di Kestra
+ * restano salvati e si aprono dal pulsante in fondo.
+ */
 function viewProgetti() {
   if (store.projectOpen) return viewProgetto(store.projectOpen);
+  if (store.kestraProjects) return [h('button', { class: 'btn ghost', onclick: () => { store.kestraProjects = false; render(); } }, '‹ Claude'), ...viewProgettiKestra()];
+  const name = h('input', { placeholder: 'Progetto da aprire (facoltativo, es. Monomitos)', 'aria-label': 'Progetto di Claude' });
+  const can = native && typeof native.claudeMode === 'function';
+  return [
+    h('div', { class: 'card' }, h('h2', {}, 'Progetti su Claude'),
+      h('p', { class: 'muted small' }, 'I progetti sono quelli che hai già nell\'app di Claude. Con la modalità Claude, Kestra ti legge ogni risposta nuova (in italiano o in inglese) e scrive e invia quello che detti.'),
+      name,
+      h('div', { class: 'row wrap' },
+        h('button', { class: 'btn primary', onclick: () => {
+          if (can) { native.claudeMode(name.value || ''); toast('Modalità Claude attiva.'); }
+          else toast('Serve l\'app Kestra 2.48 o più recente.');
+        } }, 'Modalità Claude'),
+        h('button', { class: 'btn', onclick: () => { if (!native?.openApp?.('Claude')) toast('Non trovo l\'app di Claude.'); } }, 'Apri Claude'))),
+    h('div', { class: 'card' }, h('h2', {}, 'A voce'),
+      h('p', { class: 'small' }, '"Kestra, modalità Claude" · "Kestra, modalità Claude, progetto Monomitos"'),
+      h('p', { class: 'small' }, 'Dentro la modalità: parli e il testo va a Claude · "apri il progetto…", "torna ai progetti", "nuova chat" li fa Kestra · "ripeti" · "basta" per uscire.'),
+      h('p', { class: 'muted small' }, 'Serve l\'Accessibilità "Kestra: usa il telefono". Lo stato è in Altro › Impostazioni.')),
+    h('button', { class: 'btn ghost', onclick: () => { store.kestraProjects = true; render(); } }, 'Vecchi progetti di Kestra'),
+  ];
+}
+
+function viewProgettiKestra() {
   if (!store.projects) { api('GET', '/projects').then(r => { store.projects = r.projects; render(); }).catch(e => toast(e.message)); return [h('p', { class: 'empty' }, 'Carico i progetti…')]; }
   const name = h('input', { placeholder: 'Nome del progetto (es. Tesi, Inglese B2, Viaggio)', 'aria-label': 'Nome del progetto' });
   const instr = h('textarea', { rows: 3, placeholder: 'Istruzioni per Kestra in questo progetto: ruolo, tono, regole, obiettivo. Puoi cambiarle quando vuoi.', 'aria-label': 'Istruzioni' });
@@ -1785,7 +1812,7 @@ function viewLogin() {
     h('p', { class: 'muted', style: 'text-align:center' }, 'Inserisci il token scelto durante l\'installazione (JARVIS_TOKEN).'), input, h('button', { class: 'btn primary', onclick: submit }, 'Entra'));
 }
 
-const TABS = [['chat', 'Kestra'], ['progetti', 'Progetti'], ['oggi', 'Oggi'], ['cucina', 'Cucina'], ['attivita', 'Attività'], ['altro', 'Altro']];
+const TABS = [['chat', 'Kestra'], ['progetti', 'Claude'], ['oggi', 'Oggi'], ['cucina', 'Cucina'], ['attivita', 'Attività'], ['altro', 'Altro']];
 function go(tab, sub) { store.tab = tab; if (sub) { if (sub !== store.sub) { store.mind = null; store.memory = null; } store.sub = sub; } render(); if (tab === 'chat') scrollChat(); }
 
 function render() {
@@ -1799,7 +1826,7 @@ function render() {
       store.error ? h('button', { class: 'btn primary', onclick: boot }, 'Riprova') : null));
   }
   const listening = !!(nativeJson('getConfig') || {}).listening;
-  const title = { chat: 'Kestra', progetti: 'Progetti', oggi: 'Oggi', cucina: 'Cucina', attivita: 'Attività', altro: 'Altro' }[store.tab];
+  const title = { chat: 'Kestra', progetti: store.kestraProjects || store.projectOpen ? 'Progetti di Kestra' : 'Claude', oggi: 'Oggi', cucina: 'Cucina', attivita: 'Attività', altro: 'Altro' }[store.tab];
   app.append(h('header', { class: 'top' },
     h('img', { src: '/logo.png', alt: '', class: 'brand-logo' }),
     h('h1', { class: 'brand-title' }, title),
