@@ -76,12 +76,15 @@ object Cloud {
      * [followup] = frase sentita a conversazione aperta senza dire "Kestra": il server decide se era
      * rivolta all'assistente o era la TV / altre persone (in quel caso risponde ignored = true e non dice nulla).
      */
-    suspend fun chat(text: String, followup: Boolean = false): Brain.Reply = withContext(Dispatchers.IO) {
+    suspend fun chat(text: String, followup: Boolean = false, afterWake: Boolean = false, media: Boolean = false): Brain.Reply = withContext(Dispatchers.IO) {
         try {
             val o = request("POST", "/api/chat", buildJsonObject {
                 put("text", text)
                 put("source", "voice")
                 if (followup) put("followup", true)
+                // Prima frase dopo il nome sentito dal modello: il server scarta TV/video (falso allarme).
+                if (afterWake) put("afterWake", true)
+                if (afterWake && media) put("media", true)
             })
             if ((o["ignored"] as? JsonPrimitive)?.booleanOrNull == true) return@withContext Brain.Reply("", false, null, null, ignored = true)
             Brain.Reply(
