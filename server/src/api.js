@@ -589,6 +589,11 @@ export async function handleApi(db, env, deps, request) {
         messages: db.all('SELECT session, role, text, at FROM messages ORDER BY id'), sessions: db.all('SELECT id, summary FROM sessions'),
         places: places.listPlaces(db), topics: db.all('SELECT * FROM topics'), layout: ui.loadLayout(db),
         flows: flows.listFlows(db),
+        // Progetti completi (istruzioni, file, chat, registro dei progressi): servono per capire come lavora Kestra in un progetto.
+        projects: db.all('SELECT * FROM projects').map(p => ({ ...p, log: projects.getLog(db, p.id) })),
+        projectFiles: db.all('SELECT project, name, content, created FROM project_files ORDER BY id'),
+        projectChats: db.all('SELECT * FROM project_chats'),
+        contextReport: kvGet(db, 'contextReport', null),
       });
     }
     return bad('non trovato', 404);

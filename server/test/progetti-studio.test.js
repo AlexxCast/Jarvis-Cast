@@ -160,3 +160,15 @@ test('PDF del progetto: con la quota dei flash finita lo legge un Gemini lite; s
   assert.equal(r.status, 400);
   assert.match(r.body.error, /quota di Gemini finita/);
 });
+
+test('il backup contiene i progetti con istruzioni, file, chat e registro', async () => {
+  const db = makeDb();
+  const id = projects.createProject(db, { name: 'Inglese B2', instructions: 'Sei la tutor.' }, NOW, 1);
+  projects.addFile(db, id, { name: 'spec.txt', content: SPEC }, NOW);
+  projects.addLog(db, id, { kind: 'lezione', topic: 'Past simple' }, NOW);
+  const res = await handleApi(db, ENV, deps(fakeFetch(() => reply({}))), new Request('https://x/api/export', { headers: { authorization: 'Bearer t' } }));
+  const b = await res.json();
+  assert.equal(b.projects[0].instructions, 'Sei la tutor.');
+  assert.equal(b.projects[0].log.entries.length, 1);
+  assert.equal(b.projectFiles[0].content, SPEC);
+});
