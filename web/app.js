@@ -1301,8 +1301,12 @@ const jobTag = (j) => h('span', { class: 'tag ' + ({ done: 'ok', failed: 'bad' }
 
 const ago = (iso) => (iso || '').slice(0, 16).replace('T', ' ');
 
-function readFileForProject(file) {
+async function readFileForProject(file) {
   if (/\.pdf$/i.test(file.name) || file.type === 'application/pdf') {
+    // Prima si legge il testo sul telefono (come per gli allegati in chat): niente quota Gemini, niente attese.
+    // Solo un PDF scansionato o illeggibile qui va al server, che lo fa leggere a Gemini.
+    const pdf = await extractPdfContent(file).catch(() => ({}));
+    if (pdf.text) return { name: file.name, content: pdf.text };
     return new Promise((ok, ko) => { const r = new FileReader(); r.onload = () => ok({ name: file.name, encoding: 'base64', content: String(r.result).replace(/^data:[^,]+,/, '') }); r.onerror = () => ko(new Error('Lettura del file non riuscita')); r.readAsDataURL(file); });
   }
   return file.text().then(content => ({ name: file.name, content }));

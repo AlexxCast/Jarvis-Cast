@@ -471,7 +471,11 @@ export async function handleApi(db, env, deps, request) {
         if (b.encoding === 'base64') {
           // PDF: il testo viene estratto una volta sola e salvato, così ogni modello lo può leggere.
           content = await router.readPdfWithGemini(env, deps.fetchFn, content.replace(/^data:[^,]+,/, ''), 'Estrai fedelmente tutto il testo, le tabelle e le istruzioni di questo PDF.') || '';
-          if (!content) return bad('non sono riuscita a leggere il PDF');
+          if (!content) {
+            const why = router.readPdfWithGemini.lastError || '';
+            logEvent(db, at, 'error', `PDF del progetto non letto (${String(b.name || '').slice(0, 60)}): ${why}`);
+            return bad(`non sono riuscita a leggere il PDF${/429|quota|RESOURCE_EXHAUSTED/i.test(why) ? ' (quota di Gemini finita per oggi: riprova domani o aggiornando l\'app, che lo legge sul telefono)' : why ? ' (' + why.slice(0, 160) + ')' : ''}`);
+          }
         }
         if (!projects.upsertFile(db, pid, { name: b.name, content }, at)) return bad('file vuoto');
         return detail();

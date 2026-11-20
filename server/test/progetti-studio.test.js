@@ -143,3 +143,20 @@ test('nome del progetto dal parlato', () => {
   assert.equal(projectName('tesi di laurea'), 'Tesi di laurea');
   assert.equal(projectName("l'inglese B2 e ti mando il pdf"), 'Inglese B2');
 });
+
+test('PDF del progetto: con la quota dei flash finita lo legge un Gemini lite; se falliscono tutti si dice perché', async () => {
+  const db = makeDb();
+  const id = projects.createProject(db, { name: 'Inglese B2' }, NOW, 1);
+  const call = async (fetchFn) => {
+    const d = deps(fetchFn);
+    const res = await handleApi(db, ENV, d, new Request(`https://x/api/projects/${id}/files`, { method: 'POST', headers: { authorization: 'Bearer t', 'content-type': 'application/json' }, body: JSON.stringify({ name: 'profilo.pdf', encoding: 'base64', content: 'JVBERi0x' }) }));
+    return { status: res.status, body: await res.json() };
+  };
+  const quota = { status: 429, json: { error: { message: 'Resource has been exhausted (e.g. check quota).', status: 'RESOURCE_EXHAUSTED' } } };
+  let r = await call(fakeFetch((url) => /lite/.test(url) ? geminiPdf(SPEC) : quota));
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body.files.map(f => f.name), ['profilo.pdf']);
+  r = await call(fakeFetch(() => quota));
+  assert.equal(r.status, 400);
+  assert.match(r.body.error, /quota di Gemini finita/);
+});
