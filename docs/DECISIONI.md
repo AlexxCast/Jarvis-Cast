@@ -689,3 +689,6 @@ Riaddestrare con la TV dentro aveva peggiorato la vita vera (vedi sopra), quindi
 - **Stato** (Impostazioni › Telefono): quante chiamate con un video in corso, quante scartate perché dopo c'era la TV,
   e un avviso quando il telefono sta suonando qualcosa.
 - Test: `server/test/wake_tv.test.js`, `KestraKwsTest` (soglia con video).
+- **Correzione dello stesso giorno**: con la 2.45 Alessio sentiva "eccomi" e poi niente: il filtro sulla prima frase
+  dopo il nome scartava anche le sue richieste vere. Ora il filtro vale solo se il telefono stava suonando un video o
+  musica (`media`); con la TV nella stanza il nome sentito risponde come prima (solo server, nessun APK).
