@@ -5,7 +5,7 @@
 import { kvGet, kvSet } from './db.js';
 import { newId } from './diet.js';
 import { keywords } from './memory.js';
-import { estimateTokens } from './router.js';
+import { estimateTokens, readPdfWithGemini, chat as modelChat } from './router.js';
 
 
 /**
@@ -73,6 +73,7 @@ export function deleteProject(db, id) {
   db.run('DELETE FROM memories WHERE module = ?', memModule(p.id));
   db.run("UPDATE jobs SET project = '' WHERE project = ?", p.id);
   db.run('DELETE FROM projects WHERE id = ?', p.id);
+  kvSet(db, LOG_KEY(p.id), null);
   if (getActive(db)?.project === p.id) exitProject(db);
   return true;
 }
@@ -162,6 +163,164 @@ export function relevantFileChunks(db, projectId, query, { maxTokens = 7000 } = 
     used: [...new Set(picked.map(c => c.file))],
   };
 }
+
+/** Stesso nome = stesso file: un PDF rimandato sostituisce la versione di prima invece di duplicarla. */
+export function upsertFile(db, projectId, { name, content }, nowIso) {
+  const n = s(name).slice(0, 120) || 'file.txt';
+  const old = db.get('SELECT id FROM project_files WHERE project = ? AND name = ?', projectId, n);
+  if (old) {
+    const text = String(content || '').replace(/\r\n/g, '\n').trim().slice(0, FILE_MAX);
+    if (!text) return null;
+    db.run('UPDATE project_files SET content = ?, created = ? WHERE id = ?', text, nowIso, old.id);
+    db.run('UPDATE projects SET updated = ? WHERE id = ?', nowIso, projectId);
+    return old.id;
+  }
+  return addFile(db, projectId, { name: n, content }, nowIso);
+}
+
+// Allegati che non sono materiale (fotogrammi di un video, PDF scansionato mandato come foto).
+const PLACEHOLDER_RE = /^\[(?:Video|PDF scansionato)\b/;
+
+/**
+ * I file allegati in chat dentro un progetto restano nel progetto, come in Claude: prima entravano
+ * solo in quella risposta e al messaggio dopo Kestra li aveva già dimenticati.
+ * I PDF arrivano già come testo dal telefono; se arrivano come byte li legge Gemini una volta sola.
+ */
+export async function saveAttachments(db, env, fetchFn, projectId, fileList, nowIso) {
+  const saved = [];
+  for (const f of (fileList || []).slice(0, 6)) {
+    let content = String(f?.content || '');
+    if (!content || PLACEHOLDER_RE.test(content)) continue;
+    if (f.encoding === 'base64') {
+      if (!/\.pdf$/i.test(String(f.name || ''))) continue;
+      content = await readPdfWithGemini(env, fetchFn, content.replace(/^data:[^,]+,/, ''), 'Estrai fedelmente tutto il testo, le tabelle, le regole e le istruzioni di questo PDF, senza riassumere.') || '';
+      if (!content) { saved.push({ name: f.name, failed: true }); continue; }
+    }
+    const id = upsertFile(db, projectId, { name: f.name, content }, nowIso);
+    if (id) saved.push({ id, name: s(f.name).slice(0, 120), chars: Math.min(content.length, FILE_MAX), text: content.slice(0, FILE_MAX) });
+  }
+  return saved;
+}
+
+const INSTR_MAX = 12000;
+
+/**
+ * Le istruzioni di un progetto a partire da un documento che lo descrive (es. il PDF con le
+ * caratteristiche del tutor). Se il documento ci sta, entra parola per parola: è quello che fa
+ * Claude con le istruzioni di progetto, e un riassunto perderebbe le regole. Se è più lungo, un
+ * modello forte ne ricava le istruzioni operative complete; il documento intero resta tra i file.
+ */
+export async function instructionsFromDoc(db, env, fetchFn, text, { tz } = {}) {
+  const clean = cleanProjectContext(String(text || '').replace(/\[Pagina \d+\]\s*/g, '').replace(/[ \t]+\n/g, '\n'));
+  if (!clean) return '';
+  if (clean.length <= INSTR_MAX) return clean;
+  try {
+    const res = await modelChat(db, env, {
+      tier: 'smart', best: true, maxTokens: 4000, fetchFn, tz,
+      build: () => [
+        { role: 'system', content: `Ricavi le ISTRUZIONI DI PROGETTO per un'assistente IA da un documento che descrive come deve lavorare (ruolo, profilo dello studente o dell'utente, obiettivi, metodo, regole, formato, cose da evitare). Riporta TUTTE le regole e i dati concreti con le parole del documento: non riassumere, togli solo ripetizioni e parti che non servono a lavorare. Massimo 10.000 caratteri, testo semplice con titoletti. Solo le istruzioni, niente commenti.` },
+        { role: 'user', content: clean.slice(0, 60000) },
+      ],
+    });
+    const out = cleanProjectContext(String(res.text || '').replace(/^```\w*\n?|```$/g, '')).trim();
+    if (out.length > 400) return out.slice(0, INSTR_MAX);
+  } catch { /* sotto: l'inizio del documento */ }
+  return clean.slice(0, INSTR_MAX);
+}
+
+/** Cambia le istruzioni del progetto: replace le sostituisce, append aggiunge una regola in fondo. */
+export function setInstructions(db, projectId, text, mode = 'append', nowIso) {
+  const p = getProject(db, projectId);
+  const t = cleanProjectContext(text);
+  if (!p || !t) return null;
+  const next = mode === 'replace' || !p.instructions ? t : `${p.instructions}\n- ${t}`;
+  return updateProject(db, p.id, { instructions: next.slice(-INSTR_MAX) }, nowIso);
+}
+
+// ---------------------------------------------------------------- registro dei progressi
+
+/**
+ * Il registro del progetto: lezioni fatte, esercizi e quiz con il punteggio, errori, livello e
+ * prossimo passo. È quello che permette a Kestra di riprendere da dove si era rimasti e di far
+ * ripassare gli errori che tornano, anche in una chat nuova o in un compito in background.
+ */
+const LOG_KEY = (id) => 'plog:' + id;
+const LOG_MAX = 300;
+const LOG_KINDS = new Set(['lezione', 'esercizio', 'quiz', 'errore', 'nota', 'verifica']);
+
+export function getLog(db, projectId) {
+  const v = kvGet(db, LOG_KEY(projectId), null);
+  return v && Array.isArray(v.entries) ? v : { level: '', next: '', entries: [] };
+}
+
+export function addLog(db, projectId, a, nowIso) {
+  if (!getProject(db, projectId)) return null;
+  const log = getLog(db, projectId);
+  const kind = LOG_KINDS.has(s(a.kind).toLowerCase()) ? s(a.kind).toLowerCase() : 'nota';
+  const text = s(a.text).slice(0, 400);
+  const topic = s(a.topic).slice(0, 60);
+  const score = Number.isFinite(Number(a.score)) && a.score !== '' && a.score != null ? Math.max(0, Number(a.score)) : null;
+  const max = Number.isFinite(Number(a.max)) && Number(a.max) > 0 ? Number(a.max) : null;
+  const errors = (Array.isArray(a.errors) ? a.errors : a.errors ? [a.errors] : []).map(e => s(e).slice(0, 120)).filter(Boolean).slice(0, 8);
+  if (!text && !topic && !errors.length && !a.level && !a.next) return null;
+  if (text || topic || errors.length) log.entries.push({ at: nowIso, kind, topic, text, ...(score != null ? { score } : {}), ...(max ? { max } : {}), ...(errors.length ? { errors } : {}) });
+  if (a.level) log.level = s(a.level).slice(0, 60);
+  if (a.next) log.next = s(a.next).slice(0, 300);
+  log.entries = log.entries.slice(-LOG_MAX);
+  kvSet(db, LOG_KEY(projectId), log);
+  return log;
+}
+
+export function clearLog(db, projectId) { kvSet(db, LOG_KEY(projectId), null); }
+
+/** Riepilogo del registro: totali, media dei punteggi, errori che tornano, ultime voci. */
+export function logSummary(log, { last = 12 } = {}) {
+  const e = log.entries || [];
+  if (!e.length && !log.level && !log.next) return null;
+  const count = (k) => e.filter(x => x.kind === k).length;
+  const scored = e.filter(x => x.score != null && x.max);
+  const avg = scored.length ? Math.round(scored.reduce((n, x) => n + x.score / x.max, 0) / scored.length * 100) : null;
+  const errCount = new Map();
+  for (const x of e) for (const er of (x.errors || (x.kind === 'errore' && x.text ? [x.text] : []))) {
+    const k = er.toLowerCase(); const c = errCount.get(k) || { text: er, n: 0, lastAt: '' };
+    c.n++; c.lastAt = x.at; errCount.set(k, c);
+  }
+  const recurring = [...errCount.values()].sort((a, b) => b.n - a.n || b.lastAt.localeCompare(a.lastAt)).slice(0, 8);
+  const topics = [...new Set(e.filter(x => x.topic && (x.kind === 'lezione' || x.kind === 'esercizio' || x.kind === 'quiz')).map(x => x.topic))].slice(-15);
+  return { level: log.level, next: log.next, lessons: count('lezione'), exercises: count('esercizio') + count('quiz'), avg, recurring, topics, recent: e.slice(-last) };
+}
+
+function logBlock(log) {
+  const sum = logSummary(log);
+  if (!sum) return '';
+  const lines = ['REGISTRO DEI PROGRESSI (da qui sai a che punto siete: riprendi da qui, non ricominciare da capo)'];
+  if (sum.level) lines.push(`Livello attuale: ${sum.level}`);
+  lines.push(`Lezioni fatte: ${sum.lessons} · esercizi e quiz: ${sum.exercises}${sum.avg != null ? ` · media ${sum.avg}%` : ''}`);
+  if (sum.topics.length) lines.push('Argomenti già fatti: ' + sum.topics.join(', '));
+  if (sum.recurring.length) lines.push('Errori da ripassare (quante volte): ' + sum.recurring.map(r => `${r.text} (${r.n})`).join('; '));
+  if (sum.next) lines.push(`Prossimo passo deciso: ${sum.next}`);
+  lines.push('Ultime voci:');
+  for (const x of sum.recent) lines.push(`- ${String(x.at).slice(0, 10)} ${x.kind}${x.topic ? ' · ' + x.topic : ''}${x.score != null && x.max ? ` · ${x.score}/${x.max}` : ''}${x.text ? ': ' + x.text : ''}${x.errors ? ' [errori: ' + x.errors.join('; ') + ']' : ''}`);
+  return lines.join('\n');
+}
+
+// Progetti di studio: lingua, esame, corso. Ricevono il metodo del tutor oltre alle istruzioni.
+export const STUDY_RE = /\b(ingles\w*|english|tedesc\w*|francese|spagnol\w*|lingu[ae]|[abc][12]\b|ielts|toefl|cambridge|tutor|lezion\w*|studi\w*|esam\w*|corso|grammatic\w*|vocabolari\w*|ripass\w*|quiz)\b/i;
+export const isStudyProject = (p) => !!p && (p.kind === 'tutor' || p.kind === 'studio' || STUDY_RE.test(`${p.name}\n${String(p.instructions || '').slice(0, 3000)}`));
+
+const STUDY_METHOD = `METODO DI STUDIO (vale sotto le ISTRUZIONI DEL PROGETTO: se dicono altro, vincono loro)
+- Sei la tutor di questo percorso. Parti dal REGISTRO DEI PROGRESSI: livello, ultimo argomento, errori da ripassare, prossimo passo. All'inizio di una sessione proponi in una frase da dove ripartire.
+- Un esercizio o una domanda alla volta: aspetta la risposta, poi correggi in modo breve e chiaro (cosa era giusto, l'errore, la forma corretta, perché) e passa alla successiva.
+- Quiz: annuncia quante domande sono, falle una alla volta, alla fine dai il punteggio.
+- Ripassa gli errori che tornano mescolandoli alle cose nuove (ripetizione distanziata). Alza o abbassa la difficoltà in base ai risultati.
+- Registra SEMPRE con project_log: a fine lezione (kind "lezione", topic, cosa avete fatto, next), a fine esercizio o quiz (kind "esercizio" o "quiz" con score e max ed errors), quando noti un errore nuovo (errors). Se il livello cambia, mettilo in level.
+- Materiale lungo da studiare (dispense, schede, liste di vocaboli, test completi): start_job, così lo preparano i modelli più forti con le istruzioni del progetto. Spiegazioni ed esercizi brevi falli subito qui.
+- In questo progetto la reply può essere lunga quanto serve per la lezione e può usare elenchi brevi; resta leggibile ad alta voce.
+- Se il Capo risponde a voce, la trascrizione può storpiare le parole: correggi la grammatica e il lessico, non l'ortografia di parole trascritte male.`;
+
+const PROJECT_ACTIONS = `AZIONI DEL PROGETTO
+- project_instructions {text, mode: "append"|"replace"}: quando il Capo dice come deve funzionare il progetto d'ora in poi ("da ora in poi...", "nel progetto voglio che..."), aggiungi la regola alle istruzioni (append). replace solo se chiede di riscriverle tutte.
+- project_log {kind: "lezione"|"esercizio"|"quiz"|"errore"|"nota"|"verifica", topic, text, score, max, errors: ["..."], level, next}: scrive nel registro dei progressi del progetto.`;
 
 // ---------------------------------------------------------------- chat
 
@@ -260,13 +419,18 @@ export function isProjectMemory(project, module) {
  */
 export function projectContext(db, active, query) {
   const { project, chat } = active;
+  const study = isStudyProject(project);
   const header = `PROGETTO ATTIVO: "${project.name}" (chat: ${chat.title || 'nuova'}).
 Lavori dentro questo progetto come in un progetto di Claude: segui le sue istruzioni, usa i suoi file e la sua memoria.
 Le istruzioni del progetto valgono più dello stile generale (lunghezza, lingua, formato del testo), ma la risposta resta sempre l'oggetto JSON richiesto.
-Per salvare qualcosa nella memoria di questo progetto usa remember con module "progetto". Un lavoro lungo del progetto: start_job (resta legato al progetto).`;
-  const instructions = project.instructions ? `ISTRUZIONI DEL PROGETTO\n${project.instructions}` : '';
+Per salvare qualcosa nella memoria di questo progetto usa remember con module "progetto". Un lavoro lungo del progetto: start_job (resta legato al progetto).
+${PROJECT_ACTIONS}`;
+  const instructions = project.instructions ? `ISTRUZIONI DEL PROGETTO\n${project.instructions}` : 'ISTRUZIONI DEL PROGETTO: ancora nessuna. Se il Capo spiega come deve funzionare il progetto, salvale con project_instructions.';
   const blocks = [];
   const report = { project: project.name, files: [], memories: 0, otherChats: 0, jobs: 0 };
+
+  const log = logBlock(getLog(db, project.id));
+  if (log) { blocks.push({ prio: 1, text: log }); report.log = true; }
 
   const files = relevantFileChunks(db, project.id, query);
   if (files.text) { blocks.push({ prio: 1, text: `FILE DEL PROGETTO${files.whole ? '' : ' (solo le parti pertinenti)'}\n${files.text}` }); report.files = files.used; }
@@ -291,7 +455,7 @@ Per salvare qualcosa nella memoria di questo progetto usa remember con module "p
     blocks.push({ prio: 2, text: 'COMPITI DEL PROGETTO\n' + jobs.map(j => `- ${j.title} (${j.status})${j.result && !j.result.startsWith('retry:') ? ': ' + j.result.slice(0, 300) : ''}`).join('\n') });
     report.jobs = jobs.length;
   }
-  return { header: [header, instructions].filter(Boolean).join('\n\n'), blocks, report };
+  return { header: [header, instructions, study ? STUDY_METHOD : ''].filter(Boolean).join('\n\n'), blocks, report, study };
 }
 
 /** Contesto di un compito legato a un progetto: istruzioni e file pertinenti all'obiettivo. */
@@ -300,7 +464,7 @@ export function jobBackground(db, projectId, goal) {
   if (!p) return '';
   const files = relevantFileChunks(db, p.id, goal, { maxTokens: 5000 });
   const mems = listMemories(db, p.id).slice(0, 20);
-  return [`PROGETTO: ${p.name}`, p.instructions ? `ISTRUZIONI DEL PROGETTO\n${p.instructions}` : '',
+  return [`PROGETTO: ${p.name}`, p.instructions ? `ISTRUZIONI DEL PROGETTO\n${p.instructions}` : '', logBlock(getLog(db, p.id)),
     files.text ? `FILE DEL PROGETTO\n${files.text}` : '', mems.length ? 'MEMORIA DEL PROGETTO\n' + mems.map(m => `- ${m.text}`).join('\n') : ''].filter(Boolean).join('\n\n');
 }
 

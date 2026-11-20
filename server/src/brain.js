@@ -106,9 +106,27 @@ export function noteImprovement(db, text, nowIso) {
 }
 
 /** Toglie i tic verbali ("Certamente, signore." a inizio di ogni risposta) e usa "Capo" come vuole la personalità. */
-const PROJECT_EXIT_RE = /^\W*(?:(?:ok|kestra|chestra)\s+)?(?:esci\s+dal\s+(?:progetto|workspace)|chiudi\s+(?:il\s+)?(?:progetto|workspace)|torna\s+(?:a\s+(?:kestra|jarvis)\s+)?(?:normale|standard))\W*$/i;
+const PROJECT_EXIT_RE = /^\W*(?:(?:ok|kestra|chestra)\s+)?(?:esci\s+dal(?:la|lo|l['’]\s*)?\s*(?:progetto|workspace)|chiudi\s+(?:il\s+)?(?:progetto|workspace)|torna\s+(?:a\s+(?:kestra|jarvis)\s+)?(?:normale|standard))\W*$/i;
 const PROJECT_NEWCHAT_RE = /^\W*(?:(?:apri|inizia|fai|crea)\s+(?:una\s+)?)?nuova\s+chat\b(?:\s+(?:nel|del)\s+progetto)?\W*$/i;
 export const PROJECT_OPEN_RE = /^\W*(?:(?:ok|ehi|kestra|chestra)\s+)?(apri|entra\s+nel|vai\s+(?:nel|al)|riprendi|torna\s+(?:nel|al)|crea|fai|nuovo|apri\s+un\s+nuovo)\s+(?:il\s+|un\s+)?(?:nuovo\s+)?progetto\s+(?:chiamato\s+|di\s+nome\s+|sul(?:l[ao'])?\s+|di\s+|per\s+)?["“]?(.{2,60}?)["”]?\W*$/i;
+
+// "Usa questo PDF come istruzioni del progetto", "queste sono le caratteristiche del progetto".
+const SPEC_AS_INSTR_RE = /\b(?:usa(?:lo|la|li)?|prendi|imposta|metti|tieni|segui)\b[^.?!]{0,40}\b(?:come|per\s+le|nelle|sono\s+le)\s+(?:istruzioni|regole|caratteristiche|impostazioni)\b|\b(?:queste|ecco)\s+(?:sono\s+)?le\s+(?:istruzioni|caratteristiche|regole)\b/i;
+// Parole che fanno pensare a un file che descrive il progetto (profilo per il tutor, caratteristiche, istruzioni).
+const SPEC_WORDS_RE = /\b(?:istruzion\w*|caratteristic\w*|regol\w*|profilo|tutor|prompt|impostazion\w*|specific\w*|come\s+devi|progetto)\b/i;
+
+// "Crea un progetto nuovo per imparare l'inglese B2, ti mando il PDF con le caratteristiche": con un file allegato
+// la frase può continuare dopo il nome.
+const PROJECT_CREATE_WITH_FILE_RE = /\b(crea(?:mi|re)?|fai|nuovo|apri\s+un\s+nuovo)\s+(?:il\s+|un\s+)?(?:nuovo\s+)?progetto(?:\s+nuovo)?\s+(?:chiamato\s+|di\s+nome\s+|sul(?:l[ao'])?\s+|di\s+|per\s+)?["“]?([^"”.,;:!?\n]{2,80})/i;
+
+/** Nome pulito dal parlato: "imparare l'inglese B2 con queste caratteristiche" → "Inglese B2". */
+export function projectName(raw) {
+  let n = String(raw || '').replace(/[.!?]+$/, '').trim();
+  n = n.replace(/\s+(?:con|usando|seguendo|secondo|dal|dai|da|in\s+base|come|che|e\s+ti|ti\s+(?:mando|invio|allego)|allegat\w*|nel\s+pdf|questo|questa)\b.*$/i, '');
+  n = n.replace(/^(?:per\s+)?(?:imparare|studiare|migliorare|preparare|fare|arrivare\s+a(?:l)?)\s+/i, '').replace(/^(?:il|lo|la|l['’]\s*|i|gli|le|un|una|mio|mia)\s*/i, '');
+  n = n.replace(/\s+/g, ' ').trim().slice(0, 40);
+  return n ? n.charAt(0).toUpperCase() + n.slice(1) : 'Progetto';
+}
 
 /** Cosa è entrato nel contesto dell'ultima risposta (vista Mente): sezioni, token, ricordi, file del progetto. */
 export function saveContextReport(db, report) {
@@ -159,6 +177,11 @@ export function applyActions(db, actions, ctx) {
           : memory.remember(db, a, ctx.nowIso);
         if (!memId) { out.failed.push(a.type); continue; }
         out.rememberedIds.push(memId);
+      }
+      else if (a.type === 'project_instructions') {
+        if (!ctx.project || !projects.setInstructions(db, ctx.project.id, a.text, a.mode === 'replace' ? 'replace' : 'append', ctx.nowIso)) { out.failed.push(a.type); continue; }
+      } else if (a.type === 'project_log') {
+        if (!ctx.project || !projects.addLog(db, ctx.project.id, a, ctx.nowIso)) { out.failed.push(a.type); continue; }
       }
       else if (a.type === 'forget') memory.forget(db, a.id);
       else if (a.type === 'learn') { if (!lessons.learn(db, a.rule || a.text, ctx.nowIso)) { out.failed.push(a.type); continue; } }
@@ -278,15 +301,33 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
     proj = projects.enterProject(db, proj.project.id, { newChat: true }, nowIso, ms);
     return local(`Nuova chat nel progetto "${proj.project.name}". Dimmi pure.`, { expectReply: true, actions: ['project_chat'] });
   }
-  const openAsk = PROJECT_OPEN_RE.exec(userText);
+  const openAsk = PROJECT_OPEN_RE.exec(userText) || (fileList.length ? PROJECT_CREATE_WITH_FILE_RE.exec(userText) : null);
+  const wantsNew = !!openAsk && /^(?:crea|nuovo|fai|apri\s+un\s+nuovo)/i.test(openAsk[1]);
+  if (openAsk && wantsNew && fileList.length) {
+    // "Crea un progetto nuovo per l'inglese B2" con il PDF delle caratteristiche: il progetto nasce con
+    // il PDF tra i file e, come istruzioni, il PDF stesso (prima il file veniva ignorato e il progetto non nasceva).
+    const name = projectName(openAsk[2]);
+    const pid = projects.createProject(db, { name }, nowIso, ms);
+    proj = projects.enterProject(db, pid, {}, nowIso, ms);
+    const saved = await projects.saveAttachments(db, env, deps.fetchFn, pid, fileList, nowIso);
+    const ok = saved.filter(f => !f.failed);
+    let note = '';
+    if (ok.length) {
+      const instr = await projects.instructionsFromDoc(db, env, deps.fetchFn, ok.map(f => f.text).join('\n\n'), { tz });
+      if (instr) projects.updateProject(db, pid, { instructions: instr }, nowIso);
+      note = ` Ho letto ${ok.map(f => f.name).join(', ')}: ${instr.length >= ok.reduce((n, f) => n + f.chars, 0) - 200 ? 'è diventato le istruzioni del progetto, parola per parola' : 'ne ho ricavato le istruzioni del progetto'}, e resta tra i file. Le trovi e le cambi nella scheda Progetti.`;
+    } else note = ' Non sono riuscita a leggere il file: caricalo dalla scheda Progetti, oppure mandamelo di nuovo.';
+    if (projects.isStudyProject(projects.getProject(db, pid))) note += ' Terrò il registro di lezioni, quiz ed errori. Dimmi "iniziamo" quando vuoi.';
+    return local(`Ho creato il progetto "${name}" e ci sono dentro.${note}`, { expectReply: true, actions: ['project_create', ...(ok.length ? ['project_file'] : [])] });
+  }
   if (openAsk && !fileList.length) {
-    const found = projects.findByName(db, openAsk[2]);
+    const found = wantsNew && /\bnuov[oa]\b/i.test(userText) ? null : projects.findByName(db, openAsk[2]);
     if (found) {
       proj = projects.enterProject(db, found.id, {}, nowIso, ms);
       return local(`Siamo nel progetto "${found.name}".`, { expectReply: true, actions: ['project_enter'] });
     }
-    if (/^(?:crea|nuovo|fai|apri\s+un\s+nuovo)/i.test(openAsk[1])) {
-      const pid = projects.createProject(db, { name: openAsk[2].replace(/[.!?]+$/, '') }, nowIso, ms);
+    if (wantsNew) {
+      const pid = projects.createProject(db, { name: projectName(openAsk[2]) }, nowIso, ms);
       proj = projects.enterProject(db, pid, {}, nowIso, ms);
       return local(`Ho creato il progetto "${proj.project.name}" e ci sono dentro. Dimmi le istruzioni, oppure carica i file dalla scheda Progetti.`, { expectReply: true, actions: ['project_create'] });
     }
@@ -312,6 +353,35 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
     return local(`Riprovo "${j.title}". Ti avviso a lavoro finito.`, { actions: ['job_retry'], touched: ['compiti'] });
   }
   if (proj) sessionId = proj.chat.session;
+
+  // Dentro un progetto i file allegati in chat diventano file del progetto (prima valevano per una sola risposta).
+  // Se il progetto non ha ancora istruzioni, o il Capo dice che il file descrive il progetto, il file diventa le istruzioni.
+  let projectFileNote = '';
+  const projectFileActions = [];
+  if (proj && (fileList.length || SPEC_AS_INSTR_RE.test(userText))) {
+    let docs = [];
+    if (fileList.length) {
+      const saved = await projects.saveAttachments(db, env, deps.fetchFn, proj.project.id, fileList, nowIso);
+      docs = saved.filter(f => !f.failed);
+      // Il PDF letto una volta: anche questa risposta lo riceve come testo, senza rileggerlo.
+      for (const f of docs) { const i = fileList.findIndex(x => x.name === f.name && x.encoding === 'base64'); if (i >= 0) fileList[i] = { name: f.name, content: f.text }; }
+      if (docs.length) { projectFileActions.push('project_file'); projectFileNote = `I file ${docs.map(f => f.name).join(', ')} sono ora salvati tra i FILE DEL PROGETTO: li avrai anche nei prossimi messaggi.`; }
+    } else {
+      const last = db.get('SELECT name, content FROM project_files WHERE project = ? ORDER BY id DESC LIMIT 1', proj.project.id);
+      if (last) docs = [{ name: last.name, text: last.content, chars: last.content.length }];
+    }
+    const asInstr = docs.length && (SPEC_AS_INSTR_RE.test(userText) || (!proj.project.instructions && SPEC_WORDS_RE.test(userText + ' ' + docs.map(f => f.name).join(' '))));
+    if (asInstr) {
+      const instr = await projects.instructionsFromDoc(db, env, deps.fetchFn, docs.map(f => f.text).join('\n\n'), { tz });
+      if (instr) {
+        proj = { ...proj, project: projects.updateProject(db, proj.project.id, { instructions: instr }, nowIso) };
+        projectFileActions.push('project_instructions');
+        projectFileNote += ` Il contenuto è diventato le ISTRUZIONI DEL PROGETTO (le vedi sotto): dillo al Capo in una frase e da ora seguile.`;
+      }
+    } else if (docs.length && !proj.project.instructions) {
+      projectFileNote += ' Il progetto non ha ancora istruzioni: se questo file descrive come deve funzionare il progetto, chiedi al Capo se usarlo come istruzioni.';
+    }
+  }
 
   // Se l'utente chiede di ridurre, sistemare o pulire il grafo (es. "il grafo della dieta è troppo grande, riducilo"),
   // l'agente locale GraphAgent lo compatta subito, così l'operazione avviene davvero anche se il modello non emette clean_graph.
@@ -394,7 +464,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   const parts = {
     core: CORE_PROMPT(diary.profile.name, nowHuman(ms, tz)) + '\n\n' + mood.MOOD_PROMPT(mood.current(db, ms)) + (projCtx ? '\n\n' + projCtx.header : ''),
     brief: projCtx && !dietOn ? '' : dietBrief(diary, today),
-    rules: [focusLine, cooking.contextLine(db), dietOn ? DIET_RULES : '', UI_WORDS.test(userText) ? ui.uiPrompt(ui.loadLayout(db)) : '', (UI_WORDS.test(userText) || CODE_WORDS.test(userText)) ? coder.codePrompt(env, db) : '', DEVICE_WORDS.test(userText) ? appsPrompt(db) : '', lessons.contextBlock(db, probe), initiative.NOTIF_WORDS.test(userText) ? initiative.notificationsContext(db) : '', (/\b(pc|computer|desktop|windows|dispositiv\w*)\b/i.test(userText) || activeFocus?.device === 'pc' || navActive) ? devices.devicesPrompt(db, ms) : '', phone.pendingContext(db, ms)].filter(Boolean).join('\n\n'),
+    rules: [projectFileNote, focusLine, cooking.contextLine(db), dietOn ? DIET_RULES : '', UI_WORDS.test(userText) ? ui.uiPrompt(ui.loadLayout(db)) : '', (UI_WORDS.test(userText) || CODE_WORDS.test(userText)) ? coder.codePrompt(env, db) : '', DEVICE_WORDS.test(userText) ? appsPrompt(db) : '', lessons.contextBlock(db, probe), initiative.NOTIF_WORDS.test(userText) ? initiative.notificationsContext(db) : '', (/\b(pc|computer|desktop|windows|dispositiv\w*)\b/i.test(userText) || activeFocus?.device === 'pc' || navActive) ? devices.devicesPrompt(db, ms) : '', phone.pendingContext(db, ms)].filter(Boolean).join('\n\n'),
     blocks: [...(dietOn ? dietContext(diary, today) : []), ...(projCtx ? projCtx.blocks : [])],
     memories: recalled.entries.slice(0, projCtx ? 8 : 24).map(m => `- [${m.id}] (${m.module}) ${m.text}`),
     moduleIndex: [mods.length ? 'MODULI DI MEMORIA ESISTENTI: ' + mods.map(m => `${m.name}${m.description ? ` (${m.description})` : ''} [${m.entries}]`).join('; ') : '',
@@ -421,7 +491,9 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   let result;
   let remembered = [];
   let topicHits = { modules: [], leaves: [] };
-  const tier = router.classifyTier(userText, !!image || !!pdfBase64);
+  // In un progetto con istruzioni o file (studio, tesi, lavoro) conta la qualità: modelli "smart", come in Claude.
+  const projectSmart = !!projCtx && (!!proj.project.instructions || projCtx.report.files.length > 0 || projCtx.study);
+  const tier = projectSmart && !image && !pdfBase64 ? 'smart' : router.classifyTier(userText, !!image || !!pdfBase64);
   // Richiesta che chiede di FARE qualcosa (PC, telefono, diario, agenda, sessioni): niente modelli lite,
   // che rispondono "ci penso io" senza mettere l'azione nel JSON.
   const needsActions = ACTION_ASK.test(userText) || phone.DOING_WORDS.test(userText) || jarvisCore.isPcTarget(db, userText);
@@ -464,6 +536,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
       if (explicitMem) parsed.actions.push({ type: 'remember', module: explicitMem.module, text: explicitMem.text });
     }
     let done = applyActions(db, parsed.actions, { today, nowIso, ms, tz, hadPhoto: !!image, project: proj?.project || null });
+    done.applied.push(...projectFileActions);
     // Correzione del Capo senza una regola dal modello: si impara comunque dallo scambio.
     if (lessons.CORRECTION_RE.test(userText) && !parsed.actions.some(a => a?.type === 'learn')) {
       const lastA = [...history].reverse().find(h => h.role === 'assistant');
@@ -516,7 +589,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
         });
         fixed = parseReply(again.text);
       } catch { /* resta la risposta onesta qui sotto */ }
-      const redo = fixed?.parsed ? applyActions(db, fixed.actions, { today, nowIso, ms, tz, hadPhoto: !!image }) : null;
+      const redo = fixed?.parsed ? applyActions(db, fixed.actions, { today, nowIso, ms, tz, hadPhoto: !!image, project: proj?.project || null }) : null;
       if (redo && (!nothing(redo, fixed.topics) || !CLAIM_WORDS.test(fixed.reply))) {
         parsed = { ...fixed, topics: fixed.topics?.length ? fixed.topics : parsed.topics };
         done = redo;
