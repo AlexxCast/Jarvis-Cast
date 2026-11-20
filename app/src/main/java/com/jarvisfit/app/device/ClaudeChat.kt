@@ -108,6 +108,30 @@ object ClaudeChat {
         return out
     }
 
+    private val EN_WORDS = setOf(
+        "the", "and", "is", "are", "was", "were", "you", "your", "it", "this", "that", "of", "to", "in", "for", "with", "on",
+        "have", "has", "do", "does", "did", "not", "can", "will", "would", "should", "what", "how", "why", "which", "when",
+        "be", "been", "my", "me", "we", "they", "there", "here", "an", "a", "or", "but", "if", "so", "about", "great", "good",
+        "yes", "sentence", "word", "correct", "try", "again", "let's", "here's", "it's", "i'm", "don't", "now", "next",
+    )
+    private val IT_WORDS = setOf(
+        "il", "lo", "la", "le", "gli", "un", "una", "di", "da", "che", "e", "è", "non", "per", "con", "su", "del", "della",
+        "dei", "delle", "nel", "nella", "sono", "sei", "hai", "ho", "abbiamo", "come", "perché", "quando", "dove", "questo",
+        "questa", "quello", "anche", "ma", "se", "più", "molto", "bene", "frase", "parola", "giusto", "corretto", "prova",
+        "ancora", "ora", "adesso", "poi", "cosa", "mi", "ti", "ci", "si", "vuoi", "puoi", "esempio", "significa", "ecco",
+    )
+
+    /**
+     * Lingua prevalente di un testo: "en" o "it". Le risposte di Claude possono essere in tutte e due:
+     * spiegazioni in italiano, esercizi in inglese. Serve alla voce (accento giusto) e all'ascolto (lingua giusta).
+     */
+    fun language(text: String): String {
+        val words = text.lowercase().split(Regex("[^a-zàèéìòóù']+")).filter { it.isNotEmpty() }
+        val en = words.count { it in EN_WORDS }
+        val ita = words.count { w -> w in IT_WORDS } + Regex("[àèéìòù]").findAll(text.lowercase()).count()
+        return if (en > ita) "en" else "it"
+    }
+
     // ---------------------------------------------------------------- comandi a voce
 
     private fun cmd(s: String) = s.lowercase().replace(Regex("[^a-z0-9àèéìòóù ]"), " ").replace(Regex("\\s+"), " ").trim()

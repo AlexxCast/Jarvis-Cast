@@ -115,4 +115,11 @@ class ClaudeChatTest {
         assertTrue(c.all { it.length <= 300 })
         assertEquals(long, c.joinToString(" "))
     }
+
+    @Test
+    fun replyLanguage() {
+        assertEquals("en", ClaudeChat.language("Great job! Now try the next sentence with the past perfect."))
+        assertEquals("it", ClaudeChat.language("Ottimo! Il past perfect si usa per un'azione che è avvenuta prima di un'altra."))
+        assertEquals("it", ClaudeChat.language("Perché qui serve il present perfect? Ecco un esempio."))
+    }
 }

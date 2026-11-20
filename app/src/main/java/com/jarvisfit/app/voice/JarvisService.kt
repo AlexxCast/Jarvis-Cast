@@ -780,8 +780,8 @@ class JarvisService : LifecycleService(), SensorEventListener {
         // Ferma immediatamente qualsiasi discorso del TTS per non ascoltare se stesso
         Speaker.stop()
         ClaudeBridge.hush()
-        // Modalità Claude: la richiesta detta subito dopo il nome è stata ascoltata in italiano, quindi per Claude
-        // sarebbe storpiata. Si tengono solo i comandi ("Kestra basta", "Kestra ripeti"); il resto si riascolta in inglese.
+        // Modalità Claude: la richiesta detta subito dopo il nome è stata ascoltata col riconoscitore del nome (solo italiano),
+        // quindi in inglese sarebbe storpiata. Si tengono solo i comandi ("Kestra basta", "Kestra ripeti"); il resto si riascolta.
         val claude = ClaudeBridge.active
         val remainingCommand = if (claude && !ClaudeChat.isStopPhrase(heardCommand) && !ClaudeChat.isRepeatPhrase(heardCommand)) "" else heardCommand
         val cautious = cautiousWake || (claude && remainingCommand.isBlank())
@@ -958,9 +958,16 @@ class JarvisService : LifecycleService(), SensorEventListener {
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1_400L)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1_100L)
             if (ClaudeBridge.active) {
-                // Modalità Claude: Alessio parla in inglese con Claude e si ferma a pensare: inglese e pause lunghe.
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
-                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "en-US")
+                // Modalità Claude: Alessio parla con Claude in inglese o in italiano e si ferma a pensare.
+                // Prima lingua = quella dell'ultima risposta di Claude; su Android 14+ il riconoscitore passa all'altra se serve.
+                val primary = if (ClaudeBridge.listenLang == "it") "it-IT" else "en-US"
+                val other = if (primary == "it-IT") "en-US" else "it-IT"
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, primary)
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, primary)
+                if (Build.VERSION.SDK_INT >= 34) {
+                    putExtra(RecognizerIntent.EXTRA_ENABLE_LANGUAGE_SWITCH, RecognizerIntent.LANGUAGE_SWITCH_BALANCED)
+                    putStringArrayListExtra(RecognizerIntent.EXTRA_LANGUAGE_SWITCH_ALLOWED_LANGUAGES, arrayListOf(primary, other))
+                }
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2_600L)
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2_100L)
                 putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 3_000L)

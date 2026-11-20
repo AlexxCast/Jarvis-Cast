@@ -50,6 +50,11 @@ object ClaudeBridge {
     private var replyChangedAt = 0L
     private var spokenParts = 0
     private var lastReply: List<String> = emptyList()
+
+    /** Lingua in cui ascoltare Alessio: quella dell'ultima risposta di Claude (inglese finché non ce n'è una). */
+    @Volatile var listenLang: String = "en"
+        private set
+    private var replyLang = "en"
     private var lastInput = ""
     private var lastActivity = 0L
     private var baselined = false
@@ -84,7 +89,7 @@ object ClaudeBridge {
         }
         active = true
         seen.clear(); sent = null; reply = emptyList(); spokenParts = 0; lastReply = emptyList()
-        queue.clear(); speaking = false; turnDone = false; baselined = false; lastInput = ""
+        queue.clear(); speaking = false; turnDone = false; baselined = false; lastInput = ""; listenLang = "en"
         lastActivity = System.currentTimeMillis()
         info = "attiva, in attesa dell'app di Claude"
         openClaude(app)
@@ -279,6 +284,8 @@ object ClaudeBridge {
         val complete = stable && (!v.streaming || now - replyChangedAt >= 12_000L)
         // I paragrafi prima dell'ultimo sono già finiti: si leggono subito (meno attesa con le risposte lunghe).
         val ready = if (complete) parts else parts.dropLast(1)
+        // La lingua si decide sull'intera risposta finora: un paragrafo senza indizi prende quella prevalente.
+        replyLang = ClaudeChat.language(parts.joinToString(" "))
         if (ready.size > spokenParts) {
             queue.addAll(ClaudeChat.chunks(ready.drop(spokenParts)))
             spokenParts = ready.size
@@ -289,6 +296,7 @@ object ClaudeBridge {
             turnDone = true
             parts.forEach { seen += ClaudeChat.norm(it) }
             lastReply = parts
+            listenLang = replyLang
             readCount++
             if (!speaking) speakNext()
         }
@@ -314,7 +322,7 @@ object ClaudeBridge {
         speaking = true
         val token = ++speakToken
         Speaker.init(ctx)
-        Speaker.speak(next, onDone = { main.post { if (token == speakToken) { if (active) speakNext() else speaking = false } } }, preferEnglish = true)
+        Speaker.speak(next, onDone = { main.post { if (token == speakToken) { if (active) speakNext() else speaking = false } } }, preferEnglish = replyLang == "en")
     }
 
     // ---------------------------------------------------------------- scrittura
