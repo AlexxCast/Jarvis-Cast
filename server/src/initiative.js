@@ -3,7 +3,7 @@
 // Non usa modelli (zero crediti). Ogni avviso ha una chiave: non si ripete prima del suo intervallo,
 // c'è un tetto giornaliero e di notte gli avvisi aspettano il mattino (tranne gli urgenti).
 
-import { kvGet, kvSet, pushInbox } from './db.js';
+import { kvGet, kvSet, pushInbox, memGet, memSet } from './db.js';
 import { loadDiary } from './diet.js';
 import { nowIso as nowIsoOf, today as todayOf } from './clock.js';
 import * as continuity from './continuity.js';
@@ -178,9 +178,9 @@ function flushQueue(db, ms, tz) {
 
 /** Un giro di controlli (al massimo uno ogni 10 minuti). */
 export function tick(db, ms, tz, { force = false } = {}) {
-  const last = Number(kvGet(db, 'initiativeTickMs', 0));
+  const last = Number(memGet(db, 'initiativeTickMs', 0));
   if (!force && ms - last < 10 * 60_000) return null;
-  kvSet(db, 'initiativeTickMs', ms);
+  memSet(db, 'initiativeTickMs', ms); // in memoria: una riga in meno a ogni battito
   const out = [...flushQueue(db, ms, tz)];
   if (settings(db).level === 'off') return out;
   for (const check of [checkErrors, checkModels, checkJobs, checkDeadlines, checkGoals, checkFollowUps]) {

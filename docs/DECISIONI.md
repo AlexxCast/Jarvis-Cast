@@ -632,3 +632,23 @@ Il Capo voleva aprire grafo, storico e alcune funzioni anche quando il server è
 - **Cosa fa Kestra da sola senza server** (`localAnswer`): timer, ora, apri app, chiama un contatto della rubrica (non numeri), calorie/proteine di oggi, ultima pesata, prossimi promemoria. Mentre è offline fa suonare anche i promemoria entro 12 ore. Pasti, sport, peso e "ricordami" si segnano e si registrano dopo; il resto riceve l'elenco di cosa si può fare.
 - **Limite noto.** La voce dell'app Android (servizio nativo) passa ancora direttamente dal server: senza server risponde con l'errore. Per farla funzionare offline serve un APK.
 - Test: `server/test/senza_server.test.js`.
+
+## Sfera e battito senza scritture inutili (20/11/2026)
+Il 20/11 alle 9:43 il contatore diceva 15.283 righe: GET /api/graph 7.769 e battito 6.912. La causa: `memory.tidyTopics`
+riscriveva ogni argomento annidato (UPDATE parent/label con gli stessi valori) a ogni lettura della sfera e a ogni giro
+del battito. La correzione di PR #40 non era ancora unita, quindi è stata ripresa qui.
+- `tidyTopics` scrive solo se parent o etichetta cambiano davvero; le letture (`/api/graph`, `/api/mind`) riordinano solo
+  se nel frattempo sono arrivati argomenti nuovi (`memory.tidyIfDirty`, segno in memoria).
+- `kvSet` non tocca la riga se il valore è uguale (`WHERE kv.value IS NOT excluded.value`): zero righe per salvataggi ripetuti.
+- In memoria del Durable Object (`memGet`/`memSet` in `db.js`, persi a un riavvio senza danni): `lastSelfInterrogateMs`,
+  `lastAutoTidyMs`, `initiativeTickMs`, l'ultimo giro a vuoto di `lastSelfHeal` (salvato solo se cambia qualcosa).
+- Il conto delle scritture ricorda quando è stato salvato (`savedAt`), così non si riscrive a ogni riavvio dell'oggetto.
+- Test `scritture.test.js`: 5 letture di sfera e mente + 5 battiti a vuoto = 0 righe.
+
+## Niente bip del microfono durante la richiesta (app 2.44, 20/11/2026)
+Alessio sentiva "TT" all'attivazione, "tum tum" dopo la domanda, un "tintino" dopo la risposta e un altro "tum tum"
+alla chiusura. Erano i bip del riconoscimento di Google (apertura, fine frase, chiusura per silenzio) e il nostro
+ToneGenerator prima di riascoltare. `JarvisService`: hushHold/hushRelease zittiscono sistema, notifiche e, se non suona
+musica, il volume multimediale per tutta la richiesta (fino a 0,9 s dopo la fine); l'apertura dell'ascolto della parola
+d'ordine è coperta per 1,2 s. Appena Kestra parla (`Speaker` listener) tutto si riaccende subito; massimo 20 s zitti.
+Il bip prima di riascoltare resta solo con le risposte a voce spente.

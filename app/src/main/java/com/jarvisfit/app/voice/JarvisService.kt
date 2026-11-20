@@ -131,7 +131,8 @@ class JarvisService : LifecycleService(), SensorEventListener {
     private var commandSession = false          // la sessione accesa è l'ascolto di un comando (non della parola chiave)
     private var pausedForSpeech: String? = null // "wake" | "command": cosa riaccendere quando la voce finisce
     private var ignoredFollowups = 0            // frasi della conversazione aperta giudicate non rivolte a Kestra
-    private val speechListener: (Boolean) -> Unit = { speaking -> main.post { onSpeechState(speaking) } }
+    // La voce di Kestra non deve mai restare zittita: appena parla si riaccendono subito i suoni tolti per i bip.
+    private val speechListener: (Boolean) -> Unit = { speaking -> if (speaking) unhushNow(); main.post { onSpeechState(speaking) } }
 
     private fun onSpeechState(speaking: Boolean) {
         if (speaking) {
@@ -207,6 +208,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
     }
 
     override fun onDestroy() {
+        unhushNow() // mai lasciare il telefono zittito
         Speaker.removeListener(speechListener)
         shutdown()
         (getSystemService(SENSOR_SERVICE) as SensorManager).unregisterListener(this)
@@ -337,24 +339,68 @@ class JarvisService : LifecycleService(), SensorEventListener {
         sessionActive = true
         lastRecognizerActivityMs = System.currentTimeMillis()
         guard?.sessionStarted()
-        if (command) muteRecognizerBeep()
+        // Bip del microfono di Google: zitti per tutta la richiesta (apertura, fine frase, chiusura per silenzio).
+        // Per l'attesa della parola Kestra basta coprire l'apertura.
+        if (command) hushHold() else hushFor(1_200)
         rec.startListening(intent)
     }
 
     /**
-     * Il riconoscimento di Google fa un bip ogni volta che apre il microfono: Alessio non vuole bip, solo la voce
-     * di Kestra. Zittisce per un attimo i suoni di sistema e di notifica (solo se erano accesi) e li riaccende.
+     * Il riconoscimento di Google fa un bip quando apre il microfono, quando capisce che la frase è finita e quando
+     * si chiude per silenzio ("TT", "tum tum"): Alessio non vuole bip, solo la voce di Kestra. Si zittiscono i suoni
+     * di sistema e di notifica e, se non sta suonando musica, anche il volume multimediale (su molti telefoni il bip
+     * di Google passa da lì). Si riaccende tutto poco dopo la fine dell'ascolto, o subito appena Kestra parla.
      */
-    private fun muteRecognizerBeep() {
+    private val hushed = mutableSetOf<Int>()
+    private var hushHeld = false
+    private val unhushRunnable = Runnable { unhushNow() }
+
+    private fun hushStreams() {
         val am = getSystemService(AUDIO_SERVICE) as? AudioManager ?: return
-        val streams = listOf(AudioManager.STREAM_SYSTEM, AudioManager.STREAM_NOTIFICATION)
-            .filter { runCatching { !am.isStreamMute(it) }.getOrDefault(false) }
-        val muted = streams.filter { runCatching { am.adjustStreamVolume(it, AudioManager.ADJUST_MUTE, 0); true }.getOrDefault(false) }
-        if (muted.isEmpty()) return
-        main.postDelayed({ muted.forEach { runCatching { am.adjustStreamVolume(it, AudioManager.ADJUST_UNMUTE, 0) } } }, 900)
+        val wanted = mutableListOf(AudioManager.STREAM_SYSTEM, AudioManager.STREAM_NOTIFICATION)
+        if (!am.isMusicActive && !Speaker.isSpeaking()) wanted += AudioManager.STREAM_MUSIC
+        synchronized(hushed) {
+            for (st in wanted) {
+                if (st in hushed) continue
+                val on = runCatching { !am.isStreamMute(st) && am.getStreamVolume(st) > 0 }.getOrDefault(false)
+                if (on && runCatching { am.adjustStreamVolume(st, AudioManager.ADJUST_MUTE, 0); true }.getOrDefault(false)) hushed += st
+            }
+        }
+    }
+
+    /** Zittisce i bip per un attimo (apertura del microfono). */
+    private fun hushFor(ms: Long) {
+        hushStreams()
+        if (!hushHeld) { main.removeCallbacks(unhushRunnable); main.postDelayed(unhushRunnable, ms) }
+    }
+
+    /** Zittisce i bip finché non si chiama hushRelease (tutta la richiesta). */
+    private fun hushHold() {
+        hushHeld = true
+        main.removeCallbacks(unhushRunnable)
+        hushStreams()
+        // Rete di sicurezza: mai più di 20 secondi zitti, anche se qualcosa va storto.
+        main.postDelayed(unhushRunnable, 20_000)
+    }
+
+    /** Fine dell'ascolto: il bip di chiusura arriva subito dopo, quindi si aspetta ancora un po' prima di riaccendere. */
+    private fun hushRelease(afterMs: Long = 900) {
+        if (!hushHeld && synchronized(hushed) { hushed.isEmpty() }) return
+        hushHeld = false
+        main.removeCallbacks(unhushRunnable)
+        main.postDelayed(unhushRunnable, afterMs)
+    }
+
+    private fun unhushNow() {
+        hushHeld = false
+        main.removeCallbacks(unhushRunnable)
+        val am = getSystemService(AUDIO_SERVICE) as? AudioManager ?: return
+        val list = synchronized(hushed) { hushed.toList().also { hushed.clear() } }
+        list.forEach { st -> runCatching { am.adjustStreamVolume(st, AudioManager.ADJUST_UNMUTE, 0) } }
     }
 
     private fun stopSession(cancel: Boolean) {
+        if (commandSession) hushRelease()
         sessionActive = false
         guard?.sessionStopped()
         if (KestraKws.running) KestraKws.stop()
@@ -796,6 +842,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
             override fun onResults(results: Bundle?) {
                 lastRecognizerActivityMs = System.currentTimeMillis()
                 main.removeCallbacks(commandStopRunnable)
+                hushRelease()
                 sessionActive = false
                 guard?.sessionStopped()
                 if (yielded) return
@@ -822,6 +869,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
             override fun onError(error: Int) {
                 lastRecognizerActivityMs = System.currentTimeMillis()
                 main.removeCallbacks(commandStopRunnable)
+                hushRelease()
                 sessionActive = false
                 guard?.sessionStopped()
                 if (yielded) return
@@ -1080,7 +1128,8 @@ class JarvisService : LifecycleService(), SensorEventListener {
                         busy = false
                         followupTurn = true
                         lastConversationActivityTime = System.currentTimeMillis()
-                        tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 80)
+                        // Niente bip prima di riascoltare (era il "tintino" dopo ogni risposta): la conversazione resta aperta in silenzio.
+                        if (!Settings.speakReplies) tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 80)
                         // Conversazione flessibile: resta in ascolto finché l'utente non dice "grazie Jarvis", parla con altri o resta in silenzio.
                         listenForCommand()
                     } else {

@@ -25,7 +25,9 @@ export class JarvisDO extends DurableObject {
     this.db = wrapDurableSql(ctx.storage.sql);
     // Se l'aggiornamento dello schema fallisce, l'oggetto deve comunque rispondere spiegando il perché.
     try { migrate(this.db); this.bootError = null; } catch (e) { this.bootError = e; console.error('Migrazione fallita:', e?.stack || e); }
-    try { restoreWriteStats(kvGet(this.db, 'writeStats', null)); } catch { /* niente conti salvati */ }
+    // Quando è stato salvato l'ultimo conto: prima si perdeva a ogni riavvio dell'oggetto (che a riposo si spegne
+    // tra un battito e l'altro), così il conto si riscriveva a ogni battito.
+    try { const saved = kvGet(this.db, 'writeStats', null); restoreWriteStats(saved); this.statsSavedAt = Number(saved?.savedAt) || 0; } catch { /* niente conti salvati */ }
   }
 
   deps() {
@@ -80,7 +82,7 @@ export class JarvisDO extends DurableObject {
     // I conti delle scritture si salvano al massimo ogni 15 minuti (2 righe), così sopravvivono ai riavvii.
     if (Date.now() - (this.statsSavedAt || 0) > 14 * 60_000) {
       this.statsSavedAt = Date.now();
-      try { kvSet(this.db, 'writeStats', writeStats); } catch { /* limite esaurito: pazienza */ }
+      try { kvSet(this.db, 'writeStats', { ...writeStats, savedAt: this.statsSavedAt }); } catch { /* limite esaurito: pazienza */ }
     }
   }
 }
