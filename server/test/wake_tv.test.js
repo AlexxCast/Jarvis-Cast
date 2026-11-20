@@ -45,3 +45,12 @@ test('dopo il nome: se il modello non risponde, la richiesta non si perde', asyn
   const out = await handleChat(db, ENV, deps(h), { text: 'ricordami di chiamare la mamma stasera', source: 'voice', afterWake: true });
   assert.notEqual(out.ignored, true);
 });
+
+test('dopo il nome senza video sul telefono: la richiesta non viene mai scartata (regressione 2.45)', async () => {
+  const db = makeDb();
+  const f = fakeFetch((url, body) => body.max_tokens <= 10 ? 'NO' : reply({ reply: 'Bravo Capo, quanti chilometri?' }));
+  const out = await handleChat(db, ENV, deps(f), { text: 'volevo dirti che oggi sono andato a correre', source: 'voice', afterWake: true });
+  assert.notEqual(out.ignored, true);
+  assert.equal(out.reply, 'Bravo Capo, quanti chilometri?');
+  assert.equal(kvGet(db, 'ignoredHeard', []).length, 0);
+});

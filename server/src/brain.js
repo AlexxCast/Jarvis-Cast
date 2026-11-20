@@ -272,7 +272,9 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   // Conversazione aperta: frase sentita senza "Kestra". Se è la TV, la radio o qualcuno che parla con altri, silenzio.
   // Stesso filtro per la prima frase dopo il nome sentito dal modello "Kestra" del telefono: con la TV o un video
   // il nome può essere un falso allarme e la frase dopo è ancora la TV.
-  if ((followup || afterWake) && !image && !fileList.length) {
+  // Solo con un video/musica sul telefono (media): senza, la 2.45 scartava anche richieste vere di Alessio
+  // ("eccomi" e poi niente, 20/11). Con la TV nella stanza il nome sentito risponde come prima.
+  if ((followup || (afterWake && media)) && !image && !fileList.length) {
     const addressed = await isFollowupAddressed(db, env, deps, userText, sessionId, { afterWake: afterWake && !followup, media });
     if (!addressed) {
       const heard = kvGet(db, 'ignoredHeard', []);
