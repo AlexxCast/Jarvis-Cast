@@ -67,15 +67,17 @@ export class JarvisDO extends DurableObject {
 
   async alarm() {
     setWriteSource('battito');
+    // Vista propria: le scritture del battito restano del battito anche se nel frattempo arriva una richiesta.
+    const db = this.db.view ? this.db.view({ source: 'battito' }) : this.db;
     const deps = this.deps();
-    const pulse = jarvisCore.selfInterrogate(this.db, this.env, Date.now(), deps.tz);
-    const nextDue = agenda.fireDue(this.db, Date.now(), deps.tz);
-    const delay = await jobs.advance(this.db, this.env, deps);
+    const pulse = jarvisCore.selfInterrogate(db, this.env, Date.now(), deps.tz);
+    const nextDue = agenda.fireDue(db, Date.now(), deps.tz);
+    const delay = await jobs.advance(db, this.env, deps);
     // Modifiche al server in prova: si guarda l'esito dei test su GitHub ogni minuto finché non è chiaro.
     let codeWait = false;
-    try { codeWait = await coder.checkTests(this.db, this.env, deps); } catch { /* riprova al prossimo battito */ }
+    try { codeWait = await coder.checkTests(db, this.env, deps); } catch { /* riprova al prossimo battito */ }
     // Impronte di significato dei ricordi che non ce l'hanno ancora (40 per battito, una scrittura ciascuno).
-    try { await semantic.backfill(this.db, this.env, deps.fetchFn, 40); } catch { /* riprova al prossimo battito */ }
+    try { await semantic.backfill(db, this.env, deps.fetchFn, 40); } catch { /* riprova al prossimo battito */ }
     // Battito: anche senza promemoria o compiti, Kestra si risveglia ogni 15 minuti per il motore di iniziativa.
     const candidates = [nextDue, pulse?.nextTimed, delay != null ? Date.now() + delay : null, codeWait ? Date.now() + 60_000 : null, Date.now() + 15 * 60_000].filter(x => x != null);
     if (candidates.length) await this.ctx.storage.setAlarm(Math.max(Math.min(...candidates), Date.now() + 100));

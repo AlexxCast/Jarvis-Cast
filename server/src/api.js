@@ -87,9 +87,10 @@ export async function handleApi(db, env, deps, request) {
   const ms = deps.now(), tz = deps.tz;
   // Letture e chat non si bloccano se finiscono le scritture: si salta quello che non si può salvare.
   // Le altre richieste restano rigide (rispondono 503 e il telefono mette la modifica in coda).
-  if (db.view) db = db.view({ tolerant: method === 'GET' || path === '/api/chat', pendingReplay: [] });
+  const source = `${method} ${path.replace(/\/[0-9a-z_-]*\d[0-9a-z_-]*(?=\/|$)/gi, '/:id')}`;
+  if (db.view) db = db.view({ tolerant: method === 'GET' || path === '/api/chat', pendingReplay: [], source });
   const startJob = (j) => { jobs.createJob(db, j, deps.now(), tz); deps.schedule?.(deps.now() + 500); };
-  setWriteSource(`${method} ${path.replace(/\/[0-9a-z_-]*\d[0-9a-z_-]*(?=\/|$)/gi, '/:id')}`);
+  setWriteSource(source);
   const chatDeps = { ...deps, startJob };
 
   try {

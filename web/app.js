@@ -1721,7 +1721,8 @@ function viewImpostazioni() {
     h('div', { class: 'card' }, h('h2', {}, 'Dati'),
       h('p', { class: 'muted' }, store.state.legacyImported ? `Dati della vecchia app importati il ${store.state.legacyImported.replace('T', ' alle ')}.` : 'I dati vivono sul tuo server Cloudflare.'),
       store.writes ? h('p', { class: 'small' }, `Scritture di oggi su Cloudflare: ${store.writes.total.toLocaleString('it-IT')} su ${store.writes.limit.toLocaleString('it-IT')}` +
-        (store.writes.sources?.length ? ` (di più: ${store.writes.sources.slice(0, 3).map(x => `${x.name} ${x.rows}`).join(', ')})` : '') + '.') :
+        (store.writes.sources?.length ? ` (di più: ${store.writes.sources.slice(0, 3).map(x => `${x.name} ${x.rows}`).join(', ')})` : '') + '.' +
+        (store.writes.pairs?.length ? ` Dove: ${store.writes.pairs.slice(0, 5).map(x => `${x.name} ${x.rows}`).join(', ')}.` : '')) :
         h('button', { class: 'btn ghost small', onclick: guard(async () => { store.writes = await api('GET', '/writes'); render(); }) }, 'Quante scritture oggi?'),
       h('div', { class: 'row wrap' },
         h('button', { class: 'btn', onclick: guard(async () => {

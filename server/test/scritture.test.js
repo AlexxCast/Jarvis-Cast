@@ -69,3 +69,19 @@ test('scritture: salvare in kv lo stesso valore non costa righe', () => {
   kvSet(db, 'x', { a: 2 });
   assert.equal(writeStats.total, 1);
 });
+
+test('scritture: la chat che aspetta il modello non viene contata alla sfera letta nel frattempo', async () => {
+  const db = makeDb();
+  let release, reached; const gate = new Promise(r => { release = r; }); const hit = new Promise(r => { reached = r; });
+  const d = deps(fakeFetch(async () => { reached(); await gate; return reply({ reply: 'Ho segnato la riunione con Marco.', topics: [{ area: 'lavoro', topic: 'riunione con Marco' }] }); }));
+  const env = { GROQ_API_KEY: 'q' };
+  const req = (method, path, b) => handleApi(db, env, d, new Request('https://x' + path, { method, headers: { 'content-type': 'application/json' }, body: b ? JSON.stringify(b) : undefined })).then(r => r.json());
+  writeStats.day = '';
+  const chat = req('POST', '/api/chat', { text: 'spiegami bene come funziona la fotosintesi nelle piante', source: 'voice' });
+  await hit;
+  await req('GET', '/api/graph');
+  release(); await chat;
+  assert.ok(!writeStats.bySource['GET /api/graph'], `la sfera non scrive: ${JSON.stringify(writeStats.bySource)}`);
+  assert.ok(writeStats.bySource['POST /api/chat'] > 5);
+  assert.ok(writeReport().pairs.some(p => p.name === 'POST /api/chat › messages'));
+});
