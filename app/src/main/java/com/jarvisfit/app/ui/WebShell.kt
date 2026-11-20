@@ -153,7 +153,7 @@ class JarvisBridge(
         val parts = mutableListOf<String>()
         parts += when {
             !Settings.strongWake -> "Spento: uso il riconoscimento di Android."
-            k.silenced() -> "In pausa: Android ha dato al servizio un microfono muto, uso il riconoscimento di Android. Riaprire l'app lo riattiva."
+            k.silenced() -> "In pausa: Android ha dato al servizio un microfono muto, uso il riconoscimento di Android e riprovo tra pochi secondi. Riaprire l'app lo riattiva subito."
             k.running -> "Attivo adesso."
             else -> "Non attivo in questo momento (sta ascoltando una richiesta o usa il riconoscimento di Android)."
         }

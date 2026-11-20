@@ -340,8 +340,10 @@ class JarvisService : LifecycleService(), SensorEventListener {
         lastRecognizerActivityMs = System.currentTimeMillis()
         guard?.sessionStarted()
         // Bip del microfono di Google: zitti per tutta la richiesta (apertura, fine frase, chiusura per silenzio).
-        // Per l'attesa della parola Kestra basta coprire l'apertura.
-        if (command) hushHold() else hushFor(1_200)
+        // Anche l'attesa della parola con Google (quando il riconoscimento forte è in pausa) va coperta tutta: ogni
+        // giro si chiude con un bip e Alessio li sentiva "a caso". Ogni giro nuovo allunga la copertura; appena Kestra
+        // parla o torna il riconoscimento forte, i suoni si riaccendono (al massimo 15 s dopo l'ultimo giro).
+        if (command) hushHold() else hushFor(15_000)
         rec.startListening(intent)
     }
 
@@ -420,7 +422,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
         val ok = KestraKws.start(this, Settings.sensitivity,
             onWake = { main.post { onStrongWake() } },
             onError = { main.post { if (sessionActive && !busy) { sessionActive = false; guard?.sessionStopped(); restartWakeWordDelayed(800) } } },
-            // Microfono muto: si passa subito al riconoscimento di Android (KestraKws.ready resta falso per 10 minuti).
+            // Microfono muto: si passa subito al riconoscimento di Android (KestraKws.ready resta falso per 45 secondi).
             onSilent = { main.post { if (sessionActive && !busy && !commandSession) { sessionActive = false; guard?.sessionStopped(); restartWakeWordDelayed(300) } } },
             mediaPlaying = { phoneMediaPlaying() },
         )

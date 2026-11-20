@@ -33,6 +33,11 @@ class KestraKwsTest {
     }
 
     @Test
+    fun `col microfono muto si riprova presto, non dopo 10 minuti di bip di Google`() {
+        assertTrue(KestraKws.SILENCE_RETRY_MS in 20_000L..60_000L)
+    }
+
+    @Test
     fun `un picco isolato non basta, servono punteggi alti di fila`() {
         var run = 0
         for (s in floatArrayOf(0.95f, 0.2f, 0.96f, 0.1f)) run = KestraKws.streak(run, s, 0.8f)
