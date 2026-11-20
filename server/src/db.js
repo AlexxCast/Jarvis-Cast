@@ -48,18 +48,21 @@ export function writeReport(limit = 8) {
   return { day: writeStats.day, total: writeStats.total, limit: 100_000, sources: top(writeStats.bySource), tables: top(writeStats.byTable) };
 }
 
-// Scritture finite (limite gratuito di Cloudflare): da quando e fino a quando (mezzanotte UTC).
-export const writeBlock = { since: 0, until: 0 };
+// Scritture finite (limite gratuito di Cloudflare). `until` è la pausa breve (10 minuti) in cui non si riprova a
+// scrivere; poi una scrittura fa da prova: se passa il blocco sparisce, se fallisce la pausa ricomincia.
+// `resetAt` è la mezzanotte UTC, quando Cloudflare azzera il conto (solo per dirlo al Capo).
+export const writeBlock = { since: 0, until: 0, resetAt: 0 };
+const PROBE_MS = 10 * 60_000;
 export function noteWriteLimit(now = Date.now()) {
   const d = new Date(now);
-  writeBlock.until = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1);
+  writeBlock.until = now + PROBE_MS;
+  writeBlock.resetAt = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate() + 1);
   if (!writeBlock.since) writeBlock.since = now;
 }
 export function writesBlocked(now = Date.now()) {
-  if (writeBlock.until && now >= writeBlock.until) { writeBlock.until = 0; writeBlock.since = 0; }
   return writeBlock.until > now;
 }
-export function resetWriteBlock() { writeBlock.until = 0; writeBlock.since = 0; }
+export function resetWriteBlock() { writeBlock.until = 0; writeBlock.since = 0; writeBlock.resetAt = 0; }
 
 /**
  * Database "che non si ferma": con db.tolerant = true una scrittura rifiutata per il limite giornaliero
@@ -75,10 +78,19 @@ function tolerate(raw) {
     // Limite già noto: la scrittura non si prova nemmeno. Su Cloudflare una scrittura rifiutata può far fallire
     // anche le letture successive della stessa richiesta (la sfera arrivava vuota per questo).
     if (this?.tolerant && writesBlocked() && WRITE_SQL_RE.test(String(a[0] || ''))) { this.swallowed++; return empty(); }
-    try { return fn(...a); } catch (e) {
-      // Con il limite già noto, qualsiasi errore di una scrittura (Cloudflare non usa sempre lo stesso messaggio) conta come limite.
-      const limit = WRITE_LIMIT_RE.test(String(e?.message || e)) || (writesBlocked() && WRITE_SQL_RE.test(String(a[0] || '')));
-      if (!limit) throw e;
+    const isWrite = WRITE_SQL_RE.test(String(a[0] || ''));
+    try {
+      const out = fn(...a);
+      if (isWrite && writeBlock.since) resetWriteBlock(); // la prova è passata: le scritture sono tornate
+      return out;
+    } catch (e) {
+      // Si salta solo una scrittura. Una lettura che fallisce resta un errore: meglio un 503 (e la copia sul
+      // telefono) che una risposta vuota che sembra vera (la sfera con un solo ramo).
+      const limit = isWrite && (WRITE_LIMIT_RE.test(String(e?.message || e)) || writesBlocked());
+      if (!limit) {
+        if (WRITE_LIMIT_RE.test(String(e?.message || e))) noteWriteLimit();
+        throw e;
+      }
       noteWriteLimit();
       if (!this?.tolerant) throw e;
       this.swallowed++;
