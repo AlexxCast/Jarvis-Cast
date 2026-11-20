@@ -108,6 +108,14 @@ object ClaudeBridge {
         ctx?.let { NotificationManagerCompat.from(it).cancel(NOTIF_ID) }
     }
 
+    /** Kestra sta per cambiare chat o progetto: il messaggio in attesa non conta più, la nuova chat sarà "già vista". */
+    fun navigating() {
+        hush()
+        sent = null
+        reply = emptyList(); replySig = ""; spokenParts = 0; turnDone = true
+        lastActivity = System.currentTimeMillis()
+    }
+
     /** Smette di leggere (Alessio sta parlando). La risposta resta segnata come letta. */
     fun hush() {
         queue.clear()

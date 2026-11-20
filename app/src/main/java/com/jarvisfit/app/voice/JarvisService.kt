@@ -1061,6 +1061,18 @@ class JarvisService : LifecycleService(), SensorEventListener {
 
     // ---------------------------------------------------------------- brain
 
+    /** Spostarsi nell'app di Claude ("apri il progetto inglese", "nuova chat"): lo fa l'agente del telefono, non Claude. */
+    private fun navigateClaude(text: String) {
+        stopSession(cancel = false)
+        inConversationMode = false
+        ClaudeBridge.navigating()
+        val r = PhoneAgent.start(this, "Nell'app di Claude (già aperta in primo piano): $text. Non scrivere messaggi a Claude, solo spostati.")
+        if (r != "ok") { backToWaiting(); return }
+        JarvisState.status.value = JarvisState.Status.THINKING
+        updateNotification("Mi sposto nell'app di Claude…")
+        backToWaiting()
+    }
+
     /** Modalità Claude: ciò che Alessio dice va a Claude (scritto e inviato), tranne i comandi per Kestra. */
     private fun processClaude(text: String) {
         stopSession(cancel = false)
@@ -1097,7 +1109,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
         // In modalità Claude tutto va a Claude, tranne gli spostamenti nell'app ("apri il progetto inglese"):
         // quelli seguono la strada normale e li fa l'agente del telefono. La chat nuova non viene riletta.
         if (ClaudeBridge.active && !awaitingPassphrase) {
-            if (ClaudeChat.isNavPhrase(text)) processMain("Usa il telefono nell'app di Claude, già aperta: $text") else processClaude(text)
+            if (ClaudeChat.isNavPhrase(text)) navigateClaude(text) else processClaude(text)
             return
         }
         processMain(text)
@@ -1108,7 +1120,17 @@ class JarvisService : LifecycleService(), SensorEventListener {
         if (ClaudeChat.isStartPhrase(text)) {
             stopSession(cancel = false)
             inConversationMode = false
+            val project = ClaudeChat.startProject(text)
             val msg = ClaudeBridge.start(this)
+            if (ClaudeBridge.active && project != null) {
+                // "Modalità Claude, progetto Monomitos": l'agente del telefono apre quel progetto, poi si detta.
+                stopSession(cancel = false)
+                main.postDelayed({ navigateClaude("apri il progetto $project") }, 1_800L)
+                lastSpokenText = "Apro il progetto $project su Claude."
+                lastSpokenTime = System.currentTimeMillis()
+                Speaker.speak(lastSpokenText) { main.post { backToWaiting() } }
+                return
+            }
             lastSpokenText = msg
             lastSpokenTime = System.currentTimeMillis()
             JarvisState.status.value = JarvisState.Status.SPEAKING

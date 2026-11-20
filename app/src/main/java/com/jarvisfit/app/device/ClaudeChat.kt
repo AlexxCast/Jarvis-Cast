@@ -139,11 +139,15 @@ object ClaudeChat {
     private val startRegex = Regex(
         "^(?:(?:ehi |ok |ciao )?(?:kestra|chestra) )?(?:attiva |avvia |apri |accendi |entra in |vai in |passa in |metti )?(?:la )?" +
             "(?:modalit[aà] claude|modalit[aà] cloud|claude mode|cloud mode|ponte (?:con|per) claude|leggimi claude|leggi claude|parla con claude|collegati a claude)" +
-            "(?: (?:per favore|grazie|kestra))*$"
+            "(?: (?:per favore|grazie|kestra))*" +
+            "(?: (?:sul |nel |con il |con |per il |per |nel |e apri (?:il )?|apri (?:il )?)?progetto (.+?))?(?: (?:per favore|grazie))*$"
     )
 
     /** "Kestra, modalità Claude": accende il ponte (riconosciuto sul telefono, senza passare dal server). */
     fun isStartPhrase(text: String): Boolean = startRegex.matches(cmd(text))
+
+    /** Il progetto di Claude nominato nella frase di accensione ("modalità Claude, progetto Monomitos"), o null. */
+    fun startProject(text: String): String? = startRegex.matchEntire(cmd(text))?.groupValues?.getOrNull(1)?.trim()?.ifEmpty { null }
 
     private val stopRegex = Regex(
         "^(?:ok |okay |grazie )?(?:basta|stop|esci|exit|quit|fine|ferma|chiudi|end|disattiva|spegni)" +

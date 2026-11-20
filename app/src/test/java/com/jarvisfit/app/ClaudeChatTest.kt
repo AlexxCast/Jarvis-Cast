@@ -130,4 +130,12 @@ class ClaudeChatTest {
         for (s in listOf("open the project", "the project is late", "apri la finestra per favore"))
             assertFalse(s, ClaudeChat.isNavPhrase(s))
     }
+
+    @Test
+    fun startWithProject() {
+        assertEquals("monomitos", ClaudeChat.startProject("Kestra, modalità Claude, progetto Monomitos"))
+        assertEquals("inglese b2", ClaudeChat.startProject("attiva la modalità Claude sul progetto inglese B2"))
+        assertNull(ClaudeChat.startProject("modalità Claude"))
+        assertTrue(ClaudeChat.isStartPhrase("modalità Claude nel progetto Monomitos"))
+    }
 }

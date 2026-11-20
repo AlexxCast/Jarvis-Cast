@@ -200,6 +200,20 @@ class JarvisBridge(
         if (Settings.listeningEnabled) JarvisService.listenNow(activity) else requestListening()
     }
 
+    /** Scheda "Claude": accende la modalità Claude e, se c'è un nome, l'agente del telefono apre quel progetto. */
+    @JavascriptInterface
+    fun claudeMode(project: String) = activity.runOnUiThread {
+        val c = com.jarvisfit.app.device.ClaudeBridge
+        Speaker.speak(c.start(activity))
+        val name = project.trim().take(80)
+        if (c.active && name.isNotEmpty()) {
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                c.navigating()
+                com.jarvisfit.app.device.PhoneAgent.start(activity, "Nell'app di Claude (già aperta in primo piano): apri il progetto \"$name\". Non scrivere messaggi a Claude, solo spostati.")
+            }, 2_000L)
+        }
+    }
+
     /** "Apri Spotify": cerca l'app per nome e la avvia. */
     @JavascriptInterface
     fun openApp(name: String): Boolean = AppLauncher.open(activity, name)
