@@ -165,7 +165,7 @@ object Cloud {
     data class PhoneMove(val kind: String, val n: Int?, val text: String, val dir: String, val say: String)
 
     /** Una mossa per il controllo del telefono: mandiamo lo schermo, il server sceglie cosa fare. */
-    suspend fun phoneStep(goal: String, step: Int, history: List<String>, screen: com.jarvisfit.app.device.JarvisAccessibility.Screen): PhoneMove =
+    suspend fun phoneStep(goal: String, step: Int, history: List<String>, screen: com.jarvisfit.app.device.JarvisAccessibility.Screen, confirmed: Boolean = false): PhoneMove =
         withContext(Dispatchers.IO) {
             try {
                 val o = request("POST", "/api/phone/step", buildJsonObject {
@@ -173,6 +173,8 @@ object Cloud {
                     put("step", step)
                     // Senza conferma prima di inviare o chiamare solo se il telefono ha appena riconosciuto la voce del Capo.
                     put("voiceTrusted", com.jarvisfit.app.voice.VoiceId.isTrusted())
+                    // Il Capo ha già confermato questo compito con un tocco (es. "Pubblica" su un post di Monomythos).
+                    if (confirmed) put("confirmed", true)
                     put("history", JsonArray(history.map { JsonPrimitive(it) }))
                     put("screen", buildJsonObject {
                         put("app", screen.app)
@@ -192,6 +194,31 @@ object Cloud {
                 PhoneMove("ask", null, "", "", "Non riesco a contattare il server: ${e.message ?: "errore di rete"}.")
             }
         }
+
+    // ---------------------------------------------------------------- Monomythos (Centro social)
+
+    data class SocialPost(val key: String, val platform: String, val title: String, val video: String, val caption: String, val auto: Boolean, val stats: Boolean)
+
+    /** Dettagli di un post da pubblicare (null se non c'è più o il server non risponde). */
+    suspend fun socialItem(key: String, platform: String): SocialPost? = withContext(Dispatchers.IO) {
+        runCatching {
+            val q = "key=" + java.net.URLEncoder.encode(key, "UTF-8") + "&platform=" + java.net.URLEncoder.encode(platform, "UTF-8")
+            val o = request("GET", "/api/social/item?$q", readTimeoutMs = 30_000)
+            SocialPost(str(o, "key"), str(o, "platform"), str(o, "title"), str(o, "video"), str(o, "caption"),
+                (o["auto"] as? JsonPrimitive)?.booleanOrNull == true, (o["stats"] as? JsonPrimitive)?.booleanOrNull != false)
+        }.getOrNull()
+    }
+
+    suspend fun socialDone(key: String, platform: String, ok: Boolean, note: String) = withContext(Dispatchers.IO) {
+        runCatching { request("POST", "/api/social/done", buildJsonObject { put("key", key); put("platform", platform); put("ok", ok); put("note", note.take(200)) }, readTimeoutMs = 30_000) }
+        Unit
+    }
+
+    /** Carica gli screenshot (JPEG in base64) nella sezione statistiche di Centro social. Ritorna l'errore o null. */
+    suspend fun socialStats(images: List<String>): String? = withContext(Dispatchers.IO) {
+        runCatching { request("POST", "/api/social/stats", buildJsonObject { put("images", JsonArray(images.map { JsonPrimitive(it) })) }, readTimeoutMs = 60_000); null }
+            .getOrElse { it.message ?: "errore" }
+    }
 
     /** Elenco delle app installate, così Jarvis capisce anche i nomi detti male. */
     suspend fun sendApps(apps: List<String>) = withContext(Dispatchers.IO) {

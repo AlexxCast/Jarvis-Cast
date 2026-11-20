@@ -347,7 +347,9 @@ function startLoops() {
     try {
       const inb = await api('POST', '/inbox/consume');
       for (const it of (inb.items || [])) {
-        const txt = String(it.text || '').replace(/\[(?:PHONE_TASK|OPEN_APP):[^\]]+\]\s*/g, '').trim();
+        const social = /\[SOCIAL_POST:([^|\]]+)\|(\w+)\]/.exec(String(it.text || ''));
+        if (social) nativeCall('socialOffer', social[1], social[2]); // il post di Monomythos lo pubblica il telefono
+        const txt = String(it.text || '').replace(/\[(?:PHONE_TASK|OPEN_APP|SOCIAL_POST):[^\]]+\]\s*/g, '').trim();
         if (txt) { toast(txt); if ((nativeJson('getConfig') || {}).speakReplies) nativeCall('speak', txt); }
       }
       await refresh();
@@ -1672,6 +1674,27 @@ function viewIniziativa() {
       h('div', { class: 'list' }, store.initiative.history.map(x => h('div', { class: 'item small' }, h('span', { class: 'muted num' }, ago(x.at).slice(5)), ' ', x.text)))) : null);
 }
 
+/** Monomythos: i post che Centro social non pubblica da solo li pubblica Kestra sul telefono. */
+function viewMonomythos() {
+  if (!store.social) { api('GET', '/social').then(r => { store.social = r; render(); }).catch(() => {}); return h('div', { class: 'card' }, h('h2', {}, 'Monomythos'), h('p', { class: 'empty' }, 'Carico…')); }
+  const st = store.social.settings;
+  const save = guard(async (patch) => { store.social.settings = (await api('POST', '/social/settings', patch)).settings; render(); });
+  const check = guard(async () => { const r = await api('POST', '/social/check'); store.social = r.status; render(); toast(r.error ? 'Non riesco a leggere Centro social: ' + r.error : r.found ? `Post da pubblicare: ${r.found}.` : 'Nessun post nuovo nelle ultime 6 ore.'); });
+  const name = { tiktok: 'TikTok', instagram: 'Instagram' };
+  const lc = store.social.lastCheck;
+  return h('div', { class: 'card' }, h('h2', {}, 'Monomythos'),
+    h('p', { class: 'muted small' }, 'Quando Centro social prepara un post che non riesce a pubblicare da solo (TikTok nella posta, Instagram), Kestra lo pubblica dal telefono: video in galleria, testo giusto copiato e incollato, poi gli screenshot delle statistiche di Instagram in Centro social. Controlla alla notifica di Centro social e ogni ora, guardando le ultime 6 ore.'),
+    h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: st.enabled, onchange: (e) => save({ enabled: e.target.checked }) }), 'Controlla i post di Centro social'),
+    h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: st.auto, onchange: (e) => save({ auto: e.target.checked }) }), 'Pubblica senza chiedere (altrimenti una notifica con "Pubblica")'),
+    h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: st.stats, onchange: (e) => save({ stats: e.target.checked }) }), 'Dopo Instagram carica gli screenshot delle statistiche'),
+    store.social.token ? null : h('p', { class: 'small' }, 'Per segnare i post come fatti e caricare le statistiche serve il Secret MONOMYTOS_TOKEN nel Worker Cloudflare (la stessa chiave GitHub di Centro social).'),
+    h('div', { class: 'row wrap' }, h('button', { class: 'btn', onclick: check }, 'Controlla ora'),
+      h('span', { class: 'muted small grow' }, lc ? `Ultimo controllo: ${new Date(lc.ms).toLocaleString('it-IT', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}` : '')),
+    (store.social.pending || []).length ? h('div', { class: 'list' }, store.social.pending.map(p => h('div', { class: 'item small' }, `${name[p.platform] || p.platform}: «${p.title}»`))) : null,
+    (store.social.log || []).length ? h('details', {}, h('summary', { class: 'small' }, 'Ultime pubblicazioni'),
+      h('div', { class: 'list' }, store.social.log.map(x => h('div', { class: 'item small' }, h('span', { class: 'muted num' }, x.at.slice(5, 16).replace('T', ' ')), ' ', x.text)))) : null);
+}
+
 function viewImpostazioni() {
   const cfg = nativeJson('getConfig');
   const toggle = (label, key, method) => h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: cfg[key], onchange: (e) => { nativeCall(method, e.target.checked); setTimeout(render, 300); } }), label);
@@ -1722,6 +1745,7 @@ function viewImpostazioni() {
         h('button', { class: 'btn', onclick: guard(async () => { store.state.legacyImported = null; await importLegacyIfNeeded(); render(); }) }, 'Reimporta i dati del telefono'),
         h('button', { class: 'btn ghost danger', onclick: () => nativeCall('disconnectCloud') }, 'Torna all\'app classica'))) : null,
     viewIniziativa(),
+    viewMonomythos(),
     h('div', { class: 'card' }, h('h2', {}, 'Dati'),
       h('p', { class: 'muted' }, store.state.legacyImported ? `Dati della vecchia app importati il ${store.state.legacyImported.replace('T', ' alle ')}.` : 'I dati vivono sul tuo server Cloudflare.'),
       store.writes ? h('p', { class: 'small' }, `Scritture di oggi su Cloudflare: ${store.writes.total.toLocaleString('it-IT')} su ${store.writes.limit.toLocaleString('it-IT')}` +

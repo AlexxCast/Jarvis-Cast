@@ -1242,12 +1242,14 @@ class JarvisService : LifecycleService(), SensorEventListener {
                     items.forEachIndexed { i, rawText ->
                         val taskMatch = Regex("\\[PHONE_TASK:([^\\]]+)\\]").find(rawText)
                         val appMatch = Regex("\\[OPEN_APP:([^\\]]+)\\]").find(rawText)
-                        val text = rawText.replace(Regex("\\[(?:PHONE_TASK|OPEN_APP):[^\\]]+\\]\\s*"), "").trim()
+                        val socialMatch = Regex("\\[SOCIAL_POST:([^|\\]]+)\\|(\\w+)\\]").find(rawText)
+                        val text = rawText.replace(Regex("\\[(?:PHONE_TASK|OPEN_APP|SOCIAL_POST):[^\\]]+\\]\\s*"), "").trim()
                         if (text.isNotBlank()) notifyInfoPopup(text, 20 + i)
                         if (appMatch != null) AppLauncher.open(this@JarvisService, appMatch.groupValues[1].trim())
                         if (taskMatch != null) PhoneAgent.start(this@JarvisService, taskMatch.groupValues[1].trim())
+                        if (socialMatch != null) com.jarvisfit.app.device.SocialPoster.offer(this@JarvisService, socialMatch.groupValues[1], socialMatch.groupValues[2])
                     }
-                    val first = items.firstOrNull()?.replace(Regex("\\[(?:PHONE_TASK|OPEN_APP):[^\\]]+\\]\\s*"), "")?.trim()
+                    val first = items.firstOrNull()?.replace(Regex("\\[(?:PHONE_TASK|OPEN_APP|SOCIAL_POST):[^\\]]+\\]\\s*"), "")?.trim()
                     val micFree = guard?.busyElsewhere(sessionActive) != true
                     if (first != null && Settings.speakReplies && !busy && !yielded && micFree) {
                         lastSpokenText = first
