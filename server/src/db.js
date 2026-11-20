@@ -26,26 +26,29 @@ CREATE INDEX IF NOT EXISTS project_chats_project ON project_chats(project);
 
 // Contatore delle scritture (il piano gratuito di Cloudflare ne concede 100.000 righe al giorno): per ogni
 // richiesta o battito si sa quante righe ha scritto e in quale tabella. Si vede in Impostazioni › Dati.
-export const writeStats = { day: '', total: 0, bySource: {}, byTable: {} };
+export const writeStats = { day: '', total: 0, bySource: {}, byTable: {}, bySourceTable: {} };
 let writeSource = 'altro';
 export function setWriteSource(label) { writeSource = String(label || 'altro').slice(0, 60); }
 export function tallyWrites(q, n, now = Date.now()) {
   if (!n) return;
   const day = new Date(now).toISOString().slice(0, 10); // il limite si azzera a mezzanotte UTC
-  if (writeStats.day !== day) Object.assign(writeStats, { day, total: 0, bySource: {}, byTable: {} });
+  if (writeStats.day !== day) Object.assign(writeStats, { day, total: 0, bySource: {}, byTable: {}, bySourceTable: {} });
   const table = (/\b(?:INTO|UPDATE|FROM|TABLE(?: IF NOT EXISTS)?)\s+(\w+)/i.exec(q) || [])[1] || '?';
   writeStats.total += n;
   writeStats.bySource[writeSource] = (writeStats.bySource[writeSource] || 0) + n;
   writeStats.byTable[table] = (writeStats.byTable[table] || 0) + n;
+  const pair = `${writeSource} › ${table}`;
+  writeStats.bySourceTable = writeStats.bySourceTable || {};
+  writeStats.bySourceTable[pair] = (writeStats.bySourceTable[pair] || 0) + n;
 }
 /** Riprende i conti di oggi salvati (il Durable Object può essere riavviato in qualsiasi momento). */
 export function restoreWriteStats(saved, now = Date.now()) {
   if (!saved || saved.day !== new Date(now).toISOString().slice(0, 10) || writeStats.day === saved.day) return;
-  Object.assign(writeStats, { day: saved.day, total: saved.total || 0, bySource: { ...saved.bySource }, byTable: { ...saved.byTable } });
+  Object.assign(writeStats, { day: saved.day, total: saved.total || 0, bySource: { ...saved.bySource }, byTable: { ...saved.byTable }, bySourceTable: { ...(saved.bySourceTable || {}) } });
 }
 export function writeReport(limit = 8) {
-  const top = (o) => Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, limit).map(([name, rows]) => ({ name, rows }));
-  return { day: writeStats.day, total: writeStats.total, limit: 100_000, sources: top(writeStats.bySource), tables: top(writeStats.byTable) };
+  const top = (o, n = limit) => Object.entries(o).sort((a, b) => b[1] - a[1]).slice(0, n).map(([name, rows]) => ({ name, rows }));
+  return { day: writeStats.day, total: writeStats.total, limit: 100_000, sources: top(writeStats.bySource), tables: top(writeStats.byTable), pairs: top(writeStats.bySourceTable || {}, 12) };
 }
 
 // Scritture finite (limite gratuito di Cloudflare). `until` è la pausa breve (10 minuti) in cui non si riprova a
@@ -77,6 +80,9 @@ function tolerate(raw) {
   const guard = (fn, empty) => function (...a) {
     // Limite già noto: la scrittura non si prova nemmeno. Su Cloudflare una scrittura rifiutata può far fallire
     // anche le letture successive della stessa richiesta (la sfera arrivava vuota per questo).
+    // Chi scrive: l'etichetta della richiesta che ha aperto la vista. Prima era una sola variabile per tutto l'oggetto,
+    // così le scritture della chat finite dopo l'attesa del modello venivano contate alla sfera letta nel frattempo.
+    if (this?.source) setWriteSource(this.source);
     if (this?.tolerant && writesBlocked() && WRITE_SQL_RE.test(String(a[0] || ''))) { this.swallowed++; return empty(); }
     const isWrite = WRITE_SQL_RE.test(String(a[0] || ''));
     try {
