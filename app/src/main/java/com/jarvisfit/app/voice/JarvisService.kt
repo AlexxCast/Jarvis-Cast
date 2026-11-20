@@ -783,7 +783,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
         // Modalità Claude: la richiesta detta subito dopo il nome è stata ascoltata col riconoscitore del nome (solo italiano),
         // quindi in inglese sarebbe storpiata. Si tengono solo i comandi ("Kestra basta", "Kestra ripeti"); il resto si riascolta.
         val claude = ClaudeBridge.active
-        val remainingCommand = if (claude && !ClaudeChat.isStopPhrase(heardCommand) && !ClaudeChat.isRepeatPhrase(heardCommand)) "" else heardCommand
+        val remainingCommand = if (claude && !ClaudeChat.isStopPhrase(heardCommand) && !ClaudeChat.isRepeatPhrase(heardCommand) && !ClaudeChat.isNavPhrase(heardCommand)) "" else heardCommand
         val cautious = cautiousWake || (claude && remainingCommand.isBlank())
         busy = true
         busySinceMs = System.currentTimeMillis()
@@ -1094,7 +1094,17 @@ class JarvisService : LifecycleService(), SensorEventListener {
 
     private fun process(text: String) {
         firstCommandPending = false
-        if (ClaudeBridge.active && !awaitingPassphrase) { processClaude(text); return }
+        // In modalità Claude tutto va a Claude, tranne gli spostamenti nell'app ("apri il progetto inglese"):
+        // quelli seguono la strada normale e li fa l'agente del telefono. La chat nuova non viene riletta.
+        if (ClaudeBridge.active && !awaitingPassphrase) {
+            if (ClaudeChat.isNavPhrase(text)) processMain("Usa il telefono nell'app di Claude, già aperta: $text") else processClaude(text)
+            return
+        }
+        processMain(text)
+    }
+
+    private fun processMain(text: String) {
+        firstCommandPending = false
         if (ClaudeChat.isStartPhrase(text)) {
             stopSession(cancel = false)
             inConversationMode = false

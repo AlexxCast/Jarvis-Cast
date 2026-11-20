@@ -122,4 +122,12 @@ class ClaudeChatTest {
         assertEquals("it", ClaudeChat.language("Ottimo! Il past perfect si usa per un'azione che è avvenuta prima di un'altra."))
         assertEquals("it", ClaudeChat.language("Perché qui serve il present perfect? Ecco un esempio."))
     }
+
+    @Test
+    fun navigationInsideClaude() {
+        for (s in listOf("apri il progetto inglese", "Kestra apri il progetto English B2", "torna alla lista dei progetti", "nuova chat", "vai nella chat di ieri"))
+            assertTrue(s, ClaudeChat.isNavPhrase(s))
+        for (s in listOf("open the project", "the project is late", "apri la finestra per favore"))
+            assertFalse(s, ClaudeChat.isNavPhrase(s))
+    }
 }

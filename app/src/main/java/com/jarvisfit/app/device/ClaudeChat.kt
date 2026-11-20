@@ -156,6 +156,14 @@ object ClaudeChat {
         return stopRegex.matches(c)
     }
 
+    private val navRegex = Regex(
+        "^(?:(?:kestra|chestra) )?(?:apri|aprimi|vai|torna|entra|passa|cerca|mostrami)(?: (?:a|al|alla|allo|nel|nella|nei|sul|sulla|in|il|la|lo|i|le|un|una))* " +
+            "(?:progett[oi]|chat|conversazion[ei]|cronologia|lista|elenco|home)\\b.*|^(?:(?:kestra|chestra) )?(?:nuova chat|nuova conversazione)\\b.*"
+    )
+
+    /** "Apri il progetto inglese", "torna alla chat", "nuova chat": muoversi nell'app di Claude (lo fa l'agente del telefono). */
+    fun isNavPhrase(text: String): Boolean = navRegex.matches(cmd(text))
+
     private val repeatRegex = Regex(
         "^(?:ripeti|ripetilo|ripeti per favore|rileggi|rileggilo|repeat|repeat that|repeat please|repeat it|say it again|say that again|again please|read it again|one more time)$"
     )
