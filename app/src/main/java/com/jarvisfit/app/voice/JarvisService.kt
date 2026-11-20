@@ -1265,7 +1265,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
                 }
                 Unit
             }
-            if (Settings.speakReplies) Speaker.speak(reply.text, after) else after()
+            if (Settings.speakReplies) Speaker.speak(reply.text, onDone = after) else after()
         }
     }
 

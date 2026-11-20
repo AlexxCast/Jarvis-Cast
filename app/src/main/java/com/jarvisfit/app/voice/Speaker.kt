@@ -111,7 +111,7 @@ object Speaker {
             }
             // Svuota la coda: parla oppure, se il TTS non è disponibile, completa subito
             val queued = synchronized(pending) { pending.toList().also { pending.clear() } }
-            queued.forEach { (t, cb) -> speak(t, cb) }
+            queued.forEach { (t, cb) -> speak(t, onDone = cb) }
         }
     }
 
@@ -188,7 +188,7 @@ object Speaker {
     }
 
     /** Parla e chiama [onDone] quando l'audio è terminato (garantito, anche in caso di errore). */
-    fun speak(text: String, onDone: (() -> Unit)? = null, preferEnglish: Boolean = false) {
+    fun speak(text: String, preferEnglish: Boolean = false, onDone: (() -> Unit)? = null) {
         val cleaned = cleanTextForSpeech(text)
         if (cleaned.isBlank() || failed) {
             onDone?.invoke()
