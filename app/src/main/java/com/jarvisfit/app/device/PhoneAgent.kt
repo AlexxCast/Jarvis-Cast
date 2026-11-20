@@ -48,6 +48,30 @@ object PhoneAgent {
         return "ok"
     }
 
+    /** Esito di un compito guidato da codice (es. pubblicare un post): done, ask o errore, con la frase finale. */
+    data class Outcome(val kind: String, val say: String) { val ok get() = kind == "done" }
+
+    /** Perché adesso non si può usare il telefono (null = si può). */
+    fun notReady(ctx: Context): String? {
+        val km = ctx.getSystemService(android.app.KeyguardManager::class.java)
+        if (km?.isDeviceLocked == true && !com.jarvisfit.app.voice.VoiceId.isTrusted()) return "telefono bloccato"
+        if (JarvisAccessibility.instance == null) return "accessibilità spenta (Kestra: usa il telefono)"
+        return null
+    }
+
+    /**
+     * Come start, ma aspetta la fine e dice com'è andata. [confirmed] = il Capo ha già confermato con un tocco;
+     * [clip] = testo messo negli appunti, usato se l'app non accetta l'incolla.
+     */
+    suspend fun runTask(ctx: Context, goal: String, confirmed: Boolean = false, clip: String = "", speakEnd: Boolean = true): Outcome {
+        val app = ctx.applicationContext
+        notReady(app)?.let { return Outcome("errore", it) }
+        job?.cancel()
+        // Il tasto "Ferma" della notifica ferma anche questo compito.
+        job = kotlin.coroutines.coroutineContext[Job]
+        return loop(app, goal, confirmed, clip, speakEnd)
+    }
+
     /** Dice e mostra perché non può procedere: mai una promessa a vuoto. */
     private fun tell(ctx: Context, text: String) {
         notify(ctx, text, ongoing = false)
@@ -61,41 +85,46 @@ object PhoneAgent {
         NotificationManagerCompat.from(ctx).cancel(NOTIF_ID)
     }
 
-    private suspend fun loop(ctx: Context, goal: String) {
+    private suspend fun loop(ctx: Context, goal: String, confirmed: Boolean = false, clip: String = "", speakEnd: Boolean = true): Outcome {
         Speaker.init(ctx)
         val history = mutableListOf<String>()
         var finalSay = ""
         var asked = false
+        var outcome = Outcome("errore", "")
         var pause = 600L
         try {
             for (step in 0 until 25) {
                 delay(pause) // lascia caricare lo schermo
-                val svc = JarvisAccessibility.instance ?: run { finalSay = "Il permesso di accessibilità è stato spento."; return }
+                val svc = JarvisAccessibility.instance ?: run { finalSay = "Il permesso di accessibilità è stato spento."; outcome = Outcome("errore", finalSay); return outcome }
                 var screen = svc.snapshot()
                 // Schermo ancora vuoto (app che si sta aprendo): aspettiamo un attimo e rileggiamo.
                 repeat(3) { if (screen.items.size < 2) { delay(800); screen = svc.snapshot() } }
-                val move = Cloud.phoneStep(goal, step, history, screen)
+                val move = Cloud.phoneStep(goal, step, history, screen, confirmed)
                 val doing = move.say.ifBlank { move.kind }
                 notify(ctx, "Passo ${step + 1}: $doing", ongoing = true)
                 val err: String? = when (move.kind) {
                     "tap" -> svc.tap(move.n ?: -1)
                     "type" -> svc.type(move.n ?: -1, move.text)
+                    "paste" -> svc.paste(move.n ?: -1, clip)
                     "scroll" -> svc.scroll(move.n, move.dir != "su")
                     "back" -> { svc.back(); null }
                     "home" -> { svc.home(); null }
                     "open_app" -> if (AppLauncher.open(ctx, move.text)) null else "app \"${move.text}\" non trovata"
                     "wait" -> null
-                    else -> { asked = move.kind == "ask"; finalSay = move.say.ifBlank { if (move.kind == "done") "Fatto." else "Mi sono fermato: mi dica come proseguire." }; return } // done / ask
+                    else -> { asked = move.kind == "ask"; finalSay = move.say.ifBlank { if (move.kind == "done") "Fatto." else "Mi sono fermato: mi dica come proseguire." }; outcome = Outcome(move.kind, finalSay); return outcome } // done / ask
                 }
-                pause = when (move.kind) { "open_app" -> 2500L; "type" -> 700L; else -> 1300L }
+                pause = when (move.kind) { "open_app" -> 2500L; "type", "paste" -> 700L; else -> 1300L }
                 val target = move.n?.let { n -> screen.items.firstOrNull { it.n == n }?.text?.take(40) }.orEmpty()
                 history += listOfNotNull(move.kind, move.n?.toString(), target.ifBlank { null }, move.text.ifBlank { null }?.let { "\"$it\"" }).joinToString(" ") +
                     (err?.let { " → ERRORE: $it" } ?: "")
             }
             finalSay = "Ci sto mettendo troppi passaggi, mi fermo qui."
+            outcome = Outcome("errore", finalSay)
+            return outcome
         } finally {
             com.jarvisfit.app.voice.JarvisState.exchanges.value = com.jarvisfit.app.voice.JarvisState.exchanges.value + 1
-            if (finalSay.isNotBlank()) {
+            if (finalSay.isNotBlank() && !speakEnd) NotificationManagerCompat.from(ctx).cancel(NOTIF_ID)
+            else if (finalSay.isNotBlank()) {
                 notify(ctx, finalSay, ongoing = false)
                 // Dopo una domanda ascolta subito la risposta, senza dover ridire "Jarvis".
                 if (asked) Speaker.speak(finalSay) { com.jarvisfit.app.voice.JarvisService.listenForAnswer(ctx) }

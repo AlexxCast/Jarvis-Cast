@@ -21,6 +21,7 @@ import * as ui from './ui.js';
 import * as coder from './coder.js';
 import * as mood from './mood.js';
 import * as jobs from './jobs.js';
+import * as social from './social.js';
 import * as router from './router.js';
 import { sanitizeModels, DEFAULT_MODELS, PROVIDERS } from './models.js';
 import { today as todayOf, nowIso as nowIsoOf } from './clock.js';
@@ -428,7 +429,27 @@ export async function handleApi(db, env, deps, request) {
     if (path === '/api/notify' && method === 'POST') {
       // Notifiche lette dall'app Android: contesto per "chi mi ha scritto?" e avvisi se urgenti.
       const b = await body(request);
+      // Notifica di Centro social (Monomythos): controllo subito i post da pubblicare, senza aspettare l'ora.
+      if (social.sawCentroNotification(db, b.items, ms)) {
+        const p = social.check(db, env, deps, { reason: 'notifica' }).catch(() => null);
+        if (deps.defer) deps.defer(p); else await p;
+      }
       return json(initiative.ingestNotifications(db, b.items, ms, tz));
+    }
+    // ---------------------------------------------------------------- Monomythos: post da pubblicare sul telefono
+    if (path === '/api/social' && method === 'GET') return json(social.status(db, env));
+    if (path === '/api/social/settings' && method === 'POST') return json({ settings: social.saveSettings(db, await body(request)) });
+    if (path === '/api/social/check' && method === 'POST') {
+      const r = await social.check(db, env, deps, { force: true, reason: 'a mano' });
+      return json({ ...r, status: social.status(db, env) });
+    }
+    if (path === '/api/social/item' && method === 'GET') {
+      const it = await social.item(db, env, deps, url.searchParams.get('key') || '', url.searchParams.get('platform') || '');
+      return it ? json(it) : bad('post non trovato (forse è già stato fatto)', 404);
+    }
+    if (path === '/api/social/done' && method === 'POST') return json(await social.done(db, env, deps, await body(request)));
+    if (path === '/api/social/stats' && method === 'POST') {
+      try { return json(await social.uploadStats(db, env, deps, await body(request))); } catch (e) { return bad('Statistiche non caricate: ' + e.message, 502); }
     }
     if (path === '/api/initiative' && method === 'GET') return json({ settings: initiative.settings(db), history: kvGet(db, 'initiativeHistory', []).slice(-20).reverse() });
     if (path === '/api/initiative' && method === 'POST') return json({ settings: initiative.saveSettings(db, await body(request)) });

@@ -7,11 +7,13 @@ import { logEvent, kvGet, kvSet } from './db.js';
 import { nowIso } from './clock.js';
 
 export const MAX_STEPS = 25;
-const MOVES = new Set(['tap', 'type', 'scroll', 'back', 'home', 'open_app', 'wait', 'done', 'ask']);
+const MOVES = new Set(['tap', 'type', 'paste', 'scroll', 'back', 'home', 'open_app', 'wait', 'done', 'ask']);
 
 // Conferma prima di inviare o chiamare: scelta del Capo (2026-11-18). Senza conferma solo quando il telefono
 // ha appena riconosciuto la sua voce; altrimenti (richiesta scritta, voce non verificata) si chiede prima.
 export const CONFIRM_TRUSTED = 'La voce del Capo è stata appena riconosciuta: NON fermarti con ask prima di inviare un messaggio, avviare una chiamata o riprodurre un contenuto che ha chiesto; esegui fino in fondo e chiudi con done.';
+// Compito confermato dal Capo con un tocco (es. "Pubblica" nella notifica di un post di Monomythos).
+export const CONFIRM_TAPPED = 'Il Capo ha già confermato QUESTO compito toccando un pulsante sul telefono: NON fermarti con ask prima di pubblicare o inviare quanto scritto nell\'obiettivo; esegui fino in fondo e chiudi con done. Per qualunque altra cosa non scritta nell\'obiettivo valgono le regole normali.';
 export const CONFIRM_UNTRUSTED = 'La voce del Capo NON è stata verificata: prima di toccare il tasto che invia un messaggio o avvia una chiamata fermati con ask, dicendo a chi e cosa stai per inviare (es. "Invio a Marco: arrivo tra 10 minuti. Procedo?"). Per riprodurre musica o video non serve chiedere.';
 const SYSTEM = `Sei Kestra e stai usando lo smartphone Android del tuo utente al posto suo, una mossa alla volta.
 Ricevi l'obiettivo, le mosse già fatte e lo schermo attuale: un elenco di elementi numerati [n] con tipo e testo.
@@ -19,6 +21,7 @@ Rispondi SOLO con JSON: {"do": "...", "n": numero elemento, "text": "...", "dir"
 Mosse:
 - tap {n}: tocca l'elemento n
 - type {n, text}: scrive text nel campo n (sostituisce il contenuto)
+- paste {n}: incolla nel campo n il testo che è negli appunti (usalo quando l'obiettivo dice che il testo è negli appunti, invece di type)
 - scroll {n?, dir}: scorre la lista n (o lo schermo) verso giu o su
 - back · home · wait (lo schermo sta caricando)
 - open_app {text: nome dell'app}
@@ -48,11 +51,11 @@ export function parseMove(text) {
   if (o.n != null && Number.isFinite(Number(o.n))) move.n = Math.trunc(Number(o.n));
   if (o.text != null) move.text = String(o.text).slice(0, 500);
   if (o.do === 'scroll') move.dir = o.dir === 'su' ? 'su' : 'giu';
-  if ((move.do === 'tap' || move.do === 'type') && move.n == null) return { do: 'ask', say: 'Non trovo l\'elemento da toccare, signore.' };
+  if ((move.do === 'tap' || move.do === 'type' || move.do === 'paste') && move.n == null) return { do: 'ask', say: 'Non trovo l\'elemento da toccare, signore.' };
   return move;
 }
 
-export const systemFor = (trusted) => SYSTEM.replace('{{CONFERMA}}', trusted ? CONFIRM_TRUSTED : CONFIRM_UNTRUSTED);
+export const systemFor = (trusted, tapped = false) => SYSTEM.replace('{{CONFERMA}}', tapped ? CONFIRM_TAPPED : trusted ? CONFIRM_TRUSTED : CONFIRM_UNTRUSTED);
 
 /** Una mossa: { goal, voiceTrusted, screen: {app, items:[{n, kind, text}]}, history: ["tap 3 Cerca", ...], step } */
 export async function step(db, env, deps, b) {
@@ -79,7 +82,7 @@ export async function step(db, env, deps, b) {
     const stepTier = opened && n >= 1 ? 'fast' : 'smart';
     const res = await router.chat(db, env, {
       tier: stepTier, maxTokens: 300, fetchFn: deps.fetchFn, now: deps.now, tz: deps.tz,
-      build: () => [{ role: 'system', content: systemFor(b.voiceTrusted === true) }, { role: 'user', content: user }],
+      build: () => [{ role: 'system', content: systemFor(b.voiceTrusted === true, b.confirmed === true) }, { role: 'user', content: user }],
     });
     const move = parseMove(res.text);
     flows.recordTrace(db, { goal, step: n, screen, move, nowMs: deps.now() });

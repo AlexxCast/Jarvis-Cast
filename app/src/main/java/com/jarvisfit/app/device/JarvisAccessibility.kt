@@ -133,6 +133,47 @@ class JarvisAccessibility : AccessibilityService() {
         return null
     }
 
+    /** Incolla gli appunti nel campo n (copia-incolla vero, come farebbe il Capo). Se l'app rifiuta, scrive [fallback]. */
+    fun paste(n: Int, fallback: String): String? {
+        var node = nodes[n] ?: return "elemento $n non trovato"
+        if (node.isPassword) return "è un campo password: non lo compilo"
+        if (!node.isEditable) {
+            node = nodes.values.firstOrNull { it.isEditable && it.isFocused }
+                ?: nodes.values.firstOrNull { it.isEditable }
+                ?: return "l'elemento $n non è un campo di testo"
+        }
+        node.performAction(AccessibilityNodeInfo.ACTION_CLICK)
+        node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
+        if (fallback.isNotBlank()) {
+            // Gli appunti si rimettono qui: un'altra app può averli cambiati nel frattempo.
+            runCatching { getSystemService(android.content.ClipboardManager::class.java)?.setPrimaryClip(android.content.ClipData.newPlainText("kestra", fallback)) }
+        }
+        if (node.performAction(AccessibilityNodeInfo.ACTION_PASTE)) return null
+        if (fallback.isBlank()) return "non riesco a incollare nel campo $n"
+        val args = Bundle().apply { putCharSequence(AccessibilityNodeInfo.ACTION_ARGUMENT_SET_TEXT_CHARSEQUENCE, fallback) }
+        return if (node.performAction(AccessibilityNodeInfo.ACTION_SET_TEXT, args)) null else "non riesco a incollare nel campo $n"
+    }
+
+    /** Screenshot dello schermo (Android 11 e successivi), per le statistiche. Null se non si può. */
+    suspend fun capture(): android.graphics.Bitmap? {
+        if (android.os.Build.VERSION.SDK_INT < 30) return null
+        return kotlinx.coroutines.suspendCancellableCoroutine { cont ->
+            runCatching {
+                takeScreenshot(android.view.Display.DEFAULT_DISPLAY, mainExecutor, object : TakeScreenshotCallback {
+                    override fun onSuccess(result: ScreenshotResult) {
+                        val bmp = runCatching {
+                            val hw = android.graphics.Bitmap.wrapHardwareBuffer(result.hardwareBuffer, result.colorSpace)
+                            hw?.copy(android.graphics.Bitmap.Config.ARGB_8888, false)
+                        }.getOrNull()
+                        runCatching { result.hardwareBuffer.close() }
+                        if (cont.isActive) cont.resumeWith(Result.success(bmp))
+                    }
+                    override fun onFailure(errorCode: Int) { if (cont.isActive) cont.resumeWith(Result.success(null)) }
+                })
+            }.onFailure { if (cont.isActive) cont.resumeWith(Result.success(null)) }
+        }
+    }
+
     fun scroll(n: Int?, down: Boolean): String? {
         val action = if (down) AccessibilityNodeInfo.ACTION_SCROLL_FORWARD else AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
         val node = n?.let { nodes[it] }?.let { var c: AccessibilityNodeInfo? = it; while (c != null && !c.isScrollable) c = c.parent; c }

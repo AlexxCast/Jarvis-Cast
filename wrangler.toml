@@ -35,3 +35,4 @@ enabled = true
 #   MISTRAL_API_KEY, GITHUB_MODELS_TOKEN   facoltative (gratuite)
 #   DEEPSEEK_API_KEY, ANTHROPIC_API_KEY    facoltative (a pagamento)
 #   GITHUB_TOKEN            facoltativo: permette a Jarvis di proporre modifiche alla web app
+#   MONOMYTOS_TOKEN         facoltativo: chiave GitHub di Centro social (repo Monomytos, Contents in scrittura) per segnare i post e caricare le statistiche

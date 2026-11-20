@@ -250,6 +250,10 @@ class JarvisBridge(
     @JavascriptInterface
     fun runPhoneTask(goal: String): String = PhoneAgent.start(activity, goal)
 
+    /** Post di Monomythos arrivato all'inbox letto dalla pagina: lo prende il telefono. */
+    @JavascriptInterface
+    fun socialOffer(key: String, platform: String) = com.jarvisfit.app.device.SocialPoster.offer(activity, key, platform)
+
     /** Registra la voce del proprietario (tre frasi). L'esito arriva alla pagina con window.jarvisVoiceEnroll. */
     @JavascriptInterface
     fun enrollVoice() {
