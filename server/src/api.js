@@ -71,7 +71,7 @@ function safe(fn, fallback) { try { return fn(); } catch (e) { console.error('st
 
 /** Stato del server per l'app: con le scritture finite si legge tutto, le modifiche le tiene il telefono. */
 function serverStatus() {
-  return { writesBlocked: writesBlocked(), until: writeBlock.until || null };
+  return { writesBlocked: writesBlocked(), until: writesBlocked() ? (writeBlock.resetAt || null) : null };
 }
 
 const OFFLINE_NOTE_SAVED = ' (Oggi Cloudflare non mi lascia salvare: lo tengo sul telefono e lo salvo da sola appena il limite si azzera.)';
@@ -579,7 +579,7 @@ export async function handleApi(db, env, deps, request) {
     return bad('non trovato', 404);
   } catch (e) {
     try { logEvent(db, nowIsoOf(deps.now(), tz), 'error', `${method} ${path}: ${e.message}`); } catch { /* database in sola lettura */ }
-    if (WRITE_LIMIT_RE.test(e.message || '')) return json({ error: friendlyError(e), writesBlocked: true, until: writeBlock.until || null }, 503);
+    if (WRITE_LIMIT_RE.test(e.message || '')) return json({ error: friendlyError(e), writesBlocked: true, until: writeBlock.resetAt || null }, 503);
     return bad(e.message || 'errore interno', /JSON|grande/.test(e.message || '') ? 400 : 500);
   }
 }

@@ -83,7 +83,7 @@ test('senza scritture: la chat risponde, avvisa e rimanda il pasto al telefono; 
   const s2 = await call('POST', '/api/sync', { ops });
   assert.equal(s2.body.state.today.eaten, 800, 'non si applica due volte');
   assert.equal((await call('GET', '/api/history')).body.messages.length, 2);
-  assert.equal(writesBlocked(), true, 'resta segnato fino a mezzanotte UTC');
+  assert.equal(writesBlocked(), false, 'una scrittura riuscita toglie il blocco');
   resetWriteBlock();
 });
 
@@ -130,5 +130,24 @@ test('limite noto: anche un errore di scrittura con un altro messaggio non svuot
   assert.ok(g.body.branches.some(b => b.id === 'musica'));
   assert.ok(!flag.poisoned, 'con il limite noto le scritture non si provano nemmeno');
   assert.equal((await call('GET', '/api/mind')).status, 200);
+  resetWriteBlock();
+});
+
+test('la prima scrittura rifiutata non dà una sfera vuota: errore (copia sul telefono), poi letture piene', async () => {
+  resetWriteBlock();
+  const { db, flag } = blockableDb();
+  const d = { ...deps(fakeFetch(() => reply({ reply: 'Ok.', actions: [{ type: 'remember', module: 'musica', text: 'ascolto Mannarino' }] }))), schedule: () => {} };
+  const call = callOf(db, d);
+  await call('POST', '/api/chat', { text: 'ricorda che ascolto Mannarino' });
+  flag.blocked = true; flag.poison = true; flag.msg = 'Exceeded allowed rows written in Durable Objects free tier.';
+  // Una richiesta che scrive e scopre il limite: le letture dopo falliscono, quindi 503 e non una risposta vuota.
+  const first = await call('POST', '/api/chat', { text: 'ciao' });
+  assert.equal(writesBlocked(), true);
+  assert.notEqual(first.status, 200);
+  flag.poisoned = false; // richiesta nuova
+  const g = await call('GET', '/api/graph');
+  assert.equal(g.status, 200, JSON.stringify(g.body));
+  assert.ok(g.body.branches.some(b => b.id === 'musica'));
+  assert.ok(!flag.poisoned, 'con il limite noto le letture restano pulite');
   resetWriteBlock();
 });
