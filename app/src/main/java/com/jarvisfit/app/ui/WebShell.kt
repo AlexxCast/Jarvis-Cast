@@ -160,6 +160,7 @@ class JarvisBridge(
         if (k.running) {
             val pct = (kotlin.math.sqrt(k.level.toDouble()) * 300).toInt().coerceIn(0, 100)
             parts += "Volume del microfono: $pct%" + (if (k.gain > 1.2f) " (alzato ×${"%.1f".format(k.gain)})" else "") + "."
+            if (k.mediaNow) parts += "Il telefono sta suonando un video o musica: per chiamarla serve un \"Kestra\" più netto (soglia ${(k.T_MEDIA * 100).toInt()})."
         }
         if (k.peakScore > 0f) {
             // Punteggio del modello di "Kestra" (0-100): serve a capire se la sensibilità va alzata o abbassata.
@@ -169,6 +170,10 @@ class JarvisBridge(
             val at = java.text.SimpleDateFormat("HH:mm", java.util.Locale.ITALY).format(java.util.Date(k.lastWakeAtMs))
             parts += "Ha sentito \"Kestra\" ${k.detections} ${if (k.detections == 1) "volta" else "volte"}, l'ultima alle $at" +
                 (if (k.emptyWakes > 0) " (${k.emptyWakes} senza nessuna richiesta dopo)." else ".")
+            val extra = mutableListOf<String>()
+            if (k.mediaWakes > 0) extra += "${k.mediaWakes} con un video o musica sul telefono"
+            if (k.filteredWakes > 0) extra += "${k.filteredWakes} ${if (k.filteredWakes == 1) "scartata" else "scartate"} perché dopo il nome c'era la TV o un video"
+            if (extra.isNotEmpty()) parts += "Di queste: ${extra.joinToString(", ")}."
         } else if (Settings.strongWake) parts += "Non ha ancora sentito \"Kestra\" da quando il telefono è acceso."
         if (k.lastError.isNotBlank()) parts += "Ultimo problema: ${k.lastError}."
         return parts.joinToString(" ")

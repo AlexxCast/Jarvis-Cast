@@ -50,6 +50,15 @@ object KestraKws {
     @Volatile var peakScore = 0f; private set
     /** Chiamate a cui non è seguita nessuna richiesta (probabili falsi allarmi): le conta il servizio. */
     @Volatile var emptyWakes = 0
+    /** Il telefono stesso sta suonando audio (video di TikTok/YouTube/Instagram, musica): soglia più alta. */
+    @Volatile var mediaNow = false; private set
+    /** L'ultima chiamata è arrivata mentre il telefono suonava un video o musica (il servizio la tratta con cautela). */
+    @Volatile var lastWakeDuringMedia = false; private set
+    /** Chiamate sentite con un video/musica in corso sul telefono. */
+    @Volatile var mediaWakes = 0; private set
+    /** Chiamate scartate perché la frase dopo il nome era TV, video o altre persone (le conta il servizio). */
+    @Volatile var filteredWakes = 0
+
     /** Android dà al servizio un microfono muto (succede se l'ascolto è ripartito mentre l'app era chiusa). */
     @Volatile var silencedUntilMs = 0L; private set
 
@@ -83,6 +92,13 @@ object KestraKws {
     internal fun threshold(sensitivity: Float): Float = (T_LOW - (T_LOW - T_HIGH) * sensitivity.coerceIn(0f, 1f))
 
     /**
+     * Soglia mentre il telefono suona un video o musica: l'altoparlante è a pochi centimetri dal microfono e ogni
+     * voce del video è "forte". Il "Kestra" vero di Alessio arriva quasi sempre a 1,00 per più passi di fila
+     * (sulle sue registrazioni: 32 chiamate su 34 restano sopra 0,97), mentre le parole simili si fermano sotto 0,90.
+     */
+    internal fun effectiveThreshold(base: Float, media: Boolean): Float = if (media) maxOf(base, T_MEDIA) else base
+
+    /**
      * Controllo automatico del volume: il telefono sul comodino sente la voce dalla scrivania molto bassa.
      * Porta il parlato verso un livello costante (al massimo ×[MAX_GAIN]), si abbassa subito sui suoni forti e
      * risale piano; il limitatore morbido evita la saturazione. [peakRms] (pezzo più forte degli ultimi 2 s) è 0..1.
@@ -110,6 +126,7 @@ object KestraKws {
     /** Punteggi sopra soglia di fila (80 ms l'uno) per dire "Kestra": un picco isolato è quasi sempre altro.
      *  Sulle prove: stessi nomi riconosciuti, falsi allarmi da ~9 a ~1,5 l'ora. */
     internal const val CONSECUTIVE = 2
+    internal const val T_MEDIA = 0.97f
     private val FILES = listOf("melspectrogram.onnx", "embedding_model.onnx", "kestra_ww.json")
 
 
@@ -126,7 +143,8 @@ object KestraKws {
      */
     @SuppressLint("MissingPermission")
     @Synchronized
-    fun start(ctx: Context, sensitivity: Float, onWake: () -> Unit, onError: (Throwable) -> Unit, onSilent: () -> Unit = {}): Boolean {
+    fun start(ctx: Context, sensitivity: Float, onWake: () -> Unit, onError: (Throwable) -> Unit, onSilent: () -> Unit = {},
+              mediaPlaying: () -> Boolean = { false }): Boolean {
         if (running) return true
         if (!ready(ctx)) return false
         val m = try { modelsFor(ctx.applicationContext) } catch (t: Throwable) {
@@ -149,18 +167,19 @@ object KestraKws {
         lastAliveMs = System.currentTimeMillis()
         val my = ++gen
         val thr = threshold(sensitivity)
-        thread = Thread({ loop(my, m.detector(), thr, record, onWake, onError, onSilent) }, "kestra-kws").also { it.start() }
+        thread = Thread({ loop(my, m.detector(), thr, record, onWake, onError, onSilent, mediaPlaying) }, "kestra-kws").also { it.start() }
         return true
     }
 
     @Synchronized
     fun stop() {
         running = false
+        mediaNow = false
         gen++
         thread = null // il ciclo vede running=false, chiude il microfono ed esce entro 100 ms
     }
 
-    private fun loop(my: Int, det: KestraDetector, thr: Float, record: AudioRecord, onWake: () -> Unit, onError: (Throwable) -> Unit, onSilent: () -> Unit) {
+    private fun loop(my: Int, det: KestraDetector, thr: Float, record: AudioRecord, onWake: () -> Unit, onError: (Throwable) -> Unit, onSilent: () -> Unit, mediaPlaying: () -> Boolean) {
         try {
             record.startRecording()
             val buf = ShortArray(SR / 10) // 100 ms
@@ -174,6 +193,7 @@ object KestraKws {
             var lvl = 0f
             val started = System.currentTimeMillis()
             var run = 0
+            var media = false
             while (running && gen == my) {
                 val n = record.read(buf, 0, buf.size)
                 if (n < 0) throw IllegalStateException("lettura microfono: $n")
@@ -203,11 +223,13 @@ object KestraKws {
                 // Il modello lavora in scala int16; il limitatore morbido evita la saturazione col guadagno alto.
                 if (g > 1.01f) for (i in 0 until n) samples[i] = kotlin.math.tanh(samples[i] * g) * 32767f
                 else for (i in 0 until n) samples[i] *= 32767f
+                // Ogni mezzo secondo: il telefono sta suonando un video o musica?
+                if (chunks % 5 == 1) { media = runCatching { mediaPlaying() }.getOrDefault(false); mediaNow = media }
                 val score = det.push(samples, n)
                 if (score < 0f) continue
                 lastScore = score
                 if (score > peakScore) peakScore = score
-                run = streak(run, score, thr)
+                run = streak(run, score, effectiveThreshold(thr, media))
                 // Il primo secondo dopo l'accensione riempie solo la memoria del modello.
                 if (run >= CONSECUTIVE && System.currentTimeMillis() - started > 1000L) {
                     run = 0
@@ -215,6 +237,8 @@ object KestraKws {
                     if (now - lastWake > 1500L && running && gen == my) {
                         lastWake = now
                         detections++
+                        lastWakeDuringMedia = media
+                        if (media) mediaWakes++
                         lastWakeAtMs = now
                         running = false
                         onWake()

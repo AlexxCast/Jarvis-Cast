@@ -21,6 +21,18 @@ class KestraKwsTest {
     }
 
     @Test
+    fun `con un video sul telefono serve un Kestra piu netto, senza video la soglia resta quella scelta`() {
+        val mid = KestraKws.threshold(0.5f)
+        assertEquals(mid, KestraKws.effectiveThreshold(mid, media = false), 0f)
+        assertEquals(KestraKws.T_MEDIA, KestraKws.effectiveThreshold(mid, media = true), 0f)
+        // Bassa è già più severa: resta la più alta delle due.
+        val low = KestraKws.threshold(0f)
+        assertEquals(maxOf(low, KestraKws.T_MEDIA), KestraKws.effectiveThreshold(low, media = true), 0f)
+        // Mai irraggiungibile: il "Kestra" vero arriva a 1,00.
+        assertTrue(KestraKws.T_MEDIA < 1f)
+    }
+
+    @Test
     fun `un picco isolato non basta, servono punteggi alti di fila`() {
         var run = 0
         for (s in floatArrayOf(0.95f, 0.2f, 0.96f, 0.1f)) run = KestraKws.streak(run, s, 0.8f)

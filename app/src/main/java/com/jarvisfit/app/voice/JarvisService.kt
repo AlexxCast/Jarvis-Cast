@@ -422,9 +422,20 @@ class JarvisService : LifecycleService(), SensorEventListener {
             onError = { main.post { if (sessionActive && !busy) { sessionActive = false; guard?.sessionStopped(); restartWakeWordDelayed(800) } } },
             // Microfono muto: si passa subito al riconoscimento di Android (KestraKws.ready resta falso per 10 minuti).
             onSilent = { main.post { if (sessionActive && !busy && !commandSession) { sessionActive = false; guard?.sessionStopped(); restartWakeWordDelayed(300) } } },
+            mediaPlaying = { phoneMediaPlaying() },
         )
         if (!ok) { sessionActive = false; guard?.sessionStopped() }
         return ok
+    }
+
+    /**
+     * Il telefono stesso sta suonando un video o musica (TikTok, YouTube, Instagram, Joytify...).
+     * La voce di Kestra non conta: mentre parla il riconoscimento forte è comunque fermo.
+     */
+    private fun phoneMediaPlaying(): Boolean {
+        if (Speaker.isSpeaking()) return false
+        val am = getSystemService(AUDIO_SERVICE) as? AudioManager ?: return false
+        return runCatching { am.isMusicActive }.getOrDefault(false)
     }
 
     private fun onStrongWake() {
@@ -434,7 +445,20 @@ class JarvisService : LifecycleService(), SensorEventListener {
         JarvisState.partial.value = "Kestra"
         // Il microfono passa al riconoscimento della richiesta: niente saluto lungo, chi dice
         // "Kestra, che ore sono" tutto d'un fiato non deve aspettare.
-        onWakeWordDetected("", quick = true)
+        // Con un video o la musica sul telefono la chiamata è "cauta": niente saluto a voce sopra il video e niente
+        // app in primo piano; solo una vibrazione, e la prima frase passa dal filtro TV del server.
+        onWakeWordDetected("", quick = true, cautious = KestraKws.lastWakeDuringMedia)
+    }
+
+    /** Vibrazione breve: dice "ti ascolto" senza parlare sopra il video (Alessio non vuole bip). */
+    @Suppress("DEPRECATION")
+    private fun softBuzz() {
+        runCatching {
+            val v: android.os.Vibrator? = if (Build.VERSION.SDK_INT >= 31)
+                getSystemService(android.os.VibratorManager::class.java)?.defaultVibrator
+            else getSystemService(VIBRATOR_SERVICE) as? android.os.Vibrator
+            if (Build.VERSION.SDK_INT >= 26) v?.vibrate(android.os.VibrationEffect.createOneShot(60, 120)) else v?.vibrate(60)
+        }
     }
 
     /**
@@ -730,7 +754,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
         return wakeGreetings[idx]
     }
 
-    private fun onWakeWordDetected(remainingCommand: String, openApp: Boolean = true, quick: Boolean = false) {
+    private fun onWakeWordDetected(remainingCommand: String, openApp: Boolean = true, quick: Boolean = false, cautious: Boolean = false) {
         if (busy) return
         if (KestraKws.running) KestraKws.stop()
         // Ferma immediatamente qualsiasi discorso del TTS per non ascoltare se stesso
@@ -744,6 +768,10 @@ class JarvisService : LifecycleService(), SensorEventListener {
         // Finché non arriva la prima richiesta la "conversazione" non è aperta davvero: se dopo il nome c'è
         // silenzio si torna subito ad aspettare (prima restava 45 s a riaprire il microfono, con un bip ogni volta).
         firstCommandPending = remainingCommand.isBlank()
+        // Chiamata del modello "Kestra" senza richiesta nella stessa frase: la frase che arriva dopo può essere la TV
+        // che continua a parlare (falso allarme). Il server la controlla prima di rispondere.
+        afterWakeTurn = quick && remainingCommand.isBlank()
+        afterWakeMedia = afterWakeTurn && cautious
 
         // 0. Ricorda se il telefono era a schermo spento o bloccato PRIMA di risvegliare lo schermo:
         // così Jarvis chiede la password solo a telefono spento/bloccato, e mai a telefono già acceso e sbloccato.
@@ -764,7 +792,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
         // 2. Apri l'app sul telefono
         // Con la finestra sopra le altre app Jarvis non interrompe ciò che si sta facendo: niente app in primo piano.
         val locked = getSystemService(android.app.KeyguardManager::class.java)?.isKeyguardLocked == true
-        if (openApp && (!Overlay.enabled(this) || locked)) {
+        if (openApp && !cautious && (!Overlay.enabled(this) || locked)) {
             val openIntent = Intent(this, MainActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             }
@@ -777,6 +805,10 @@ class JarvisService : LifecycleService(), SensorEventListener {
             // Ha già detto la richiesta: niente bip né saluto, risponde direttamente.
             if (!Settings.speakReplies) tone?.startTone(ToneGenerator.TONE_PROP_BEEP, 90)
             main.postDelayed({ process(remainingCommand) }, 150)
+        } else if (cautious) {
+            softBuzz()
+            Overlay.caption(this, "Ti ascolto")
+            main.postDelayed({ listenForCommand() }, 150)
         } else if (Settings.speakReplies) {
             val greet = nextWakeGreeting()
             lastSpokenText = greet
@@ -950,11 +982,16 @@ class JarvisService : LifecycleService(), SensorEventListener {
 
     private var awaitingPassphrase = false
     private var firstCommandPending = false
+    /** La prossima frase è la prima dopo una chiamata del modello "Kestra" (può essere la TV dopo un falso allarme). */
+    private var afterWakeTurn = false
+    private var afterWakeMedia = false
     private var pendingDeviceActions: List<Pair<String, String>> = emptyList()
     private var pendingReplyText: String = ""
 
     private fun backToWaiting() {
         busy = false
+        afterWakeTurn = false
+        afterWakeMedia = false
         inConversationMode = false
         wakeFromScreenOff = false
         awaitingPassphrase = false
@@ -1043,10 +1080,21 @@ class JarvisService : LifecycleService(), SensorEventListener {
         // Frase della conversazione aperta senza il nome: il server la ignora se non era rivolta a Kestra.
         val isFollowup = followupTurn && !VoiceText.containsWake(text, Settings.sensitivity)
         followupTurn = false
+        val afterWake = afterWakeTurn && !isFollowup && !VoiceText.containsWake(text, Settings.sensitivity)
+        val afterMedia = afterWakeMedia
+        afterWakeTurn = false
+        afterWakeMedia = false
         lifecycleScope.launch {
             if (VoiceId.matchesPassword(text)) VoiceId.trustNow()
             val cloud = Settings.cloudEnabled
-            val reply = if (cloud) Cloud.chat(text, followup = isFollowup) else Brain.handle(text)
+            val reply = if (cloud) Cloud.chat(text, followup = isFollowup, afterWake = afterWake, media = afterMedia) else Brain.handle(text)
+            if (reply.ignored && afterWake) {
+                // Falso allarme: il nome l'aveva "detto" la TV o un video. Nessuna risposta, si torna ad aspettare.
+                KestraKws.filteredWakes++
+                inConversationMode = false
+                backToWaiting()
+                return@launch
+            }
             if (reply.ignored) {
                 // TV, radio o persone nella stanza: nessuna risposta. Dopo due frasi ignorate di fila chiude la conversazione.
                 if (++ignoredFollowups >= 2) { inConversationMode = false; backToWaiting(); return@launch }

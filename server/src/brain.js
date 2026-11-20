@@ -236,7 +236,7 @@ export function isReplayable(type) {
  * Gestisce un messaggio dell'utente.
  * deps: { now, fetchFn, tz, defer(promise), startJob({title, goal}) }
  */
-export async function handleChat(db, env, deps, { text, image = null, files = [], sessionId = 'main', source = 'app', followup = false }) {
+export async function handleChat(db, env, deps, { text, image = null, files = [], sessionId = 'main', source = 'app', followup = false, afterWake = false, media = false }) {
   const ms = deps.now();
   const tz = deps.tz;
   const today = todayOf(ms, tz);
@@ -247,8 +247,10 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   if (!userText) return { reply: 'Non ho sentito nulla, Capo.', expectReply: true, card: '', photoRequest: null };
 
   // Conversazione aperta: frase sentita senza "Kestra". Se è la TV, la radio o qualcuno che parla con altri, silenzio.
-  if (followup && !image && !fileList.length) {
-    const addressed = await isFollowupAddressed(db, env, deps, userText, sessionId);
+  // Stesso filtro per la prima frase dopo il nome sentito dal modello "Kestra" del telefono: con la TV o un video
+  // il nome può essere un falso allarme e la frase dopo è ancora la TV.
+  if ((followup || afterWake) && !image && !fileList.length) {
+    const addressed = await isFollowupAddressed(db, env, deps, userText, sessionId, { afterWake: afterWake && !followup, media });
     if (!addressed) {
       const heard = kvGet(db, 'ignoredHeard', []);
       kvSet(db, 'ignoredHeard', [...heard.slice(-19), { at: nowIso, text: userText.slice(0, 200) }]);
@@ -744,22 +746,39 @@ export async function isAddressed(db, env, deps, text) {
  * Frase sentita a conversazione aperta (senza dire "Kestra"): verdetto locale veloce.
  * 'yes' = chiaramente rivolta all'assistente, 'ask' = decide il modello (TV, altre persone, frasi fuori contesto).
  */
-export function followupVerdict(text, lastAssistant = '') {
+export function followupVerdict(text, lastAssistant = '', { afterWake = false } = {}) {
   const t = String(text || '').toLowerCase().replace(/[^a-z0-9àèéìòóù' ]/g, ' ').replace(/\s+/g, ' ').trim();
   if (!t) return 'no';
   const words = t.split(' ');
-  if (words.length <= 3) return 'yes';
-  if (/\?\s*$/.test(String(lastAssistant || '').trim()) && words.length <= 8) return 'yes';
+  // Dopo un nome forse sentito dalla TV le frasi corte ("ma dai", "andiamo via") e la domanda di Kestra di prima
+  // non bastano: decide il modello, a meno che sia chiaramente una richiesta (sotto).
+  if (!afterWake && words.length <= 3) return 'yes';
+  if (!afterWake && /\?\s*$/.test(String(lastAssistant || '').trim()) && words.length <= 8) return 'yes';
+  if (afterWake && words.length <= 6 && /^(?:che\s+(?:ore|ora|tempo|giorno)|ciao|buongiorno|buonasera|buonanotte|grazie|sei\s+l[iì]|ci\s+sei|mi\s+senti)\b/.test(t)) return 'yes';
   if (words.length <= 12 && /^(?:e\s+|poi\s+|ora\s+|adesso\s+|allora\s+|no\s+|s[iì]\s+)?(?:apri|aprimi|metti|mettimi|aggiungi|segna|registra|togli|cancella|chiama|cerca|cercami|ricordami|ricorda|dimmi|mostrami|mostra|fai|fammi|leggi|leggimi|scrivi|manda|invia|imposta|spegni|accendi|quanto|quanti|quante|qual|quale|cosa|come|perch[eé]|dove|quando|puoi|sai|mi\s+(?:dici|serve|servono)|ho\s+(?:mangiato|bevuto|fatto))\b/.test(t)) return 'yes';
   return 'ask';
 }
 
 /** Conversazione aperta: l'utente sta ancora parlando con Kestra o il microfono ha sentito altro (TV, altre persone)? */
-export async function isFollowupAddressed(db, env, deps, text, sessionId = 'main') {
+export async function isFollowupAddressed(db, env, deps, text, sessionId = 'main', { afterWake = false, media = false } = {}) {
   const last = db.all('SELECT role, text FROM messages WHERE session = ? ORDER BY id DESC LIMIT 4', sessionId).reverse();
   const lastAssistant = [...last].reverse().find(m => m.role === 'assistant')?.text || '';
-  const v = followupVerdict(text, lastAssistant);
+  const v = followupVerdict(text, lastAssistant, { afterWake });
   if (v !== 'ask') return v === 'yes';
+  if (afterWake) {
+    try {
+      const res = await router.chat(db, env, {
+        tier: 'fast', maxTokens: 5, fetchFn: deps.fetchFn, now: deps.now, tz: deps.tz,
+        build: () => [
+          { role: 'system', content: `Kestra è un assistente vocale sul telefono. Il telefono ha appena creduto di sentire il suo nome "Kestra" e ha trascritto la frase sentita subito dopo.${media ? ' In quel momento il telefono stava riproducendo un video o musica (TikTok, YouTube, Instagram...).' : ''} Spesso è un falso allarme: il nome l'ha "detto" la TV, un video o una persona che parla d'altro, e la frase è il seguito di quel dialogo. Rispondi SI se la frase è una richiesta, una domanda o un comando rivolto a un assistente (cibo, sport, promemoria, telefono, app, meteo, ore, informazioni, saluto all'assistente). Rispondi NO se sembra un pezzo di film, serie, TV, video, canzone, pubblicità o una conversazione tra altre persone. Rispondi solo SI oppure NO.` },
+          { role: 'user', content: `FRASE: ${String(text).slice(0, 400)}` },
+        ],
+      });
+      return !/^\W*no\b/i.test(res.text);
+    } catch {
+      return true; // nel dubbio non si perde una richiesta vera
+    }
+  }
   try {
     const res = await router.chat(db, env, {
       tier: 'fast', maxTokens: 5, fetchFn: deps.fetchFn, now: deps.now, tz: deps.tz,

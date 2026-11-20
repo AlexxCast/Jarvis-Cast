@@ -652,3 +652,23 @@ ToneGenerator prima di riascoltare. `JarvisService`: hushHold/hushRelease zittis
 musica, il volume multimediale per tutta la richiesta (fino a 0,9 s dopo la fine); l'apertura dell'ascolto della parola
 d'ordine è coperta per 1,2 s. Appena Kestra parla (`Speaker` listener) tutto si riaccende subito; massimo 20 s zitti.
 Il bip prima di riascoltare resta solo con le risposte a voce spente.
+
+## Meno chiamate false con TV e video (app 2.45, 20/11/2026)
+Alessio: con la 2.44 Kestra si attivava e rispondeva spesso con la TV e con i video di TikTok, YouTube e Instagram.
+Riaddestrare con la TV dentro aveva peggiorato la vita vera (vedi sopra), quindi il modello resta quello della 2.41.
+- **Prove sulle sue registrazioni** (stessa catena del telefono: pezzi da 100 ms, guadagno, tanh): il suo "Kestra" vero
+  arriva quasi sempre a 1,00 per più passi di fila; le parole simili si fermano a 0,88; i 4 minuti di TV registrati e
+  i suoi ~6 minuti di parlato non superano 0,2. Un indice di "stanza piena di voci" (energia continua) NON separa la TV
+  dal suo parlato (il suo è anche più continuo): scartato.
+- **Video o musica sul telefono** (`AudioManager.isMusicActive`, controllato ogni mezzo secondo da `KestraKws`): la
+  soglia sale a 0,97 (`T_MEDIA`). Sulle registrazioni restano 32 chiamate su 34 (a 0,87: 34). Se la chiamata arriva
+  durante un video è "cauta": niente saluto a voce sopra il video, niente app in primo piano, una vibrazione breve
+  (permesso VIBRATE) e "Ti ascolto" nella finestra sopra le app.
+- **Filtro TV sulla prima frase dopo il nome**: dopo ogni chiamata del modello senza richiesta nella stessa frase, la
+  frase sentita dopo va al server con `afterWake: true` (e `media: true` se c'era un video). `followupVerdict` con
+  `afterWake` non fa passare da sole le frasi corte né i "sì" (con la TV sono quasi sempre dialogo): passano i comandi
+  chiari, "che ore/che tempo", i saluti; il resto lo decide il modello veloce con un prompt sui falsi allarmi. Se è TV:
+  nessuna risposta, kv `ignoredHeard`, si torna subito ad aspettare. Se il modello non risponde, la richiesta passa.
+- **Stato** (Impostazioni › Telefono): quante chiamate con un video in corso, quante scartate perché dopo c'era la TV,
+  e un avviso quando il telefono sta suonando qualcosa.
+- Test: `server/test/wake_tv.test.js`, `KestraKwsTest` (soglia con video).
