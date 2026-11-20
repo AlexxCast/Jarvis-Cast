@@ -644,3 +644,11 @@ del battito. La correzione di PR #40 non era ancora unita, quindi è stata ripre
   `lastAutoTidyMs`, `initiativeTickMs`, l'ultimo giro a vuoto di `lastSelfHeal` (salvato solo se cambia qualcosa).
 - Il conto delle scritture ricorda quando è stato salvato (`savedAt`), così non si riscrive a ogni riavvio dell'oggetto.
 - Test `scritture.test.js`: 5 letture di sfera e mente + 5 battiti a vuoto = 0 righe.
+
+## Niente bip del microfono durante la richiesta (app 2.44, 20/11/2026)
+Alessio sentiva "TT" all'attivazione, "tum tum" dopo la domanda, un "tintino" dopo la risposta e un altro "tum tum"
+alla chiusura. Erano i bip del riconoscimento di Google (apertura, fine frase, chiusura per silenzio) e il nostro
+ToneGenerator prima di riascoltare. `JarvisService`: hushHold/hushRelease zittiscono sistema, notifiche e, se non suona
+musica, il volume multimediale per tutta la richiesta (fino a 0,9 s dopo la fine); l'apertura dell'ascolto della parola
+d'ordine è coperta per 1,2 s. Appena Kestra parla (`Speaker` listener) tutto si riaccende subito; massimo 20 s zitti.
+Il bip prima di riascoltare resta solo con le risposte a voce spente.
