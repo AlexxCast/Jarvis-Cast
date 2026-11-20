@@ -446,7 +446,7 @@ export async function handleApi(db, env, deps, request) {
       projects.exitProject(db);
       return json({ state: statePayload(db, ms, tz, env) });
     }
-    const pr = /^\/api\/projects\/([\w-]+)(?:\/(files|memory|chats|jobs|enter)(?:\/([\w-]+))?)?$/.exec(path);
+    const pr = /^\/api\/projects\/([\w-]+)(?:\/(files|memory|chats|jobs|enter|progress)(?:\/([\w-]+))?)?$/.exec(path);
     if (pr) {
       const [, pid, sub, subId] = pr;
       const p = projects.getProject(db, pid);
@@ -455,6 +455,7 @@ export async function handleApi(db, env, deps, request) {
       const detail = () => json({
         project: projects.getProject(db, pid), files: projects.listFiles(db, pid), chats: projects.listChats(db, pid),
         memories: projects.listMemories(db, pid), jobs: jobs.listJobs(db).filter(j => j.project === pid), active: projects.activeSummary(db),
+        progress: projects.logSummary(projects.getLog(db, pid), { last: 30 }),
       });
       if (!sub && method === 'GET') return detail();
       if (!sub && (method === 'POST' || method === 'PATCH')) { const b = await body(request); projects.updateProject(db, pid, b, at); return detail(); }
@@ -464,7 +465,7 @@ export async function handleApi(db, env, deps, request) {
         projects.enterProject(db, pid, { chatId: String(b.chatId || ''), newChat: b.newChat === true }, at, ms);
         return json({ state: statePayload(db, ms, tz, env) });
       }
-      if (sub === 'files' && method === 'POST') {
+      if (sub === 'files' && !subId && method === 'POST') {
         const b = await body(request);
         let content = typeof b.content === 'string' ? b.content : '';
         if (b.encoding === 'base64') {
@@ -472,10 +473,20 @@ export async function handleApi(db, env, deps, request) {
           content = await router.readPdfWithGemini(env, deps.fetchFn, content.replace(/^data:[^,]+,/, ''), 'Estrai fedelmente tutto il testo, le tabelle e le istruzioni di questo PDF.') || '';
           if (!content) return bad('non sono riuscita a leggere il PDF');
         }
-        if (!projects.addFile(db, pid, { name: b.name, content }, at)) return bad('file vuoto');
+        if (!projects.upsertFile(db, pid, { name: b.name, content }, at)) return bad('file vuoto');
         return detail();
       }
       if (sub === 'files' && subId && method === 'DELETE') { projects.deleteFile(db, pid, subId); return detail(); }
+      if (sub === 'progress' && method === 'DELETE') { projects.clearLog(db, pid); return detail(); }
+      if (sub === 'files' && subId && method === 'POST') {
+        // "Usa come istruzioni": il file diventa le istruzioni del progetto (intero se ci sta).
+        const f = db.get('SELECT content FROM project_files WHERE project = ? AND id = ?', pid, Number(subId));
+        if (!f) return bad('file non trovato');
+        const instr = await projects.instructionsFromDoc(db, env, deps.fetchFn, f.content, { tz });
+        if (!instr) return bad('file vuoto');
+        projects.updateProject(db, pid, { instructions: instr }, at);
+        return detail();
+      }
       if (sub === 'memory' && method === 'POST') { const b = await body(request); if (!projects.remember(db, pid, b.text, at)) return bad('testo mancante'); return detail(); }
       if (sub === 'memory' && subId && method === 'DELETE') { db.run('DELETE FROM memories WHERE id = ? AND module = ?', Number(subId), projects.memModule(pid)); return detail(); }
       if (sub === 'chats' && subId && method === 'DELETE') {

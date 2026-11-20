@@ -373,6 +373,23 @@ Diagnosi fatta leggendo i 1.589 messaggi salvati. Decisioni:
 - **Resoconto del contesto**: `buildMessages` registra le sezioni entrate con i token, i ricordi, i file e cosa è rimasto fuori. Lo salva in kv `contextReport` e la vista Mente lo mostra come "Ultima risposta: cosa ho usato".
 - **Interfaccia**: nuova scheda **Progetti**. In chat, la barra del progetto ha "+ Chat", "Apri" ed "Esci".
 
+### Progetti di studio come in Claude (20/11/2026)
+Il Capo ha chiesto a Kestra di creare un progetto per arrivare all'inglese B2 e gli ha mandato il PDF con le caratteristiche. Kestra lo gestiva male per quattro motivi:
+- con un file allegato, "crea un progetto…" non creava nulla (`openAsk && !fileList.length`) e il PDF entrava solo in quella risposta;
+- dentro un progetto un file allegato in chat non diventava file del progetto: al messaggio dopo era già sparito (nella cronologia resta solo "[📎 nome]");
+- del PDF restava una riga di memoria, non le regole;
+- nessun registro dei progressi, e chat dei progetti sui modelli veloci.
+
+Cosa fa ora:
+- **"Crea un (nuovo) progetto per …" con un file allegato**: crea il progetto (nome pulito, es. "Inglese B2"), salva il file e lo usa come istruzioni. Se il testo sta in 12.000 caratteri entra **parola per parola** (come le istruzioni di un progetto Claude); se è più lungo un modello forte (`best`) ne ricava le istruzioni complete e il documento intero resta tra i file. Con "nuovo" si crea un progetto nuovo anche se ce n'è già uno simile.
+- **Allegati dentro un progetto** (`projects.saveAttachments`): restano tra i file del progetto; stesso nome = sostituisce. Il PDF in byte si legge con Gemini una volta sola. Se il progetto non ha istruzioni e il messaggio o il nome del file parla di istruzioni, caratteristiche, profilo, tutor o progetto, il file diventa le istruzioni. "Usa il file come istruzioni" prende l'ultimo file. In Progetti › File c'è "Usa come istruzioni".
+- **Registro dei progressi** (kv `plog:<progetto>`, max 300 voci): azione `project_log {kind lezione|esercizio|quiz|errore|nota|verifica, topic, text, score, max, errors, level, next}`. Nel contesto entra "REGISTRO DEI PROGRESSI" (livello, lezioni, media, errori che tornano, prossimo passo, ultime voci), anche nei compiti in background del progetto. Si vede e si azzera in Progetti › Progressi.
+- **Azione `project_instructions {text, mode append|replace}`**: "da ora in poi nel progetto…" aggiunge una regola alle istruzioni.
+- **Metodo di studio** (`STUDY_METHOD`, solo per progetti di studio: lingua, B2, esame, corso, tutor): un esercizio alla volta, correzione breve, quiz con punteggio, ripasso degli errori che tornano, registro sempre aggiornato, materiale lungo con start_job. Le istruzioni del progetto vincono sul metodo.
+- **Modelli**: in un progetto con istruzioni, file o di studio la chat usa il livello `smart` (oggi di solito Gemini 3.1 Pro, poi gli altri). Un po' più lenta della chat normale, ma più precisa.
+- "Esci dalla progetto" (a voce) ora esce.
+- Limiti rispetto a Claude: i modelli gratuiti restano sotto Claude nelle correzioni sottili; file oltre ~7.000 token entrano a pezzi; la voce trascritta può storpiare l'inglese; nessuna valutazione della pronuncia.
+
 ## Autonomia: iniziativa, notifiche, correzioni e grafica (fase 3, app v2.32, 18/11/2026)
 - **Motore di iniziativa** (`server/src/initiative.js`). Gira nel battito del Durable Object (allarme ogni 15 minuti, sempre attivo) e non usa modelli. Controlla:
   - errori uguali ripetuti (almeno 3 in 2 ore);

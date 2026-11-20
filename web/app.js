@@ -1337,6 +1337,31 @@ function viewProgetti() {
   ];
 }
 
+/** Registro dei progressi del progetto: livello, lezioni, media dei quiz, errori che tornano, ultime voci. */
+function viewProgressi(id, pr, set) {
+  if (!pr) return h('div', { class: 'card' }, h('h2', {}, 'Progressi'),
+    h('p', { class: 'muted small' }, 'Kestra scrive qui lezioni, esercizi, quiz ed errori mentre lavorate nel progetto, e riparte da qui ogni volta.'),
+    h('p', { class: 'empty' }, 'Ancora niente: apri il progetto in chat e di\' "iniziamo".'));
+  const stat = (label, value) => h('div', { class: 'stat' }, h('div', { class: 'num', style: 'font-size:1.3em;color:var(--text)' }, value), h('div', { class: 'muted small' }, label));
+  const del = store.confirmProgress === id;
+  return h('div', { class: 'card' },
+    h('h2', {}, 'Progressi'),
+    h('div', { class: 'row wrap', style: 'gap:18px' },
+      stat('livello', pr.level || '—'), stat('lezioni', String(pr.lessons)), stat('esercizi e quiz', String(pr.exercises)), stat('media', pr.avg != null ? pr.avg + '%' : '—')),
+    pr.next ? h('p', {}, h('strong', {}, 'Prossimo passo: '), pr.next) : null,
+    pr.recurring.length ? h('div', {}, h('p', { class: 'muted small' }, 'Errori da ripassare'),
+      h('div', { class: 'row wrap' }, pr.recurring.map(r => h('span', { class: 'tag' }, `${r.text} ×${r.n}`)))) : null,
+    pr.recent.length ? h('div', { class: 'list' }, [...pr.recent].reverse().map(x => h('div', { class: 'item' },
+      h('span', { class: 'muted small num' }, String(x.at).slice(5, 10).split('-').reverse().join('/')),
+      h('span', { class: 'tag' }, x.kind),
+      h('span', { class: 'grow' }, [x.topic, x.text].filter(Boolean).join(': ')),
+      x.score != null && x.max ? h('span', { class: 'num' }, `${x.score}/${x.max}`) : null))) : null,
+    h('button', { class: 'btn ' + (del ? 'danger' : 'ghost danger'), onclick: guard(async () => {
+      if (!del) { store.confirmProgress = id; render(); return; }
+      store.confirmProgress = null; set(await api('DELETE', `/projects/${id}/progress`)); toast('Registro azzerato.');
+    }) }, del ? 'Conferma: azzera il registro' : 'Azzera registro'));
+}
+
 function viewProgetto(id) {
   const back = h('button', { class: 'btn ghost', onclick: () => { store.projectOpen = null; store.projects = null; render(); } }, '‹ Tutti i progetti');
   if (!store.projectDetail || store.projectDetail.project?.id !== id) {
@@ -1366,11 +1391,13 @@ function viewProgetto(id) {
     h('div', { class: 'card' }, h('h2', {}, 'Istruzioni'),
       h('p', { class: 'muted small' }, 'Valgono in ogni chat del progetto, come le istruzioni di un progetto Claude.'),
       instr, h('button', { class: 'btn primary', onclick: guard(async () => { set(await api('POST', '/projects/' + id, { instructions: instr.value })); toast('Istruzioni salvate.'); }) }, 'Salva istruzioni')),
+    viewProgressi(id, d.progress, set),
     h('div', { class: 'card' },
       h('div', { class: 'row' }, h('h2', { class: 'grow' }, 'File'), h('button', { class: 'btn', onclick: () => fileInput.click() }, '+ Aggiungi file'), fileInput),
       h('p', { class: 'muted small' }, 'Kestra li consulta da sola: interi se sono piccoli, altrimenti solo le parti che servono alla domanda. I PDF vengono letti una volta e salvati come testo.'),
       d.files.length ? h('div', { class: 'list' }, d.files.map(f => h('div', { class: 'item' },
         h('span', { class: 'grow clip' }, f.name), h('span', { class: 'muted small num' }, `${Math.max(1, Math.round(f.size / 1024))} KB`),
+        h('button', { class: 'btn ghost small', title: 'Il file diventa le istruzioni del progetto', onclick: guard(async () => { toast('Leggo il file…'); set(await api('POST', `/projects/${id}/files/${f.id}`)); toast('Istruzioni prese dal file.'); }) }, 'Usa come istruzioni'),
         h('button', { class: 'btn icon ghost danger', 'aria-label': 'Elimina ' + f.name, onclick: guard(async () => set(await api('DELETE', `/projects/${id}/files/${f.id}`))) }, icon(ICONS.trash)))))
         : h('p', { class: 'empty' }, 'Nessun file.')),
     h('div', { class: 'card' },
