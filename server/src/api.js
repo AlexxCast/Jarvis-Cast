@@ -287,7 +287,7 @@ export async function handleApi(db, env, deps, request) {
       // Foglie della dieta: per non affollare la sfera con decine di vecchi pasti,
       // mostra solo l'ultimo pasto per fascia (colazione, pranzo, cena, spuntino) entro il tetto del ramo.
       // Riordino dei rami: solo manutenzione. Con le scritture finite non serve (non resterebbe) e non deve mai far sparire la sfera.
-      if (!writesBlocked()) { try { memory.tidyTopics(db); } catch (e) { console.error('tidyTopics:', e?.message || e); } }
+      if (!writesBlocked()) { try { memory.tidyIfDirty(db); } catch (e) { console.error('tidyTopics:', e?.message || e); } }
       const limits = kvGet(db, 'graphLimits', {});
       const g = memory.graph(db), d = loadDiary(db);
       const dietCap = Math.max(2, Math.min(10, Number(limits.dieta) || 5));
@@ -328,7 +328,7 @@ export async function handleApi(db, env, deps, request) {
     }
     if (path === '/api/mind' && method === 'GET') {
       // Come Jarvis archivia e usa i contesti: dipartimenti, argomenti, riassunti, compiti.
-      if (!writesBlocked()) { try { memory.tidyTopics(db); } catch (e) { console.error('tidyTopics:', e?.message || e); } }
+      if (!writesBlocked()) { try { memory.tidyIfDirty(db); } catch (e) { console.error('tidyTopics:', e?.message || e); } }
       const g = memory.graph(db, { perModule: 40 });
       const sizes = {};
       for (const b of g.branches) if (b.kind === 'module') sizes[b.id] = (b.entries || 0) + (db.get('SELECT COUNT(*) AS n FROM topics WHERE module = ?', b.id)?.n || 0);
@@ -530,7 +530,7 @@ export async function handleApi(db, env, deps, request) {
     if (path === '/api/self-heal' && method === 'GET') {
       return json({
         aliases: selfHeal.listLearnedAliases(db),
-        lastHeal: kvGet(db, 'lastSelfHeal', null),
+        lastHeal: selfHeal.lastHeal(db),
         openIssues: jarvisCore.listFixLatenti(db).length,
       });
     }

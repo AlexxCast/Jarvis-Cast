@@ -3,7 +3,7 @@
 // solo quando la conversazione lo richiede, così il contesto resta piccolo.
 
 import * as semantic from './semantic.js';
-import { kvGet, kvSet } from './db.js';
+import { kvGet, kvSet, memGet, memSet } from './db.js';
 
 const STOP = new Set('il lo la i gli le un uno una di a da in con su per tra fra e o ma che chi cui non mi ti si ci vi ne è sono ho hai ha del della dei delle al alla ai alle dal dalla nel nella sul sulla come quando dove cosa quale quanto questo questa quello quella mio mia tuo tua suo sua più meno molto poco anche già poi ora oggi fare fatto essere avere jarvis'.split(' '));
 
@@ -245,6 +245,7 @@ function upsertTopic(db, mod, label, nowIso) {
 
 export function touchTopics(db, topics, nowIso) {
   const out = { modules: [], leaves: [] };
+  if ((topics || []).length) memSet(db, 'topicsDirty', true); // la prossima lettura della sfera riordina i rami
   for (const t of topics || []) {
     const rawMod = slug(t.area);
     if (!rawMod) continue;
@@ -269,6 +270,13 @@ export function touchTopics(db, topics, nowIso) {
 }
 
 /** Riunisce i doppioni già salvati e rimuove i nodi ridondanti/meta: tiene il nodo più usato, somma gli usi, sposta i figli. */
+/** Riordina i rami solo se qualcosa è cambiato dall'ultima volta (o dopo un riavvio): le letture della sfera non scrivono. */
+export function tidyIfDirty(db) {
+  if (!memGet(db, 'topicsDirty', true)) return 0;
+  memSet(db, 'topicsDirty', false);
+  return tidyTopics(db);
+}
+
 export function tidyTopics(db) {
   let merged = 0;
   // Rimuove eventuali meta-ricordi ridondanti salvati per errore nel modulo dieta.
@@ -311,7 +319,9 @@ export function tidyTopics(db) {
           db.run('UPDATE topics SET parent = ? WHERE module = ? AND parent = ?', host.name, mod, child.name);
           db.run('DELETE FROM topics WHERE module = ? AND name = ?', mod, child.name);
           merged++;
-        } else {
+        } else if (child.parent !== host.name || child.label !== shorter) {
+          // Solo se cambia davvero: prima questa riga riscriveva OGNI argomento annidato a ogni lettura della sfera
+          // e a ogni battito (migliaia di righe al giorno, il limite gratuito di Cloudflare finito per niente).
           db.run('UPDATE topics SET parent = ?, label = ? WHERE module = ? AND name = ?', host.name, shorter, mod, child.name);
           child.parent = host.name;
           child.label = shorter;

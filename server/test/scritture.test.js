@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { makeDb, deps, fakeFetch, reply } from './helpers.js';
 import { handleApi } from '../src/api.js';
-import { writeStats, tallyWrites, restoreWriteStats, writeReport } from '../src/db.js';
+import { writeStats, tallyWrites, restoreWriteStats, writeReport, kvSet } from '../src/db.js';
 
 const call = (db, d, method, path, b) => handleApi(db, {}, d, new Request('https://x' + path, { method, headers: { 'content-type': 'application/json' }, body: b ? JSON.stringify(b) : undefined })).then(r => r.json());
 
@@ -31,4 +31,41 @@ test('scritture: si azzerano a mezzanotte UTC e si riprendono dopo un riavvio', 
   restoreWriteStats(saved, t2);
   assert.equal(writeReport().total, 2);
   assert.equal(writeReport().tables[0].name, 'topics');
+});
+
+test('scritture: rileggere la sfera e il battito a vuoto non scrivono nulla', async () => {
+  const { T0: t0 } = await import('./helpers.js');
+  const memory = await import('../src/memory.js');
+  const jarvisCore = await import('../src/jarvis_core.js');
+  const agenda = await import('../src/agenda.js');
+  const db = makeDb();
+  const d = deps(fakeFetch(() => reply({ reply: 'ok' })));
+  const iso = new Date(t0).toISOString();
+  const tops = [];
+  for (const area of ['lavoro', 'casa', 'telefono']) {
+    tops.push({ area, topic: 'WhatsApp' }, { area, topic: 'Klagenfurt' });
+    for (let i = 0; i < 8; i++) tops.push({ area, topic: `lettura WhatsApp ${i}x`, parent: 'WhatsApp' }, { area, topic: `ristoranti Klagenfurt n${i}` });
+  }
+  memory.touchTopics(db, tops, iso);
+  await call(db, d, 'GET', '/api/graph'); // il primo giro riordina davvero (annida i figli)
+  const beat = () => { d.clock.ms += 15 * 60_000; jarvisCore.selfInterrogate(db, {}, d.clock.ms, 'Europe/Rome'); agenda.fireDue(db, d.clock.ms, 'Europe/Rome'); };
+  beat();
+  writeStats.day = ''; writeStats.total = 0;
+  for (let i = 0; i < 5; i++) { await call(db, d, 'GET', '/api/graph'); await call(db, d, 'GET', '/api/mind'); }
+  for (let i = 0; i < 5; i++) beat();
+  assert.equal(writeStats.total, 0, `scritture inutili: ${JSON.stringify(writeStats.byTable)}`);
+  // Un argomento nuovo si riordina alla lettura successiva, come prima.
+  memory.touchTopics(db, [{ area: 'lavoro', topic: 'impostazioni privacy WhatsApp' }], iso);
+  await call(db, d, 'GET', '/api/graph');
+  assert.equal(db.get("SELECT parent FROM topics WHERE module = 'lavoro' AND label LIKE 'impostazioni privacy%'")?.parent, 'whatsapp');
+});
+
+test('scritture: salvare in kv lo stesso valore non costa righe', () => {
+  const db = makeDb();
+  kvSet(db, 'x', { a: 1 });
+  writeStats.day = ''; writeStats.total = 0;
+  kvSet(db, 'x', { a: 1 });
+  assert.equal(writeStats.total, 0);
+  kvSet(db, 'x', { a: 2 });
+  assert.equal(writeStats.total, 1);
 });

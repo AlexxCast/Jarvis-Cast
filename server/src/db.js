@@ -172,8 +172,16 @@ export function kvGet(db, key, fallback = null) {
   try { return JSON.parse(row.value); } catch { return fallback; }
 }
 export function kvSet(db, key, value) {
-  db.run('INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value', key, JSON.stringify(value));
+  // Se il valore è già quello, SQLite non tocca la riga: zero scritture (prima ogni salvataggio uguale costava una riga).
+  db.run('INSERT INTO kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value WHERE kv.value IS NOT excluded.value', key, JSON.stringify(value));
 }
+
+// Promemoria di servizio che non vale la pena salvare (ultimo giro del battito, ultimo riordino): restano in memoria
+// nel Durable Object, uno per database. Se l'oggetto si riavvia si perdono e il controllo si rifà una volta: innocuo.
+const volatile = new WeakMap();
+const volatileOf = (db) => { const k = db?.root || db; let m = volatile.get(k); if (!m) volatile.set(k, (m = new Map())); return m; };
+export function memGet(db, key, fallback = null) { const m = volatileOf(db); return m.has(key) ? m.get(key) : fallback; }
+export function memSet(db, key, value) { volatileOf(db).set(key, value); }
 
 export function logEvent(db, at, kind, text) {
   db.run('INSERT INTO events (at, kind, text) VALUES (?, ?, ?)', at, kind, String(text).slice(0, 500));

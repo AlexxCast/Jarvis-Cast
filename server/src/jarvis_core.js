@@ -6,7 +6,7 @@
 // 3. Controllo autonomo di Antigravity / VS Code su progetti del PC con cattura e invio dello schermo PC in sovraimpressione;
 // 4. Esecuzione procedurale istantanea e orchestrazione multi-dispositivo (PC Ghideon + Smartphone).
 
-import { kvGet, kvSet, pushInbox } from './db.js';
+import { kvGet, kvSet, pushInbox, memGet, memSet } from './db.js';
 import * as flows from './flows.js';
 import * as devices from './devices.js';
 import * as memory from './memory.js';
@@ -316,9 +316,10 @@ export function fireDueTimedActions(db, env = {}, nowMs = Date.now(), tz = 'Euro
  */
 export function selfInterrogate(db, env = {}, nowMs = Date.now(), tz = 'Europe/Rome') {
   const nextTimed = fireDueTimedActions(db, env, nowMs, tz);
-  const lastRun = Number(kvGet(db, 'lastSelfInterrogateMs', 0));
+  // In memoria, non nel database: era una riga scritta a ogni battito.
+  const lastRun = Number(memGet(db, 'lastSelfInterrogateMs', 0));
   if (nowMs - lastRun < 45_000) return { ran: false, nextTimed };
-  kvSet(db, 'lastSelfInterrogateMs', nowMs);
+  memSet(db, 'lastSelfInterrogateMs', nowMs);
 
   const actionsTaken = [];
   const atIso = nowIsoOf(nowMs, tz);
@@ -391,9 +392,9 @@ export function selfInterrogate(db, env = {}, nowMs = Date.now(), tz = 'Europe/R
   }
 
   // 3. Igiene periodica del grafo e delle automazioni (ogni 10 minuti, zero crediti):
-  const lastTidy = Number(kvGet(db, 'lastAutoTidyMs', 0));
+  const lastTidy = Number(memGet(db, 'lastAutoTidyMs', 0));
   if (nowMs - lastTidy > 10 * 60_000) {
-    kvSet(db, 'lastAutoTidyMs', nowMs);
+    memSet(db, 'lastAutoTidyMs', nowMs);
     const merged = memory.tidyTopics(db);
     const pruned = agents.FlowAgent.prune(db);
     if (merged > 0 || pruned > 0) actionsTaken.push(`grafo ottimizzato (${merged} uniti, ${pruned} flow potati)`);

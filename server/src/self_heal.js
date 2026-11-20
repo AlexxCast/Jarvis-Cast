@@ -2,7 +2,7 @@
 // Analizza fixLatenti, eventi di errore, cronologia e flussi per correggere doppioni,
 // apprendere alias da errori di dettatura vocale e mantenere il sistema sano in autonomia.
 
-import { kvGet, kvSet, logEvent } from './db.js';
+import { kvGet, kvSet, logEvent, memGet, memSet } from './db.js';
 import * as flows from './flows.js';
 import * as devices from './devices.js';
 import * as router from './router.js';
@@ -129,7 +129,12 @@ export function runDeterministicHeal(db, nowMs = Date.now(), tz = 'Europe/Rome')
     flowsTotal: cleanFlows.length,
     openIssues: kvGet(db, 'fixLatenti', []).length,
   };
-  kvSet(db, LAST_HEAL_KEY, report);
+  // Il resoconto si salva solo quando cambia qualcosa (prima: una riga a ogni battito solo per l'orario).
+  // L'ultimo giro a vuoto resta in memoria e si vede lo stesso in /api/self-heal.
+  memSet(db, LAST_HEAL_KEY, report);
+  const prev = kvGet(db, LAST_HEAL_KEY, null);
+  const same = prev && ['learnedTotal', 'skillsTotal', 'flowsTotal', 'openIssues'].every(k => prev[k] === report[k]);
+  if (actions.length || !same) kvSet(db, LAST_HEAL_KEY, report);
   if (actions.length) logEvent(db, report.at, 'heal', actions.join(' · '));
   return report;
 }
@@ -176,4 +181,9 @@ export async function diagnoseWithModel(db, env, fetchFn, nowMs = Date.now(), tz
   } catch (e) {
     return { ...baseReport, aiSummary: `Analisi locale completata (modello non disponibile: ${e.message}).` };
   }
+}
+
+/** Ultimo giro di auto-guarigione: quello in memoria (anche a vuoto) o l'ultimo salvato. */
+export function lastHeal(db) {
+  return memGet(db, LAST_HEAL_KEY, null) || kvGet(db, LAST_HEAL_KEY, null);
 }
