@@ -172,3 +172,39 @@ test('il backup contiene i progetti con istruzioni, file, chat e registro', asyn
   assert.equal(b.projects[0].log.entries.length, 1);
   assert.equal(b.projectFiles[0].content, SPEC);
 });
+
+test('lezione di inglese: una frase in inglese che parla di cibo non diventa un pasto, un promemoria o una nota', async () => {
+  const db = makeDb();
+  const id = projects.createProject(db, { name: 'Inglese B2', instructions: 'Sei la tutor di inglese.' }, NOW, 1);
+  projects.enterProject(db, id, {}, NOW, 2);
+  const text = "yesterday I wake up and for the breakfast I eat yogurt with protein powder and for dinner I cook a kebab and after I go to sleep";
+  assert.ok(projects.looksEnglish(text));
+  assert.ok(!projects.looksEnglish('iniziamo la lezione di inglese di oggi'));
+  const f = fakeFetch(() => reply({ reply: 'Correzione: I woke up, I ate, I cooked, I went to sleep.', actions: [
+    { type: 'add_meal', date: '2026-11-20', meal: 'colazione', description: 'yogurt', items: [{ name: 'yogurt', grams: 150, kcal: 100 }] },
+    { type: 'add_reminder', text: 'controlla il microfono', due: '2026-11-21T09:00' },
+    { type: 'remember', module: 'generale', text: 'Wicked up' },
+    { type: 'project_log', kind: 'esercizio', topic: 'Past simple', note: 'racconto di ieri', score: '3/7', mistakes: ['wake → woke', 'eat → ate'] },
+  ] }));
+  const out = await handleChat(db, ENV, deps(f), { text, source: 'voice' });
+  assert.ok(!out.actions.includes('add_meal') && !out.actions.includes('add_reminder') && !out.actions.includes('remember'));
+  assert.ok(out.actions.includes('project_log'), 'il registro accetta note/mistakes/score "3/7"');
+  assert.equal(db.all('SELECT id FROM reminders').length, 0);
+  const e = projects.getLog(db, id).entries[0];
+  assert.equal(e.text, 'racconto di ieri'); assert.equal(e.score, 3); assert.equal(e.max, 7);
+  assert.deepEqual(e.errors, ['wake → woke', 'eat → ate']);
+  assert.doesNotMatch(out.reply, /non sono riuscit/);
+  assert.match(systemOf(f.calls[0]), /segnala OGNI errore/);
+});
+
+test('in un progetto di inglese il telefono ascolta in inglese con pause lunghe; fuori in italiano', async () => {
+  const db = makeDb();
+  const id = projects.createProject(db, { name: 'Inglese B2' }, NOW, 1);
+  const d = deps(fakeFetch(() => reply({ reply: 'Ok.' })));
+  const chat = async (text) => (await handleApi(db, ENV, d, new Request('https://x/api/chat', { method: 'POST', headers: { authorization: 'Bearer t', 'content-type': 'application/json' }, body: JSON.stringify({ text, source: 'voice' }) }))).json();
+  assert.equal((await chat('che tempo fa domani a Roma?')).listen.lang, 'it-IT');
+  projects.enterProject(db, id, {}, NOW, 2);
+  const l = (await chat('iniziamo')).listen;
+  assert.equal(l.lang, 'en-US'); assert.equal(l.alt, 'it-IT'); assert.ok(l.silenceMs >= 3000);
+  assert.equal((await chat('esci dal progetto')).listen.lang, 'it-IT');
+});

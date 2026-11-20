@@ -894,7 +894,8 @@ class JarvisService : LifecycleService(), SensorEventListener {
                     lastCommandPartial = text
                     JarvisState.partial.value = text
                     main.removeCallbacks(commandStopRunnable)
-                    main.postDelayed(commandStopRunnable, if (ClaudeBridge.active) 2_600L else 1400L)
+                    // Modalità Claude o lezione di inglese: si aspetta di più, chi parla una lingua nuova si ferma a pensare.
+                    main.postDelayed(commandStopRunnable, if (ClaudeBridge.active) 2_600L else if (ListenMode.silenceMs > 0) ListenMode.silenceMs else 1400L)
                 }
             }
             override fun onResults(results: Bundle?) {
@@ -953,10 +954,9 @@ class JarvisService : LifecycleService(), SensorEventListener {
 
         val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-            putExtra(RecognizerIntent.EXTRA_LANGUAGE, "it-IT")
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1_400L)
-            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1_100L)
+            // Italiano con pause brevi; in lezione di inglese inglese con pause lunghe (vedi ListenMode).
+            ListenMode.apply(this, 1_400L, 1_100L)
             if (ClaudeBridge.active) {
                 // Modalità Claude: Alessio parla con Claude in inglese o in italiano e si ferma a pensare.
                 // Prima lingua = quella dell'ultima risposta di Claude; su Android 14+ il riconoscitore passa all'altra se serve.
