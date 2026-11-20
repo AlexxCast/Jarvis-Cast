@@ -77,10 +77,13 @@ object ClaudeBridge {
 
     /** Domanda singola ("chiedi a Claude …"): letta la risposta, la modalità si spegne da sola invece di ascoltare. */
     private var oneShot = false
+    /** Appena acceso, dice dove si era rimasti (l'ultimo messaggio della chat) e poi ascolta. */
+    private var recap = false
 
     /** Accende il ponte. Ritorna la frase da dire. */
-    fun start(ctx: Context, single: Boolean = false): String {
+    fun start(ctx: Context, single: Boolean = false, recapFirst: Boolean = false): String {
         oneShot = single
+        recap = recapFirst
         val app = ctx.applicationContext
         appCtx = app
         if (JarvisAccessibility.instance == null) {
@@ -270,6 +273,16 @@ object ClaudeBridge {
             baselined = true
             lastInput = v.inputText
             info = "attiva: ${seen.size} messaggi già presenti ignorati" + if (v.input == null) ", ma non trovo la casella di testo" else ""
+            if (recap) {
+                // "Facciamo il progetto B2": si riparte da dove eravate, leggendo l'ultimo messaggio della chat.
+                recap = false
+                val last = ClaudeChat.messages(v.blocks).lastOrNull()
+                val intro = if (last == null) listOf("La chat è vuota: comincia pure.") else listOf("Eravamo rimasti qui.") + ClaudeChat.chunks(listOf(last)).take(3)
+                last?.let { lastReply = listOf(it); replyLang = ClaudeChat.language(it); listenLang = replyLang }
+                queue.clear(); queue.addAll(intro)
+                turnDone = true
+                speakNext()
+            }
             return
         }
 

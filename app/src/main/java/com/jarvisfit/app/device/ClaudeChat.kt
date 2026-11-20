@@ -197,6 +197,23 @@ object ClaudeChat {
         }
     }
 
+    private val workRegex = Regex(
+        "^(?:(?:ehi |ok |dai )?(?:kestra|chestra) )?(?:allora |dai |ok )?(?:facciamo|lavoriamo|continuiamo|riprendiamo|andiamo avanti con|torniamo|iniziamo|cominciamo|fammi fare|apri|riapri)" +
+            "(?: (?:a|al|alla|allo|sul|sulla|con|col|il|la|lo|un|una|di|da))*" +
+            " (?:(?:progetto|lezione(?: di)?) ([a-z0-9àèéìòóù ]+?)|([a-z0-9àèéìòóù ]+?) su (?:claude|cloud))(?: su (?:claude|cloud))?(?: (?:per favore|grazie|adesso|ora))*$"
+    )
+
+    /**
+     * "Facciamo il progetto B2", "riprendiamo la lezione di inglese", "lavoriamo a Monomitos su Claude": si lavora
+     * DAL VIVO in quel progetto di Claude (apre la chat più recente, dice dove eravate rimasti, poi modalità Claude).
+     * Ritorna il nome del progetto, o null.
+     */
+    fun workRequest(text: String): String? {
+        val m = workRegex.matchEntire(cmd(text)) ?: return null
+        val name = (m.groupValues[1].ifBlank { m.groupValues[2] }).trim()
+        return name.split(" ").takeWhile { it !in projectStop }.take(4).joinToString(" ").ifBlank { null }
+    }
+
     data class Ask(val project: String?, val question: String)
 
     private val askRegex = Regex(

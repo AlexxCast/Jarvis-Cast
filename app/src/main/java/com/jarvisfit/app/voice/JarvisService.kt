@@ -1082,6 +1082,31 @@ class JarvisService : LifecycleService(), SensorEventListener {
         return if (out.ok) null else "Non sono riuscita ad aprire il progetto $project su Claude" + (out.say.takeIf { it.isNotBlank() }?.let { ": $it" } ?: ".")
     }
 
+    /**
+     * "Facciamo il progetto B2": apre il progetto su Claude e la sua chat più recente, dice dove eravate rimasti
+     * e passa alla modalità Claude dal vivo (la lezione la guida Claude con le istruzioni del suo progetto).
+     */
+    private fun claudeWork(project: String) {
+        stopSession(cancel = false)
+        inConversationMode = false
+        ClaudeBridge.stop(this)
+        JarvisState.status.value = JarvisState.Status.THINKING
+        updateNotification("Apro $project su Claude…")
+        Overlay.caption(this, "Apro $project su Claude")
+        lifecycleScope.launch {
+            if (!ClaudeBridge.bringClaude(this@JarvisService)) { sayThen("Non riesco ad aprire l'app di Claude."); return@launch }
+            val goal = "Nell'app di Claude (già aperta in primo piano) vai alla lista dei progetti e apri il progetto \"$project\" " +
+                "(il nome può essere scritto in modo un po' diverso, es. B2 = Inglese B2). Poi apri la chat più recente di quel progetto " +
+                "(se non ce n'è nessuna, una nuova chat nel progetto) e fermati quando vedi la conversazione e la casella per scrivere. Non scrivere niente."
+            val out = PhoneAgent.runTask(this@JarvisService, goal, speakEnd = false)
+            if (!out.ok) { sayThen("Non sono riuscita ad aprire il progetto $project su Claude" + (out.say.takeIf { it.isNotBlank() }?.let { ": $it" } ?: ".")); return@launch }
+            val msg = ClaudeBridge.start(this@JarvisService, recapFirst = true)
+            if (!ClaudeBridge.active) { sayThen(msg); return@launch }
+            updateNotification("Modalità Claude: $project")
+            backToWaiting()
+        }
+    }
+
     /** "Chiedi a Claude nel progetto X …": apre il progetto, scrive la domanda, legge la risposta e chiude. */
     private fun claudeAsk(ask: ClaudeChat.Ask) {
         stopSession(cancel = false)
@@ -1177,7 +1202,9 @@ class JarvisService : LifecycleService(), SensorEventListener {
         // In modalità Claude tutto va a Claude, tranne gli spostamenti nell'app ("apri il progetto inglese"):
         // quelli seguono la strada normale e li fa l'agente del telefono. La chat nuova non viene riletta.
         if (ClaudeBridge.active && !awaitingPassphrase) {
-            if (ClaudeChat.isNavPhrase(text)) navigateClaude(text) else processClaude(text)
+            val work = ClaudeChat.workRequest(text)
+            if (work != null && Regex("\\b(?:progetto|lezione|claude)\\b", RegexOption.IGNORE_CASE).containsMatchIn(text)) claudeWork(work)
+            else if (ClaudeChat.isNavPhrase(text)) navigateClaude(text) else processClaude(text)
             return
         }
         processMain(text)
@@ -1209,6 +1236,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
         }
         // Kestra che usa Claude da sola: una domanda singola, oppure leggere un progetto e riassumerlo.
         ClaudeChat.askRequest(text)?.let { claudeAsk(it); return }
+        ClaudeChat.workRequest(text)?.let { claudeWork(it); return }
         ClaudeChat.studyRequest(text)?.let { claudeStudy(it); return }
         if (VoiceText.isCancelPhrase(text.trim())) {
             inConversationMode = false

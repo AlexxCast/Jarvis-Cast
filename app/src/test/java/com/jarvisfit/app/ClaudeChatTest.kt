@@ -161,4 +161,15 @@ class ClaudeChatTest {
         assertEquals(null, ClaudeChat.askRequest("chiedi a claude")?.question)
         assertEquals("come si dice gatto in inglese", ClaudeChat.askRequest("Kestra chiedi a Claude come si dice gatto in inglese")?.question)
     }
+
+    @Test
+    fun workRequests() {
+        assertEquals("b2", ClaudeChat.workRequest("facciamo il progetto B2"))
+        assertEquals("inglese", ClaudeChat.workRequest("Kestra, riprendiamo la lezione di inglese"))
+        assertEquals("monomitos", ClaudeChat.workRequest("lavoriamo a Monomitos su Claude"))
+        assertEquals("inglese b2", ClaudeChat.workRequest("dai facciamo il progetto inglese b2 su claude"))
+        assertNull(ClaudeChat.workRequest("facciamo la spesa"))
+        assertNull(ClaudeChat.workRequest("apri WhatsApp"))
+        assertNull(ClaudeChat.workRequest("riprendiamo domani"))
+    }
 }
