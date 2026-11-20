@@ -34,6 +34,8 @@ import com.jarvisfit.app.device.AppLauncher
 import com.jarvisfit.app.device.Places
 import com.jarvisfit.app.device.PhoneAgent
 import com.jarvisfit.app.device.Overlay
+import com.jarvisfit.app.device.ClaudeBridge
+import com.jarvisfit.app.device.ClaudeChat
 import com.jarvisfit.app.net.Cloud
 import com.jarvisfit.app.ui.MainActivity
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -69,6 +71,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
         const val ACTION_LISTEN = "listen"     // ascolta subito, senza parola chiave
         const val ACTION_ANSWER = "answer"     // ascolta la risposta a una domanda, senza portare Jarvis in primo piano
         const val ACTION_REFRESH = "refresh"   // l'app è in primo piano: Android ridà il microfono vero al servizio
+        const val ACTION_CLAUDE = "claude"     // modalità Claude: risposta letta, ascolta subito Alessio in inglese (senza saluto)
         private const val NOTIF_ID = 1
         private const val PHOTO_NOTIF_ID = 2
         private const val INBOX_POLL_MS = 90_000L // Timer interno di 1 minuto e mezzo per controllare attività, messaggi e stato
@@ -94,6 +97,9 @@ class JarvisService : LifecycleService(), SensorEventListener {
         fun listenNow(ctx: Context) =
             ctx.startForegroundService(Intent(ctx, JarvisService::class.java).setAction(ACTION_LISTEN))
         /** Jarvis ha fatto una domanda mentre usava un'altra app: ascolta la risposta restando dov'è. */
+        fun claudeTurn(ctx: Context) {
+            runCatching { ctx.startForegroundService(Intent(ctx, JarvisService::class.java).setAction(ACTION_CLAUDE)) }
+        }
         fun listenForAnswer(ctx: Context) {
             if (!Settings.listeningEnabled) return
             runCatching { ctx.startForegroundService(Intent(ctx, JarvisService::class.java).setAction(ACTION_ANSWER)) }
@@ -197,6 +203,18 @@ class JarvisService : LifecycleService(), SensorEventListener {
                         stopSession(cancel = true)
                         restartWakeWordDelayed(300)
                     } else if (!busy && !yielded) startWakeWord()
+                } else if (intent?.action == ACTION_CLAUDE) {
+                    if (!busy && !yielded && ClaudeBridge.active) {
+                        stopSession(cancel = true)
+                        if (KestraKws.running) KestraKws.stop()
+                        busy = true
+                        busySinceMs = System.currentTimeMillis()
+                        inConversationMode = true
+                        followupTurn = false
+                        firstCommandPending = false
+                        lastConversationActivityTime = System.currentTimeMillis()
+                        main.postDelayed({ listenForCommand() }, 150)
+                    }
                 } else if (intent?.action == ACTION_ANSWER) {
                     if (!busy && !yielded) { stopSession(cancel = true); onWakeWordDetected("", openApp = false) }
                 } else if (!busy && !yielded) {
@@ -449,7 +467,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
         // "Kestra, che ore sono" tutto d'un fiato non deve aspettare.
         // Con un video o la musica sul telefono la chiamata è "cauta": niente saluto a voce sopra il video e niente
         // app in primo piano; solo una vibrazione, e la prima frase passa dal filtro TV del server.
-        onWakeWordDetected("", quick = true, cautious = KestraKws.lastWakeDuringMedia)
+        onWakeWordDetected("", quick = true, cautiousWake = KestraKws.lastWakeDuringMedia)
     }
 
     /** Vibrazione breve: dice "ti ascolto" senza parlare sopra il video (Alessio non vuole bip). */
@@ -756,11 +774,17 @@ class JarvisService : LifecycleService(), SensorEventListener {
         return wakeGreetings[idx]
     }
 
-    private fun onWakeWordDetected(remainingCommand: String, openApp: Boolean = true, quick: Boolean = false, cautious: Boolean = false) {
+    private fun onWakeWordDetected(heardCommand: String, openApp: Boolean = true, quick: Boolean = false, cautiousWake: Boolean = false) {
         if (busy) return
         if (KestraKws.running) KestraKws.stop()
         // Ferma immediatamente qualsiasi discorso del TTS per non ascoltare se stesso
         Speaker.stop()
+        ClaudeBridge.hush()
+        // Modalità Claude: la richiesta detta subito dopo il nome è stata ascoltata in italiano, quindi per Claude
+        // sarebbe storpiata. Si tengono solo i comandi ("Kestra basta", "Kestra ripeti"); il resto si riascolta in inglese.
+        val claude = ClaudeBridge.active
+        val remainingCommand = if (claude && !ClaudeChat.isStopPhrase(heardCommand) && !ClaudeChat.isRepeatPhrase(heardCommand)) "" else heardCommand
+        val cautious = cautiousWake || (claude && remainingCommand.isBlank())
         busy = true
         busySinceMs = System.currentTimeMillis()
         inConversationMode = true
@@ -794,7 +818,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
         // 2. Apri l'app sul telefono
         // Con la finestra sopra le altre app Jarvis non interrompe ciò che si sta facendo: niente app in primo piano.
         val locked = getSystemService(android.app.KeyguardManager::class.java)?.isKeyguardLocked == true
-        if (openApp && !cautious && (!Overlay.enabled(this) || locked)) {
+        if (openApp && !cautious && !claude && (!Overlay.enabled(this) || locked)) {
             val openIntent = Intent(this, MainActivity::class.java).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
             }
@@ -870,7 +894,7 @@ class JarvisService : LifecycleService(), SensorEventListener {
                     lastCommandPartial = text
                     JarvisState.partial.value = text
                     main.removeCallbacks(commandStopRunnable)
-                    main.postDelayed(commandStopRunnable, 1400L)
+                    main.postDelayed(commandStopRunnable, if (ClaudeBridge.active) 2_600L else 1400L)
                 }
             }
             override fun onResults(results: Bundle?) {
@@ -933,6 +957,14 @@ class JarvisService : LifecycleService(), SensorEventListener {
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 1_400L)
             putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 1_100L)
+            if (ClaudeBridge.active) {
+                // Modalità Claude: Alessio parla in inglese con Claude e si ferma a pensare: inglese e pause lunghe.
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
+                putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, "en-US")
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 2_600L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 2_100L)
+                putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 3_000L)
+            }
         }
         beginSession(rec, intent, command = true)
     }
@@ -1022,8 +1054,52 @@ class JarvisService : LifecycleService(), SensorEventListener {
 
     // ---------------------------------------------------------------- brain
 
+    /** Modalità Claude: ciò che Alessio dice va a Claude (scritto e inviato), tranne i comandi per Kestra. */
+    private fun processClaude(text: String) {
+        stopSession(cancel = false)
+        inConversationMode = false
+        fun say(msg: String) {
+            lastSpokenText = msg
+            lastSpokenTime = System.currentTimeMillis()
+            JarvisState.status.value = JarvisState.Status.SPEAKING
+            Overlay.caption(this, msg)
+            Speaker.speak(msg) { main.post { backToWaiting() } }
+        }
+        when {
+            ClaudeChat.isStartPhrase(text) -> say("La modalità Claude è già attiva. Per uscire dimmi basta.")
+            ClaudeChat.isStopPhrase(text) -> { ClaudeBridge.stop(this); say("Modalità Claude chiusa.") }
+            ClaudeChat.isRepeatPhrase(text) -> {
+                if (ClaudeBridge.repeat()) backToWaiting() else say("Non ho ancora una risposta di Claude da rileggere.")
+            }
+            else -> {
+                JarvisState.status.value = JarvisState.Status.THINKING
+                updateNotification("Scrivo a Claude…")
+                Overlay.caption(this, text)
+                ClaudeBridge.send(text) { problem ->
+                    main.post {
+                        if (problem != null) say(problem)
+                        else { updateNotification("Modalità Claude: aspetto la risposta"); backToWaiting() }
+                    }
+                }
+            }
+        }
+    }
+
     private fun process(text: String) {
         firstCommandPending = false
+        if (ClaudeBridge.active && !awaitingPassphrase) { processClaude(text); return }
+        if (ClaudeChat.isStartPhrase(text)) {
+            stopSession(cancel = false)
+            inConversationMode = false
+            val msg = ClaudeBridge.start(this)
+            lastSpokenText = msg
+            lastSpokenTime = System.currentTimeMillis()
+            JarvisState.status.value = JarvisState.Status.SPEAKING
+            Overlay.caption(this, msg)
+            // Appena acceso ascolta subito il primo messaggio per Claude, senza dover ridire "Kestra".
+            Speaker.speak(msg) { main.post { backToWaiting(); if (ClaudeBridge.active) main.postDelayed({ claudeTurn(this) }, 500) } }
+            return
+        }
         if (VoiceText.isCancelPhrase(text.trim())) {
             inConversationMode = false
             awaitingPassphrase = false

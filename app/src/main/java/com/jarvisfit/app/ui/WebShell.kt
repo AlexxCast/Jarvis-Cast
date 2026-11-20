@@ -176,6 +176,8 @@ class JarvisBridge(
             if (extra.isNotEmpty()) parts += "Di queste: ${extra.joinToString(", ")}."
         } else if (Settings.strongWake) parts += "Non ha ancora sentito \"Kestra\" da quando il telefono è acceso."
         if (k.lastError.isNotBlank()) parts += "Ultimo problema: ${k.lastError}."
+        val c = com.jarvisfit.app.device.ClaudeBridge
+        if (c.info.isNotBlank()) parts += "Modalità Claude: ${c.info} (risposte lette ${c.readCount}, messaggi inviati ${c.sentCount})."
         return parts.joinToString(" ")
     }
 

@@ -701,3 +701,14 @@ riconoscimento di Google per aspettare la parola, e ogni giro di Google si chiud
 - Durante l'attesa con Google i suoni di sistema, notifiche e (se non suona musica) multimediali restano zitti per tutto
   il giro (`hushFor(15_000)`, rinnovato a ogni giro), non solo all'apertura. Si riaccendono appena Kestra parla o al
   massimo 15 s dopo l'ultimo giro.
+
+## Modalità Claude: Kestra fa da voce all'app di Claude (app 2.48, 20/11/2026)
+
+Alessio studia inglese (B2) in un progetto dell'app ufficiale di Claude, ma dentro i progetti la voce di Claude non funziona. Kestra fa da ponte vocale **solo sullo schermo del telefono**: niente accesso all'account Claude, niente server, niente modelli.
+
+- **Accensione:** "Kestra, modalità Claude" (anche "leggimi Claude", "claude mode"; riconosciuto sul telefono, `ClaudeChat.isStartPhrase`). Apre l'app di Claude se non è davanti. Serve l'Accessibilità "Kestra: usa il telefono".
+- **Lettura:** `device/ClaudeBridge.kt` legge la lista della conversazione ogni 0,7 s (e subito quando l'app di Claude cambia schermo). La risposta è ciò che viene **dopo l'ultimo messaggio di Alessio** (`ClaudeChat.update`). Ciò che c'era sullo schermo all'accensione, o in un'altra chat aperta dopo, è "già visto" e non si legge mai. I paragrafi già finiti si leggono subito; l'ultimo quando il testo resta fermo 1,5 s e non c'è il tasto "interrompi" (dopo 12 s fermo si legge comunque). La voce preferisce l'inglese (`Speaker.speak(preferEnglish = true)`), l'italiano resta per le frasi chiaramente italiane.
+- **Dettatura:** finita la lettura Kestra ascolta subito, senza "Kestra", in **inglese** con pause lunghe (2,6 s). Ciò che sente va nella casella di Claude (`ACTION_SET_TEXT`, altrimenti incolla) e preme il tasto invia. Se non trova la casella o il tasto lo dice ("premilo tu"), mai un finto "inviato". Dopo il nome "Kestra" la richiesta detta nella stessa frase (ascoltata in italiano) si scarta e si riascolta in inglese, tranne i comandi.
+- **Comandi:** "basta" / "stop" / "esci dalla modalità Claude" chiude; "ripeti" / "repeat" rilegge l'ultima risposta. Anche il tasto "Esci" nella notifica; si chiude da sola dopo 30 minuti senza attività. Mentre Kestra legge il microfono è spento (anti-eco): per interromperla si usa la notifica.
+- **Messaggi scritti a mano:** se la casella si svuota dopo che Alessio ha scritto, quel testo diventa il nuovo punto fermo, così la risposta si legge lo stesso.
+- **Limiti noti:** gli id interni dell'app di Claude non sono pubblici e cambiano: tutto si basa su testi e pulsanti visibili (`ClaudeChat.isSendButton`, `isStopButton`, etichette da ignorare). **Non è stato provato su un telefono vero.** Lo stato si vede in Impostazioni › Stato ("Modalità Claude: …, risposte lette N, messaggi inviati M"): se dice "non trovo la casella" o "non trovo il tasto invia", vanno adattate quelle regole.

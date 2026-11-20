@@ -142,7 +142,7 @@ object Speaker {
         RegexOption.IGNORE_CASE,
     )
 
-    private fun splitLanguageSegments(text: String): List<Pair<String, Locale>> {
+    private fun splitLanguageSegments(text: String, preferEnglish: Boolean = false): List<Pair<String, Locale>> {
         val rawParts = text.split(Regex("""(?<=[.!?;:\n])\s+|(?="[^"]+")|(?<=")\s+"""))
             .map { it.trim() }
             .filter { it.isNotEmpty() }
@@ -152,7 +152,8 @@ object Speaker {
             if (clean.isEmpty()) continue
             val enCount = ENGLISH_HINT.findAll(clean).count()
             val itCount = ITALIAN_HINT.findAll(clean).count()
-            val locale = if (enCount >= 1 && enCount > itCount) Locale.US else Locale.ITALIAN
+            // Con le risposte di Claude in inglese (modalità Claude) i pezzi senza indizi chiari sono inglesi.
+            val locale = if ((enCount >= 1 && enCount > itCount) || (preferEnglish && enCount >= itCount)) Locale.US else Locale.ITALIAN
             if (out.isNotEmpty() && out.last().second == locale) {
                 val prev = out.removeAt(out.lastIndex)
                 out += (prev.first + " " + clean) to locale
@@ -160,7 +161,7 @@ object Speaker {
                 out += clean to locale
             }
         }
-        return if (out.isEmpty()) listOf(text to Locale.ITALIAN) else out
+        return if (out.isEmpty()) listOf(text to (if (preferEnglish) Locale.US else Locale.ITALIAN)) else out
     }
 
     private fun pickFemaleVoice(engine: TextToSpeech, locale: Locale): android.speech.tts.Voice? {
@@ -187,7 +188,7 @@ object Speaker {
     }
 
     /** Parla e chiama [onDone] quando l'audio è terminato (garantito, anche in caso di errore). */
-    fun speak(text: String, onDone: (() -> Unit)? = null) {
+    fun speak(text: String, onDone: (() -> Unit)? = null, preferEnglish: Boolean = false) {
         val cleaned = cleanTextForSpeech(text)
         if (cleaned.isBlank() || failed) {
             onDone?.invoke()
@@ -198,7 +199,7 @@ object Speaker {
             synchronized(pending) { pending += cleaned to onDone }
             return
         }
-        val segments = splitLanguageSegments(cleaned)
+        val segments = splitLanguageSegments(cleaned, preferEnglish)
         val id = "u" + System.nanoTime()
         if (onDone != null) callbacks[id] = onDone
         // QUEUE_FLUSH interrompe la frase precedente: la si chiude subito, senza aspettare il watchdog.

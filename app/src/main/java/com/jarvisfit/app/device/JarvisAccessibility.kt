@@ -36,7 +36,8 @@ class JarvisAccessibility : AccessibilityService() {
     override fun onServiceConnected() { instance = this }
     override fun onDestroy() { instance = null; super.onDestroy() }
     override fun onUnbind(intent: android.content.Intent?): Boolean { instance = null; return super.onUnbind(intent) }
-    override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+    // Unico uso degli eventi: la modalità Claude controlla subito lo schermo quando l'app di Claude cambia.
+    override fun onAccessibilityEvent(event: AccessibilityEvent?) { if (ClaudeBridge.active) ClaudeBridge.onScreenChanged(event?.packageName) }
     override fun onInterrupt() {}
 
     private fun label(node: AccessibilityNodeInfo): String {
