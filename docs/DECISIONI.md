@@ -692,3 +692,12 @@ Riaddestrare con la TV dentro aveva peggiorato la vita vera (vedi sopra), quindi
 - **Correzione dello stesso giorno**: con la 2.45 Alessio sentiva "eccomi" e poi niente: il filtro sulla prima frase
   dopo il nome scartava anche le sue richieste vere. Ora il filtro vale solo se il telefono stava suonando un video o
   musica (`media`); con la TV nella stanza il nome sentito risponde come prima (solo server, nessun APK).
+
+## Bip "a caso" col microfono muto (app 2.46, 20/11/2026)
+Lo Stato di Alessio diceva "Android ha dato al servizio un microfono muto". In quel caso l'app passava per 10 minuti al
+riconoscimento di Google per aspettare la parola, e ogni giro di Google si chiude con un bip: bip senza motivo apparente.
+- Il riconoscimento forte si riprova dopo 45 s (`KestraKws.SILENCE_RETRY_MS`), non dopo 10 minuti: spesso il muto dura
+  solo finché un'altra app usa il microfono.
+- Durante l'attesa con Google i suoni di sistema, notifiche e (se non suona musica) multimediali restano zitti per tutto
+  il giro (`hushFor(15_000)`, rinnovato a ogni giro), non solo all'apertura. Si riaccendono appena Kestra parla o al
+  massimo 15 s dopo l'ultimo giro.

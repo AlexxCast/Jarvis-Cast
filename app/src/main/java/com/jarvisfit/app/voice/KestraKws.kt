@@ -62,7 +62,7 @@ object KestraKws {
     /** Android dà al servizio un microfono muto (succede se l'ascolto è ripartito mentre l'app era chiusa). */
     @Volatile var silencedUntilMs = 0L; private set
 
-    /** Vero se il microfono arriva muto: per 10 minuti si usa il riconoscimento di Android (o finché si apre l'app). */
+    /** Vero se il microfono arriva muto: per 45 s si usa il riconoscimento di Android (o finché si apre l'app). */
     fun silenced() = System.currentTimeMillis() < silencedUntilMs
 
     /** L'app è in primo piano: Android ridà il microfono vero al servizio, si può riprovare subito. */
@@ -127,6 +127,9 @@ object KestraKws {
      *  Sulle prove: stessi nomi riconosciuti, falsi allarmi da ~9 a ~1,5 l'ora. */
     internal const val CONSECUTIVE = 2
     internal const val T_MEDIA = 0.97f
+    /** Microfono muto: si riprova il riconoscimento forte dopo 45 s (prima 10 minuti di riconoscimento di Google,
+     *  che fa bip a ogni giro: Alessio sentiva bip "a caso"). Spesso il muto dura solo finché un'altra app registra. */
+    internal const val SILENCE_RETRY_MS = 45_000L
     private val FILES = listOf("melspectrogram.onnx", "embedding_model.onnx", "kestra_ww.json")
 
 
@@ -205,8 +208,8 @@ object KestraKws {
                 val clientSilenced = Build.VERSION.SDK_INT >= 29 && chunks % 10 == 0 &&
                     runCatching { record.activeRecordingConfiguration?.isClientSilenced == true }.getOrDefault(false)
                 if ((silentChunks >= SILENT_CHUNKS || clientSilenced) && gen == my) {
-                    silencedUntilMs = System.currentTimeMillis() + 10 * 60_000L
-                    lastError = "Android ha dato al servizio un microfono muto: apri l'app per riattivarlo"
+                    silencedUntilMs = System.currentTimeMillis() + SILENCE_RETRY_MS
+                    lastError = "Android ha dato al servizio un microfono muto (riprovo da solo tra 45 secondi)"
                     running = false
                     level = 0f
                     onSilent()
