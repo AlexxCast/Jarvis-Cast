@@ -110,6 +110,9 @@ const PROJECT_EXIT_RE = /^\W*(?:(?:ok|kestra|chestra)\s+)?(?:esci\s+dal(?:la|lo|
 const PROJECT_NEWCHAT_RE = /^\W*(?:(?:apri|inizia|fai|crea)\s+(?:una\s+)?)?nuova\s+chat\b(?:\s+(?:nel|del)\s+progetto)?\W*$/i;
 export const PROJECT_OPEN_RE = /^\W*(?:(?:ok|ehi|kestra|chestra)\s+)?(apri|entra\s+nel|vai\s+(?:nel|al)|riprendi|torna\s+(?:nel|al)|crea|fai|nuovo|apri\s+un\s+nuovo)\s+(?:il\s+|un\s+)?(?:nuovo\s+)?progetto\s+(?:chiamato\s+|di\s+nome\s+|sul(?:l[ao'])?\s+|di\s+|per\s+)?["“]?(.{2,60}?)["”]?\W*$/i;
 
+// In lezione, con una frase in inglese, niente azioni sulla vita del Capo: solo la lezione.
+const LESSON_BLOCKED = new Set(['add_reminder', 'phone_task', 'open_app', 'open_url', 'call', 'pc_action', 'save_place', 'live_card', 'ui_pin', 'ui_note', 'recipe']);
+const SILENT_FAILS = new Set(['project_log']);
 // "Usa questo PDF come istruzioni del progetto", "queste sono le caratteristiche del progetto".
 const SPEC_AS_INSTR_RE = /\b(?:usa(?:lo|la|li)?|prendi|imposta|metti|tieni|segui)\b[^.?!]{0,40}\b(?:come|per\s+le|nelle|sono\s+le)\s+(?:istruzioni|regole|caratteristiche|impostazioni)\b|\b(?:queste|ecco)\s+(?:sono\s+)?le\s+(?:istruzioni|caratteristiche|regole)\b/i;
 // Parole che fanno pensare a un file che descrive il progetto (profilo per il tutor, caratteristiche, istruzioni).
@@ -360,6 +363,9 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
 
   // Dentro un progetto i file allegati in chat diventano file del progetto (prima valevano per una sola risposta).
   // Se il progetto non ha ancora istruzioni, o il Capo dice che il file descrive il progetto, il file diventa le istruzioni.
+  // Lezione di una lingua: una frase detta in inglese è un esercizio, non un comando (prima "breakfast… yogurt… kebab"
+  // finiva nel diario come pasto e "Wicked up" diventava una nota).
+  const lessonEn = !!proj && projects.isStudyProject(proj.project) && !image && projects.looksEnglish(userText);
   let projectFileNote = '';
   const projectFileActions = [];
   if (proj && (fileList.length || SPEC_AS_INSTR_RE.test(userText))) {
@@ -397,10 +403,10 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
 
   // 1. JARVIS CORE (IA proprietaria interna): gestisce direttamente controllo multi-dispositivo (PC/Telefono), Antigravity, timer e diagnostica.
   // In cucina con le mani occupate: "avanti", "indietro", "ripeti" scorrono i passaggi senza chiamare un modello.
-  const cookStep = (!image && !fileList.length) ? cooking.voiceStep(db, userText, ms) : null;
+  const cookStep = (!image && !fileList.length && !lessonEn) ? cooking.voiceStep(db, userText, ms) : null;
   const coreHit = cookStep
     ? { reply: cookStep, expectReply: true, actions: ['recipe_step'], device: [], touched: ['cucina'], touchedLeaves: [] }
-    : (!image && !fileList.length) ? jarvisCore.handleCoreIntent(db, userText, ms, env, sessionId, tz) : null;
+    : (!image && !fileList.length && !lessonEn) ? jarvisCore.handleCoreIntent(db, userText, ms, env, sessionId, tz) : null;
   if (coreHit) {
     if (coreHit.scheduleAt) deps.schedule?.(coreHit.scheduleAt);
     if (coreHit.reply) {
@@ -421,7 +427,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   }
 
   // 2. Gatekeeper procedurale locale: attività già fatte sul telefono vanno in automatico, zero modelli esterni.
-  const localHit = flows.gatekeepChat(db, userText, { hasImage: !!image || fileList.length > 0, hasPendingPhone: !!phone.pendingContext(db, ms) });
+  const localHit = lessonEn ? null : flows.gatekeepChat(db, userText, { hasImage: !!image || fileList.length > 0, hasPendingPhone: !!phone.pendingContext(db, ms) });
   if (localHit) {
     addMessage(db, sessionId, 'user', userText, nowIso, image ? { image: true } : null);
     addMessage(db, sessionId, 'assistant', localHit.reply, nowIso, { model: 'local-gatekeeper' });
@@ -443,7 +449,7 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
   const sticky = Object.entries(sess.modules).filter(([, ttl]) => ttl > 0).map(([k]) => k);
   const recentMsgs = db.all('SELECT text FROM messages WHERE session = ? ORDER BY id DESC LIMIT 4', sessionId).map(r => r.text.slice(0, 250)).join(' ');
   const probe = userText + ' ' + recentMsgs;
-  const dietOn = !!image || DIET_KEYWORDS.test(probe) || sticky.includes('dieta') || !!diary.activeRecipeSession || !!diary.pendingPhotoRequest;
+  const dietOn = !!image || (!lessonEn && DIET_KEYWORDS.test(probe)) || sticky.includes('dieta') || !!diary.activeRecipeSession || !!diary.pendingPhotoRequest;
   const agendaOn = AGENDA_KEYWORDS.test(probe) || sticky.includes('agenda');
   // Impronta di significato del messaggio (Gemini, ~0,1 s, tetto 1,5 s): se manca si usa solo la ricerca per parole.
   const qvec = await semantic.embedQuery(env, deps.fetchFn, userText).catch(() => null);
@@ -535,7 +541,8 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
       } catch { parsed = { ...parsed, reply: 'Ho cercato, ma non riesco a elaborare i risultati in questo momento, signore.', actions: [] }; }
       parsed.actions = parsed.actions.filter(a => a.type !== 'web_search' && a.type !== 'read_url' && a.type !== 'recall');
     }
-    if (!parsed.actions.some(a => a && a.type === 'remember')) {
+    if (lessonEn) parsed.actions = parsed.actions.filter(a => a && !LESSON_BLOCKED.has(a.type) && !DIET_ACTIONS.has(a.type) && !(a.type === 'remember' && !projects.isProjectMemory(proj.project, a.module)));
+    if (!lessonEn && !parsed.actions.some(a => a && a.type === 'remember')) {
       const explicitMem = agents.MemoryAgent.extractExplicit(userText);
       if (explicitMem) parsed.actions.push({ type: 'remember', module: explicitMem.module, text: explicitMem.text });
     }
@@ -604,7 +611,9 @@ export async function handleChat(db, env, deps, { text, image = null, files = []
       }
     } else if (done.failed.length) {
       // Alcune azioni sono riuscite e altre no: lo dice chiaramente invece di far finta.
-      parsed = { ...parsed, reply: `${parsed.reply} Attenzione però: non sono riuscito a ${[...new Set(done.failed)].map(failLabel).join(' e a ')}.` };
+      // Il registro del progetto è contabilità interna: se non si scrive non si interrompe la lezione per dirlo.
+      const shown = [...new Set(done.failed)].filter(t => !SILENT_FAILS.has(t));
+      if (shown.length) parsed = { ...parsed, reply: `${parsed.reply} Attenzione però: non sono riuscito a ${shown.map(failLabel).join(' e a ')}.` };
       logEvent(db, nowIso, 'error', `azioni non riuscite: ${done.failed.join(', ')}`);
     }
     remembered = parsed.actions.filter(a => a && a.type === 'remember').map(a => memory.slug(a.module) || 'generale');

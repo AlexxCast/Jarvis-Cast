@@ -257,14 +257,25 @@ export function addLog(db, projectId, a, nowIso) {
   if (!getProject(db, projectId)) return null;
   const log = getLog(db, projectId);
   const kind = LOG_KINDS.has(s(a.kind).toLowerCase()) ? s(a.kind).toLowerCase() : 'nota';
-  const text = s(a.text).slice(0, 400);
+  // I modelli scrivono i campi a modo loro (note, result, summary, description…): si accetta tutto.
+  const text = s(a.text || a.note || a.notes || a.result || a.summary || a.description || a.details || a.feedback).slice(0, 400);
   const topic = s(a.topic).slice(0, 60);
-  const score = Number.isFinite(Number(a.score)) && a.score !== '' && a.score != null ? Math.max(0, Number(a.score)) : null;
-  const max = Number.isFinite(Number(a.max)) && Number(a.max) > 0 ? Number(a.max) : null;
-  const errors = (Array.isArray(a.errors) ? a.errors : a.errors ? [a.errors] : []).map(e => s(e).slice(0, 120)).filter(Boolean).slice(0, 8);
-  if (!text && !topic && !errors.length && !a.level && !a.next) return null;
-  if (text || topic || errors.length) log.entries.push({ at: nowIso, kind, topic, text, ...(score != null ? { score } : {}), ...(max ? { max } : {}), ...(errors.length ? { errors } : {}) });
+  // "7/10" o "70%" nel punteggio, oppure score + max/total.
+  let score = null, max = null;
+  const frac = /^(\d+(?:[.,]\d+)?)\s*\/\s*(\d+(?:[.,]\d+)?)$/.exec(s(a.score));
+  if (frac) { score = Number(frac[1].replace(',', '.')); max = Number(frac[2].replace(',', '.')); }
+  else if (/%$/.test(s(a.score))) { score = Number(s(a.score).replace('%', '').replace(',', '.')); max = 100; }
+  else if (a.score !== '' && a.score != null && Number.isFinite(Number(a.score))) score = Math.max(0, Number(a.score));
+  const mx = a.max ?? a.total ?? a.out_of ?? a.of;
+  if (max == null && Number.isFinite(Number(mx)) && Number(mx) > 0) max = Number(mx);
+  if (score != null && !Number.isFinite(score)) score = null;
+  const rawErr = a.errors ?? a.mistakes ?? a.error ?? [];
+  const errors = (Array.isArray(rawErr) ? rawErr : [rawErr]).map(e => s(typeof e === 'object' && e ? (e.text || e.error || e.wrong || JSON.stringify(e)) : e).slice(0, 120)).filter(Boolean).slice(0, 8);
+  const any = text || topic || errors.length || score != null;
+  if (!any && !a.level && !a.next) return null;
+  if (any) log.entries.push({ at: nowIso, kind, topic, text, ...(score != null ? { score } : {}), ...(max ? { max } : {}), ...(errors.length ? { errors } : {}) });
   if (a.level) log.level = s(a.level).slice(0, 60);
+  if (!text && !topic && !errors.length && score != null) log.entries[log.entries.length - 1].text = kind;
   if (a.next) log.next = s(a.next).slice(0, 300);
   log.entries = log.entries.slice(-LOG_MAX);
   kvSet(db, LOG_KEY(projectId), log);
@@ -304,19 +315,45 @@ function logBlock(log) {
   return lines.join('\n');
 }
 
+// Progetto per imparare l'inglese: il telefono ascolta in inglese durante la lezione.
+export const ENGLISH_RE = /\b(ingles\w*|english|ielts|toefl|cambridge|first\s+certificate)\b/i;
+export const isEnglishProject = (p) => !!p && ENGLISH_RE.test(`${p.name}\n${String(p.instructions || '').slice(0, 3000)}`);
+
+/** Come deve ascoltare il telefono adesso: in inglese, con pause lunghe, se è aperto un progetto di inglese. */
+export function listenMode(db) {
+  const a = getActive(db);
+  if (a && isEnglishProject(a.project)) return { lang: 'en-US', alt: 'it-IT', silenceMs: 3500, project: a.project.name };
+  return { lang: 'it-IT', silenceMs: 0 };
+}
+
+const EN_WORDS = new Set('the a an i you he she it we they is are was were am be been have has had do does did will would can could should to of in on at for with my your his her our their this that these those yesterday today tomorrow went go going got make made eat ate breakfast lunch dinner after before and but because when while what where who why how not dont didnt im its there here very some any morning evening night then'.split(' '));
+const IT_WORDS = new Set('il lo la le gli un una di da in con su per che non e è sono ho hai ha abbiamo come cosa quando perché questo questa quello quella ieri oggi domani poi anche ma ancora già fatto fare dire andiamo iniziamo facciamo ok sì si no mi ti ci vi del della dei nel nella al alla'.split(' '));
+
+/** Una frase (anche trascritta male) che è più inglese che italiano: in lezione è un esercizio, non un comando. */
+export function looksEnglish(text) {
+  const w = String(text || '').toLowerCase().replace(/[’']/g, '').split(/[^a-zà-ù]+/).filter(Boolean);
+  if (w.length < 2) return false;
+  let en = 0, it = 0;
+  for (const x of w) { if (EN_WORDS.has(x)) en++; if (IT_WORDS.has(x)) it++; }
+  return en >= 2 && en > it * 1.5;
+}
+
 // Progetti di studio: lingua, esame, corso. Ricevono il metodo del tutor oltre alle istruzioni.
 export const STUDY_RE = /\b(ingles\w*|english|tedesc\w*|francese|spagnol\w*|lingu[ae]|[abc][12]\b|ielts|toefl|cambridge|tutor|lezion\w*|studi\w*|esam\w*|corso|grammatic\w*|vocabolari\w*|ripass\w*|quiz)\b/i;
 export const isStudyProject = (p) => !!p && (p.kind === 'tutor' || p.kind === 'studio' || STUDY_RE.test(`${p.name}\n${String(p.instructions || '').slice(0, 3000)}`));
 
 const STUDY_METHOD = `METODO DI STUDIO (vale sotto le ISTRUZIONI DEL PROGETTO: se dicono altro, vincono loro)
 - Sei la tutor di questo percorso. Parti dal REGISTRO DEI PROGRESSI: livello, ultimo argomento, errori da ripassare, prossimo passo. All'inizio di una sessione proponi in una frase da dove ripartire.
-- Un esercizio o una domanda alla volta: aspetta la risposta, poi correggi in modo breve e chiaro (cosa era giusto, l'errore, la forma corretta, perché) e passa alla successiva.
+- Un esercizio o una domanda alla volta: aspetta la risposta, poi correggi e passa alla successiva.
+- CORREZIONE: confronta la risposta del Capo parola per parola con la forma corretta e segnala OGNI errore (verbo, tempo, ortografia, ordine, articolo), anche quelli negli esempi che ha ricopiato senza correggerli. Per ogni errore: quello che ha scritto → la forma giusta → il perché in poche parole. Non dire "bene" a una frase che contiene ancora un errore. Se una frase ha più soluzioni giuste accettale, ma non accettare una forma sbagliata (es. "the phone was ringing" dove serve l'azione puntuale "rang").
+- Quello che il Capo dice o scrive IN INGLESE durante la lezione è sempre materiale dell'esercizio: correggilo. Non trasformarlo MAI in pasti, promemoria, note, ricordi o azioni sul telefono, anche se parla di cibo o di cose da fare.
+- Non dire "avvio in background" per un esercizio breve: fallo subito in questa risposta.
 - Quiz: annuncia quante domande sono, falle una alla volta, alla fine dai il punteggio.
 - Ripassa gli errori che tornano mescolandoli alle cose nuove (ripetizione distanziata). Alza o abbassa la difficoltà in base ai risultati.
 - Registra SEMPRE con project_log: a fine lezione (kind "lezione", topic, cosa avete fatto, next), a fine esercizio o quiz (kind "esercizio" o "quiz" con score e max ed errors), quando noti un errore nuovo (errors). Se il livello cambia, mettilo in level.
 - Materiale lungo da studiare (dispense, schede, liste di vocaboli, test completi): start_job, così lo preparano i modelli più forti con le istruzioni del progetto. Spiegazioni ed esercizi brevi falli subito qui.
 - In questo progetto la reply può essere lunga quanto serve per la lezione e può usare elenchi brevi; resta leggibile ad alta voce.
-- Se il Capo risponde a voce, la trascrizione può storpiare le parole: correggi la grammatica e il lessico, non l'ortografia di parole trascritte male.`;
+- Se il Capo risponde a voce, la trascrizione può storpiare le parole: se una parola non ha senso, dì cosa hai capito e chiedi conferma invece di indovinare; correggi grammatica e lessico, non l'ortografia di parole trascritte male. Parla al Capo al maschile.`;
 
 const PROJECT_ACTIONS = `AZIONI DEL PROGETTO
 - project_instructions {text, mode: "append"|"replace"}: quando il Capo dice come deve funzionare il progetto d'ora in poi ("da ora in poi...", "nel progetto voglio che..."), aggiungi la regola alle istruzioni (append). replace solo se chiede di riscriverle tutte.

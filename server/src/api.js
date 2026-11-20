@@ -104,6 +104,8 @@ export async function handleApi(db, env, deps, request) {
         content: String(f.content).slice(0, f.encoding === 'base64' ? 4_000_000 : 60000),
       })) : [];
       const out = await handleChat(db, env, chatDeps, { text: b.text, image, files, sessionId: String(b.session || 'main').slice(0, 40), source: b.source === 'voice' ? 'voice' : 'app', followup: b.followup === true, afterWake: b.afterWake === true, media: b.media === true });
+      // Come deve ascoltare il telefono la prossima frase (in inglese durante la lezione di inglese).
+      out.listen = projects.listenMode(db);
       const nextDue = agenda.fireDue(db, deps.now(), tz);
       if (nextDue) deps.schedule?.(nextDue);
       if (db.swallowed) {
